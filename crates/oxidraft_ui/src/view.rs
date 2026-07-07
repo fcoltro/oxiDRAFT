@@ -109,11 +109,17 @@ pub fn draw_ui(ui: &mut egui::Ui, app: &mut AppState, ui_state: &mut UiState) {
                 ui.add_space(8.0);
                 ui.horizontal(|ui| {
                     if ui.button("Restore").clicked() {
-                        app.restore_recovery(&path);
+                        if app.restore_recovery(&path) {
+                            // The work now lives in this session; retire the
+                            // dead session's file and re-protect immediately
+                            // under our own recovery file on the next tick.
+                            crate::autosave::remove_recovery_file(&path);
+                            ui_state.last_autosave = None;
+                        }
                         ui_state.recovery_offer = None;
                     }
                     if ui.button("Discard").clicked() {
-                        crate::autosave::discard_recovery();
+                        crate::autosave::remove_recovery_file(&path);
                         ui_state.recovery_offer = None;
                     }
                 });

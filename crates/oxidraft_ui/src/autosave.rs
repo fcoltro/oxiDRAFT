@@ -3,20 +3,93 @@
 //! successful manual save and when the user explicitly discards changes at
 //! exit — so a recovery file found at startup means the last session ended
 //! without either, i.e. a crash or kill, and the UI offers to restore it.
+//!
+//! Each instance writes its own `oxidraft_recovery_<pid>.o2d`, so concurrent
+//! instances can't clobber each other's safety copy. Liveness is arbitrated
+//! through a sidecar `.lock` file held under an exclusive OS lock for the
+//! writer's lifetime: a recovery file whose sidecar can be locked (or is
+//! missing) belongs to a dead session and is offered for restore; one whose
+//! sidecar refuses the lock belongs to a still-running instance.
 
 use crate::state::AppState;
-use std::path::PathBuf;
+use std::fs::TryLockError;
+use std::path::{Path, PathBuf};
+use std::sync::{LazyLock, Mutex};
 use std::time::{Duration, Instant};
 
 pub const AUTOSAVE_INTERVAL: Duration = Duration::from_secs(30);
 
-/// Lives next to the executable like the crash log; temp dir as fallback.
-pub fn recovery_path() -> PathBuf {
-    std::env::current_exe()
+const RECOVERY_PREFIX: &str = "oxidraft_recovery";
+
+/// Sidecar locks this instance holds; the open handles keep the OS locks
+/// alive for the process lifetime, which is exactly the liveness signal.
+static HELD_LOCKS: LazyLock<Mutex<Vec<(PathBuf, std::fs::File)>>> =
+    LazyLock::new(|| Mutex::new(Vec::new()));
+
+/// The recovery file and its sidecar are process-wide state; tests that
+/// write or retire them (directly or through `save_file_to`) must hold this
+/// so parallel test threads can't delete each other's file mid-assertion.
+#[cfg(test)]
+pub(crate) static RECOVERY_TEST_LOCK: Mutex<()> = Mutex::new(());
+
+/// Dirs that may hold recovery files, most preferred first: next to the
+/// executable like the crash log, then the temp dir for installs where the
+/// executable's directory isn't writable (Program Files, /usr/bin) — an
+/// unwritable sole location would silently disable crash protection.
+fn candidate_dirs() -> Vec<PathBuf> {
+    let mut dirs: Vec<PathBuf> = std::env::current_exe()
         .ok()
         .and_then(|p| p.parent().map(|d| d.to_path_buf()))
-        .unwrap_or_else(std::env::temp_dir)
-        .join("oxidraft_recovery.o2d")
+        .into_iter()
+        .collect();
+    dirs.push(std::env::temp_dir());
+    dirs.dedup();
+    dirs
+}
+
+fn own_file_name() -> String {
+    format!("{RECOVERY_PREFIX}_{}.o2d", std::process::id())
+}
+
+fn sidecar(recovery: &Path) -> PathBuf {
+    recovery.with_extension("lock")
+}
+
+/// Creates and locks the sidecar for a recovery file we just wrote, once per
+/// path. Failure is non-fatal: without the lock the file merely risks being
+/// offered to a concurrently running instance, the pre-lock behavior.
+fn mark_alive(recovery: &Path) {
+    let lock_path = sidecar(recovery);
+    let Ok(mut held) = HELD_LOCKS.lock() else {
+        return;
+    };
+    if held.iter().any(|(p, _)| p == &lock_path) {
+        return;
+    }
+    // The sidecar's contents never matter — only the lock held on it does.
+    if let Ok(f) = std::fs::OpenOptions::new()
+        .create(true)
+        .write(true)
+        .truncate(false)
+        .open(&lock_path)
+        && f.try_lock().is_ok()
+    {
+        held.push((lock_path, f));
+    }
+}
+
+/// True when the session that wrote `recovery` still runs — its sidecar is
+/// exclusively locked. A missing sidecar (legacy files, failed lock setup)
+/// reads as dead, which at worst re-offers a live instance's copy.
+fn session_is_live(recovery: &Path) -> bool {
+    let Ok(f) = std::fs::File::open(sidecar(recovery)) else {
+        return false;
+    };
+    match f.try_lock() {
+        Ok(()) => false,
+        Err(TryLockError::WouldBlock) => true,
+        Err(TryLockError::Error(_)) => false,
+    }
 }
 
 /// Called once per frame; writes at most every [`AUTOSAVE_INTERVAL`], and
@@ -34,21 +107,62 @@ pub fn tick(app: &AppState, last: &mut Option<Instant>) {
     }
     let mut doc = app.document.clone();
     doc.remove(app.origin_id);
-    let _ = oxidraft_io::save_native(&doc, &recovery_path());
-}
-
-pub fn discard_recovery() {
-    let _ = std::fs::remove_file(recovery_path());
-}
-
-/// A leftover recovery file with content means the previous session did not
-/// end with a save or an explicit discard.
-pub fn pending_recovery() -> Option<PathBuf> {
-    let path = recovery_path();
-    match std::fs::metadata(&path) {
-        Ok(m) if m.len() > 0 => Some(path),
-        _ => None,
+    for dir in candidate_dirs() {
+        let path = dir.join(own_file_name());
+        if oxidraft_io::save_native(&doc, &path).is_ok() {
+            mark_alive(&path);
+            break;
+        }
     }
+}
+
+/// Retires *this session's* recovery copy — called after a successful save
+/// and when the user explicitly discards unsaved work at exit.
+pub fn discard_recovery() {
+    for dir in candidate_dirs() {
+        let _ = std::fs::remove_file(dir.join(own_file_name()));
+    }
+}
+
+/// Removes a specific recovery file (the one offered at startup) and its
+/// sidecar, after the user restored or declined it.
+pub fn remove_recovery_file(path: &Path) {
+    let _ = std::fs::remove_file(sidecar(path));
+    let _ = std::fs::remove_file(path);
+}
+
+/// A leftover recovery file with content, whose writer no longer runs, means
+/// that session ended without a save or an explicit discard. Also sweeps
+/// orphaned sidecars (clean exits can't delete their own held lock file).
+pub fn pending_recovery() -> Option<PathBuf> {
+    let mut found = None;
+    for dir in candidate_dirs() {
+        let Ok(entries) = std::fs::read_dir(&dir) else {
+            continue;
+        };
+        for entry in entries.flatten() {
+            let name = entry.file_name().to_string_lossy().into_owned();
+            let path = entry.path();
+            if name.starts_with(RECOVERY_PREFIX) && name.ends_with(".lock") {
+                let data = path.with_extension("o2d");
+                if !data.exists() && !session_is_live(&data) {
+                    let _ = std::fs::remove_file(&path);
+                }
+                continue;
+            }
+            if !(name.starts_with(RECOVERY_PREFIX) && name.ends_with(".o2d")) {
+                continue;
+            }
+            let has_content = std::fs::metadata(&path).is_ok_and(|m| m.len() > 0);
+            if has_content && !session_is_live(&path) && found.is_none() {
+                found = Some(path);
+            }
+        }
+        if found.is_some() {
+            break;
+        }
+    }
+    found
 }
 
 #[cfg(test)]
@@ -57,10 +171,18 @@ mod tests {
     use oxidraft_document::EntityKind;
     use oxidraft_geometry::{Curve, LineSeg, Point2d};
 
-    // One test only: the recovery file is a shared path, and parallel tests
-    // in this process would race on it.
+    fn own_recovery_file() -> Option<PathBuf> {
+        candidate_dirs()
+            .into_iter()
+            .map(|d| d.join(own_file_name()))
+            .find(|p| std::fs::metadata(p).is_ok_and(|m| m.len() > 0))
+    }
+
+    // One test only: this session's recovery path and lock are process-wide
+    // state, and parallel tests in this process would race on them.
     #[test]
     fn autosave_and_restore_round_trip() {
+        let _guard = RECOVERY_TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         discard_recovery();
         let mut app = AppState::new(800.0, 600.0);
         app.history.snapshot(&app.document);
@@ -74,7 +196,16 @@ mod tests {
         // First tick has no timestamp yet, so it writes immediately.
         let mut last = None;
         tick(&app, &mut last);
-        let path = pending_recovery().expect("dirty tick must leave a recovery file");
+        let path = own_recovery_file().expect("dirty tick must leave a recovery file");
+        assert!(
+            session_is_live(&path),
+            "our own held sidecar lock must read as a live session"
+        );
+        assert_ne!(
+            pending_recovery().as_deref(),
+            Some(path.as_path()),
+            "a live session's file must never be offered for restore"
+        );
 
         let mut fresh = AppState::new(800.0, 600.0);
         assert!(fresh.restore_recovery(&path), "restore must load the file");
@@ -94,6 +225,18 @@ mod tests {
             "recovered documents are untitled"
         );
         discard_recovery();
-        assert!(pending_recovery().is_none(), "discard removes the file");
+        assert!(own_recovery_file().is_none(), "discard removes the file");
+
+        // A recovery file from a dead session (no one holds its sidecar) is
+        // exactly what startup must detect and clean up.
+        let dead = candidate_dirs()[0].join(format!("{RECOVERY_PREFIX}_0.o2d"));
+        std::fs::write(&dead, "O2D 1\n").expect("plant a dead session's file");
+        assert!(!session_is_live(&dead));
+        assert!(
+            pending_recovery().is_some(),
+            "a dead session's file must be discoverable"
+        );
+        remove_recovery_file(&dead);
+        assert!(!dead.exists(), "declining the offer removes the file");
     }
 }

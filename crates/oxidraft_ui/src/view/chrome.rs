@@ -258,7 +258,7 @@ fn export_menu(ctx: &Context, app: &mut AppState) {
             if ui.button("Export DXF…").clicked() {
                 if let Some(path) = FileDialog::new().add_filter("DXF", &["dxf"]).save_file() {
                     let content = oxidraft_io::export_dxf(&app.document);
-                    if let Err(e) = std::fs::write(&path, content) {
+                    if let Err(e) = oxidraft_io::write_atomic(&path, content.as_bytes()) {
                         app.command_log.push(format!("DXF export failed: {e}"));
                     }
                 }
@@ -270,7 +270,7 @@ fn export_menu(ctx: &Context, app: &mut AppState) {
                     .save_file()
                 {
                     let content = oxidraft_io::export_svg(&app.document);
-                    if let Err(e) = std::fs::write(&path, content) {
+                    if let Err(e) = oxidraft_io::write_atomic(&path, content.as_bytes()) {
                         app.command_log.push(format!("SVG export failed: {e}"));
                     }
                 }
@@ -398,7 +398,7 @@ pub(super) fn plot_dialog(ctx: &Context, app: &mut AppState) {
                 if let Some(path) = FileDialog::new().add_filter("PDF", &["pdf"]).save_file() {
                     match oxidraft_io::export_pdf(&app.document, paper) {
                         Ok(bytes) => {
-                            if let Err(e) = std::fs::write(&path, bytes) {
+                            if let Err(e) = oxidraft_io::write_atomic(&path, &bytes) {
                                 app.command_log.push(format!("Plot failed: {e}"));
                             } else {
                                 app.command_log.push("Plotted to PDF".to_string());
@@ -463,7 +463,7 @@ fn menu_items(ui: &mut egui::Ui, app: &mut AppState) {
         if ui.button("Export DXF…").clicked() {
             if let Some(path) = FileDialog::new().add_filter("DXF", &["dxf"]).save_file() {
                 let content = oxidraft_io::export_dxf(&app.document);
-                if let Err(e) = std::fs::write(&path, content) {
+                if let Err(e) = oxidraft_io::write_atomic(&path, content.as_bytes()) {
                     app.command_log.push(format!("DXF export failed: {e}"));
                 }
             }
@@ -475,7 +475,7 @@ fn menu_items(ui: &mut egui::Ui, app: &mut AppState) {
                 .save_file()
             {
                 let content = oxidraft_io::export_svg(&app.document);
-                if let Err(e) = std::fs::write(&path, content) {
+                if let Err(e) = oxidraft_io::write_atomic(&path, content.as_bytes()) {
                     app.command_log.push(format!("SVG export failed: {e}"));
                 }
             }

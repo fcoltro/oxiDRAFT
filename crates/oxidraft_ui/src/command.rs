@@ -34,6 +34,14 @@ pub enum CoordInput {
     PolarRelative { dist: f64, angle_deg: f64 },
 }
 
+/// All typed numbers come through here: `nan` is a valid f64 literal and
+/// `1e999` overflows to `inf`, and a single non-finite number reaching the
+/// document poisons snapping and zoom-to-fit, so the command line refuses
+/// them at the parse boundary.
+fn parse_finite_f64(s: &str) -> Option<f64> {
+    s.trim().parse::<f64>().ok().filter(|v| v.is_finite())
+}
+
 pub fn parse_coordinate(input: &str) -> Option<CoordInput> {
     let s = input.trim();
     if s.is_empty() {
@@ -44,8 +52,8 @@ pub fn parse_coordinate(input: &str) -> Option<CoordInput> {
         None => (false, s),
     };
     if let Some((d, a)) = body.split_once('<') {
-        let dist = d.trim().parse::<f64>().ok()?;
-        let angle_deg = a.trim().parse::<f64>().ok()?;
+        let dist = parse_finite_f64(d)?;
+        let angle_deg = parse_finite_f64(a)?;
         return Some(if relative {
             CoordInput::PolarRelative { dist, angle_deg }
         } else {
@@ -53,8 +61,8 @@ pub fn parse_coordinate(input: &str) -> Option<CoordInput> {
         });
     }
     if let Some((x, y)) = body.split_once(',') {
-        let xv = x.trim().parse::<f64>().ok()?;
-        let yv = y.trim().parse::<f64>().ok()?;
+        let xv = parse_finite_f64(x)?;
+        let yv = parse_finite_f64(y)?;
         return Some(if relative {
             CoordInput::Relative(xv, yv)
         } else {
@@ -91,7 +99,7 @@ pub fn parse_command(input: &str) -> Command {
         "TTR" | "CIRCLETTR" => {
             let radius = rest
                 .first()
-                .and_then(|s| s.parse::<f64>().ok())
+                .and_then(|s| parse_finite_f64(s))
                 .filter(|r| *r > 0.0)
                 .unwrap_or(1.0);
             Command::Activate(Tool::CircleTtr {
@@ -168,14 +176,14 @@ pub fn parse_command(input: &str) -> Command {
         "OFFSET" | "O" => {
             let dist = rest
                 .first()
-                .and_then(|s| s.parse::<f64>().ok())
+                .and_then(|s| parse_finite_f64(s))
                 .unwrap_or(1.0);
             Command::Activate(Tool::Offset { dist, source: None })
         }
         "FILLET" | "F" => {
             let radius = rest
                 .first()
-                .and_then(|s| s.parse::<f64>().ok())
+                .and_then(|s| parse_finite_f64(s))
                 .unwrap_or(1.0);
             Command::Activate(Tool::Fillet {
                 radius,
@@ -185,7 +193,7 @@ pub fn parse_command(input: &str) -> Command {
         "CHAMFER" | "CHA" => {
             let dist = rest
                 .first()
-                .and_then(|s| s.parse::<f64>().ok())
+                .and_then(|s| parse_finite_f64(s))
                 .unwrap_or(1.0);
             Command::Activate(Tool::Chamfer { dist, first: None })
         }
@@ -200,7 +208,7 @@ pub fn parse_command(input: &str) -> Command {
                     "G2" => continuity = oxidraft_geometry::Continuity::G2,
                     "G3" => continuity = oxidraft_geometry::Continuity::G3,
                     other => {
-                        if let Ok(v) = other.parse::<f64>() {
+                        if let Some(v) = parse_finite_f64(other) {
                             tension = v;
                         }
                     }
@@ -232,16 +240,16 @@ pub fn parse_command(input: &str) -> Command {
         // family. A bare RADCON locks the current radius; DIACON takes the
         // value as a diameter.
         "RADCON" | "GCRAD" | "GCRADIUS" => {
-            Command::ConstrainRadius(rest.first().and_then(|v| v.parse::<f64>().ok()))
+            Command::ConstrainRadius(rest.first().and_then(|v| parse_finite_f64(v)))
         }
         "DIACON" | "GCDIA" | "GCDIAMETER" => Command::ConstrainRadius(
             rest.first()
-                .and_then(|v| v.parse::<f64>().ok())
+                .and_then(|v| parse_finite_f64(v))
                 .map(|d| d * 0.5),
         ),
         // A bare LENCON locks the current length; LENCON <value> drives it.
         "LENCON" | "GCLEN" | "GCLENGTH" => {
-            Command::ConstrainDistance(rest.first().and_then(|v| v.parse::<f64>().ok()))
+            Command::ConstrainDistance(rest.first().and_then(|v| parse_finite_f64(v)))
         }
         "UNCONSTRAIN" | "UNCON" => Command::Unconstrain,
         "ERASE" | "E" | "DELETE" => Command::Erase,
@@ -260,8 +268,8 @@ pub fn parse_command(input: &str) -> Command {
 fn parse_zoom(rest: &[&str]) -> Command {
     match rest.first().map(|s| s.to_ascii_uppercase()) {
         Some(s) if s == "E" || s == "EXTENTS" => Command::ZoomExtents,
-        Some(s) => match s.parse::<f64>() {
-            Ok(scale) if scale > 0.0 => Command::ZoomScale(scale),
+        Some(s) => match parse_finite_f64(&s) {
+            Some(scale) if scale > 0.0 => Command::ZoomScale(scale),
             _ => Command::ZoomExtents,
         },
         None => Command::ZoomExtents,
@@ -384,6 +392,28 @@ mod tests {
         assert_eq!(parse_coordinate(""), None);
         assert_eq!(parse_coordinate("@5"), None);
         assert_eq!(parse_coordinate("a,b"), None);
+    }
+
+    #[test]
+    fn non_finite_typed_numbers_are_rejected() {
+        // `nan`/`inf` are valid f64 literals and `1e999` overflows to inf;
+        // none of them may reach the document as geometry.
+        assert_eq!(parse_coordinate("inf,0"), None);
+        assert_eq!(parse_coordinate("10,nan"), None);
+        assert_eq!(parse_coordinate("@1e999<45"), None);
+        assert!(matches!(
+            parse_command("OFFSET inf"),
+            Command::Activate(Tool::Offset { dist, .. }) if dist == 1.0
+        ));
+        assert!(matches!(
+            parse_command("FILLET nan"),
+            Command::Activate(Tool::Fillet { radius, .. }) if radius == 1.0
+        ));
+        assert!(matches!(
+            parse_command("RADCON 1e999"),
+            Command::ConstrainRadius(None)
+        ));
+        assert!(matches!(parse_command("Z 1e999"), Command::ZoomExtents));
     }
 
     #[test]

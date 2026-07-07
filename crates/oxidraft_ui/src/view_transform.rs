@@ -76,12 +76,22 @@ impl ViewTransform {
         ((wx / g).round() * g, (wy / g).round() * g)
     }
 
+    // The mutating methods below ignore non-finite input. One NaN reaching
+    // `zoom` or `center` sticks — every later frame transforms through it and
+    // the viewport goes permanently blank — so reject it at the boundary.
+
     pub fn pan_pixels(&mut self, dx: f64, dy: f64) {
+        if !(dx.is_finite() && dy.is_finite()) {
+            return;
+        }
         self.center.0 -= dx / self.zoom;
         self.center.1 += dy / self.zoom;
     }
 
     pub fn zoom_at(&mut self, wx: f64, wy: f64, factor: f64) {
+        if !(wx.is_finite() && wy.is_finite() && factor.is_finite() && factor > 0.0) {
+            return;
+        }
         let old = self.zoom;
         let new = self.clamp_zoom(old * factor);
         if new == old {
@@ -101,6 +111,9 @@ impl ViewTransform {
     }
 
     pub fn zoom_to_bounds(&mut self, x0: f64, y0: f64, x1: f64, y1: f64) {
+        if ![x0, y0, x1, y1].iter().all(|v| v.is_finite()) {
+            return;
+        }
         let w = (x1 - x0).max(1e-9);
         let h = (y1 - y0).max(1e-9);
         let margin = 1.1;
@@ -194,5 +207,24 @@ mod tests {
         assert_eq!(v.center, (50.0, 25.0));
         let (x0, y0, x1, y1) = v.visible_bounds();
         assert!(x0 <= 0.0 && x1 >= 100.0 && y0 <= 0.0 && y1 >= 50.0);
+    }
+
+    #[test]
+    fn non_finite_input_cannot_poison_the_view() {
+        let mut v = ViewTransform::new(800.0, 600.0);
+        v.zoom_to_bounds(f64::NAN, 0.0, 100.0, 50.0);
+        v.zoom_at(f64::NAN, 1.0, 2.0);
+        v.zoom_at(1.0, 1.0, f64::NAN);
+        v.zoom_at(1.0, 1.0, 0.0);
+        v.pan_pixels(f64::INFINITY, 3.0);
+        assert!(
+            v.zoom.is_finite()
+                && v.zoom > 0.0
+                && v.center.0.is_finite()
+                && v.center.1.is_finite(),
+            "view must ignore hostile input: zoom={} center={:?}",
+            v.zoom,
+            v.center
+        );
     }
 }

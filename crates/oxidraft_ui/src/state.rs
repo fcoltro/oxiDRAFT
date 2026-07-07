@@ -40,7 +40,9 @@ pub struct AppState {
     pub current_file_path: Option<std::path::PathBuf>,
     pub text_font: Option<String>,
     pub hatch_pattern: oxidraft_document::HatchPattern,
-    pub saved_depth: usize,
+    /// [`History::current_revision`] at the last successful save; the
+    /// document is dirty whenever the current revision differs.
+    pub saved_revision: u64,
     pub zoom_target: Option<(f64, f64, f64)>,
     pub default_line_type: LineTypeRef,
     pub default_line_weight: LineWeight,
@@ -434,7 +436,7 @@ impl AppState {
             current_file_path: None,
             text_font: None,
             hatch_pattern: oxidraft_document::HatchPattern::Solid,
-            saved_depth: 0,
+            saved_revision: 0,
             zoom_target: None,
             default_line_type: LineTypeRef::ByLayer,
             default_line_weight: LineWeight::ByLayer,
@@ -1997,7 +1999,7 @@ impl AppState {
         self.history = History::new();
         self.tool = Tool::Select;
         self.current_file_path = None;
-        self.saved_depth = 0;
+        self.saved_revision = self.history.current_revision();
     }
 
     pub fn open_file(&mut self, path: std::path::PathBuf) {
@@ -2027,7 +2029,7 @@ impl AppState {
                 self.history = History::new();
                 self.tool = Tool::Select;
                 self.current_file_path = Some(path);
-                self.saved_depth = 0;
+                self.saved_revision = self.history.current_revision();
             }
             Err(e) => self.command_log.push(format!("Cannot open: {e}")),
         }
@@ -2049,11 +2051,13 @@ impl AppState {
             .and_then(|e| e.to_str())
             .unwrap_or("")
             .to_ascii_lowercase();
+        // Every format saves atomically: a crash or full disk mid-write must
+        // never truncate the existing good file on disk.
         let result =
             match ext.as_str() {
-                "dxf" => std::fs::write(&path, oxidraft_io::export_dxf(&save_doc))
+                "dxf" => oxidraft_io::write_atomic(&path, oxidraft_io::export_dxf(&save_doc).as_bytes())
                     .map_err(|e| e.to_string()),
-                "svg" => std::fs::write(&path, oxidraft_io::export_svg(&save_doc))
+                "svg" => oxidraft_io::write_atomic(&path, oxidraft_io::export_svg(&save_doc).as_bytes())
                     .map_err(|e| e.to_string()),
                 "dwg" => Err("oxiDRAFT can't write DWG (proprietary binary). \
                           Save as DXF for CAD interchange."
@@ -2063,7 +2067,7 @@ impl AppState {
         match result {
             Ok(()) => {
                 self.current_file_path = Some(path);
-                self.saved_depth = self.history.undo_depth();
+                self.saved_revision = self.history.current_revision();
                 // The work is on disk now; the crash-recovery copy is stale.
                 crate::autosave::discard_recovery();
                 true
@@ -2076,7 +2080,7 @@ impl AppState {
     }
 
     pub fn is_dirty(&self) -> bool {
-        self.history.undo_depth() != self.saved_depth
+        self.history.current_revision() != self.saved_revision
     }
 
     /// Loads the crash-recovery copy as an *untitled, unsaved* document: no
@@ -2093,7 +2097,7 @@ impl AppState {
                 self.history = History::new();
                 self.tool = Tool::Select;
                 self.current_file_path = None;
-                self.saved_depth = usize::MAX;
+                self.saved_revision = u64::MAX;
                 true
             }
             Err(e) => {
@@ -2797,6 +2801,11 @@ mod tests {
 
     #[test]
     fn save_open_dispatches_by_extension() {
+        // save_file_to retires the process-wide recovery file on success;
+        // serialize with the autosave test so neither deletes the other's.
+        let _guard = crate::autosave::RECOVERY_TEST_LOCK
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
         for ext in ["o2d", "dxf", "svg"] {
             let mut a = app();
             a.document
