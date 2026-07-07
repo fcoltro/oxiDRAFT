@@ -1,34 +1,39 @@
 const TAU: f64 = std::f64::consts::TAU;
 const PI: f64 = std::f64::consts::PI;
 
-pub fn wrap_pi(mut a: f64) -> f64 {
-    while a <= -PI {
-        a += TAU;
-    }
-    while a > PI {
-        a -= TAU;
-    }
-    a
+// The wrap functions are total: any input terminates in O(1), with non-finite
+// angles propagating as NaN. The τ-stepping loops they replace never terminated
+// for ±inf and took one iteration per turn for large-magnitude angles, so a
+// single corrupt coordinate could hang the whole app.
+
+/// Wraps an angle into (-π, π].
+pub fn wrap_pi(a: f64) -> f64 {
+    let w = wrap_tau(a);
+    if w > PI { w - TAU } else { w }
 }
 
-pub fn wrap_tau(mut a: f64) -> f64 {
-    while a < 0.0 {
-        a += TAU;
-    }
-    while a >= TAU {
-        a -= TAU;
-    }
-    a
+/// Wraps an angle into [0, τ).
+pub fn wrap_tau(a: f64) -> f64 {
+    let r = a.rem_euclid(TAU);
+    // rem_euclid can round up to exactly τ for tiny negative inputs.
+    if r >= TAU { 0.0 } else { r }
 }
 
-pub fn wrap_deg360(mut a: f64) -> f64 {
-    while a < 0.0 {
-        a += 360.0;
+/// Wraps an angle in degrees into [0, 360).
+pub fn wrap_deg360(a: f64) -> f64 {
+    let r = a.rem_euclid(360.0);
+    if r >= 360.0 { 0.0 } else { r }
+}
+
+/// Normalizes an angular sweep into (0, τ]: zero and negative sweeps wrap into
+/// the positive turn, while already-positive values (including sweeps beyond a
+/// full turn) pass through unchanged.
+pub fn positive_sweep(a: f64) -> f64 {
+    if a > 0.0 {
+        return a;
     }
-    while a >= 360.0 {
-        a -= 360.0;
-    }
-    a
+    let r = wrap_tau(a);
+    if r == 0.0 { TAU } else { r }
 }
 
 pub fn wrap_from(a: f64, start: f64) -> f64 {
@@ -113,6 +118,36 @@ mod tests {
         let w = wrap_from(s - 0.3, s);
         assert!(w >= s - 1e-12 && w < s + TAU);
         assert!((w - (s + TAU - 0.3)).abs() < 1e-9);
+    }
+
+    #[test]
+    fn wrap_is_total_for_hostile_angles() {
+        // Formerly τ-stepping loops: ±inf never terminated and 1e300 took
+        // ~1e299 iterations. Corrupt files can carry such values, so these
+        // must return (NaN propagates; huge finite values wrap) instantly.
+        for f in [wrap_pi, wrap_tau, wrap_deg360, positive_sweep] {
+            assert!(f(f64::NAN).is_nan());
+            assert!(f(f64::INFINITY).is_nan() || f(f64::INFINITY) == f64::INFINITY);
+            assert!(f(f64::NEG_INFINITY).is_nan());
+            assert!(f(-1e300).is_finite());
+            assert!(f(1e300).is_finite() || f(1e300) == 1e300);
+        }
+        assert!(wrap_from(f64::NEG_INFINITY, 1.0).is_nan());
+    }
+
+    #[test]
+    fn positive_sweep_matches_old_loop_semantics() {
+        assert!((positive_sweep(0.0) - TAU).abs() < 1e-12, "zero sweep is a full turn");
+        assert!((positive_sweep(-TAU) - TAU).abs() < 1e-12);
+        assert!((positive_sweep(-PI) - PI).abs() < 1e-12);
+        assert_eq!(positive_sweep(3.0 * TAU), 3.0 * TAU, "positive sweeps pass through");
+        assert_eq!(positive_sweep(0.5), 0.5);
+    }
+
+    #[test]
+    fn wrap_tau_tiny_negative_rounds_to_zero_not_tau() {
+        let w = wrap_tau(-1e-20);
+        assert!((0.0..TAU).contains(&w), "must stay in [0, τ): {w}");
     }
 
     #[test]

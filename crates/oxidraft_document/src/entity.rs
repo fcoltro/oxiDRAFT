@@ -82,42 +82,61 @@ pub enum EntityKind {
     },
 }
 
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub struct TangentRef {
-    pub target: EntityId,
-    pub near: Point2d,
-}
-
-#[derive(Clone, Debug)]
-pub struct Entity {
-    pub id: EntityId,
-    pub kind: EntityKind,
-    pub layer: usize,
-    pub color: Color,
-    pub line_type: LineTypeRef,
-    pub line_weight: LineWeight,
-    pub transparency: f64,
-    pub xdata: XData,
-    pub tangents: Vec<TangentRef>,
-}
-
-impl Entity {
-    pub fn new(id: EntityId, kind: EntityKind, layer: usize) -> Self {
-        Entity {
-            id,
-            kind,
-            layer,
-            color: Color::ByLayer,
-            line_type: LineTypeRef::ByLayer,
-            line_weight: LineWeight::ByLayer,
-            transparency: 0.0,
-            xdata: XData::default(),
-            tangents: Vec::new(),
+impl EntityKind {
+    /// True when every defining number is finite; loaders use this to drop
+    /// corrupt records before NaN/inf can poison the document. Direction
+    /// vectors, heights, and rotations count — not just coordinates.
+    pub fn is_finite(&self) -> bool {
+        let pts_finite = |pts: &[&Point2d]| pts.iter().all(|p| p.is_finite());
+        match self {
+            EntityKind::Curve(c) => c.is_finite(),
+            EntityKind::Point(p) => p.is_finite(),
+            EntityKind::Text {
+                anchor,
+                height,
+                rotation,
+                ..
+            } => anchor.is_finite() && height.is_finite() && rotation.is_finite(),
+            EntityKind::XLine { through, dir } => {
+                through.is_finite() && dir.0.is_finite() && dir.1.is_finite()
+            }
+            EntityKind::Ray { from, dir } => {
+                from.is_finite() && dir.0.is_finite() && dir.1.is_finite()
+            }
+            EntityKind::Insert { transform, .. } => transform.is_finite(),
+            EntityKind::Hatch {
+                boundary, holes, ..
+            } => {
+                boundary.iter().all(|c| c.is_finite())
+                    && holes.iter().flatten().all(|c| c.is_finite())
+            }
+            EntityKind::Dimension {
+                p1, p2, line, height, ..
+            }
+            | EntityKind::OrthoDim {
+                p1, p2, line, height, ..
+            } => pts_finite(&[p1, p2, line]) && height.is_finite(),
+            EntityKind::AngularDim {
+                center,
+                p1,
+                p2,
+                line,
+                height,
+                ..
+            } => pts_finite(&[center, p1, p2, line]) && height.is_finite(),
+            EntityKind::RadialDim {
+                center,
+                edge,
+                height,
+                ..
+            } => pts_finite(&[center, edge]) && height.is_finite(),
         }
     }
 
+    /// The kind's extent, when it has one — unbounded kinds (`Insert`,
+    /// `XLine`, `Ray`) return `None`, as does a `Hatch` with no boundary.
     pub fn bounding_box(&self) -> Option<BoundingBox> {
-        match &self.kind {
+        match self {
             EntityKind::Curve(c) => Some(c.bounding_box()),
             EntityKind::Point(p) => Some(BoundingBox::new(*p, *p)),
             EntityKind::Text {
@@ -156,6 +175,45 @@ impl Entity {
                 Some(bbox_of(&[center.to_f64(), edge.to_f64()]))
             }
         }
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct TangentRef {
+    pub target: EntityId,
+    pub near: Point2d,
+}
+
+#[derive(Clone, Debug)]
+pub struct Entity {
+    pub id: EntityId,
+    pub kind: EntityKind,
+    pub layer: usize,
+    pub color: Color,
+    pub line_type: LineTypeRef,
+    pub line_weight: LineWeight,
+    pub transparency: f64,
+    pub xdata: XData,
+    pub tangents: Vec<TangentRef>,
+}
+
+impl Entity {
+    pub fn new(id: EntityId, kind: EntityKind, layer: usize) -> Self {
+        Entity {
+            id,
+            kind,
+            layer,
+            color: Color::ByLayer,
+            line_type: LineTypeRef::ByLayer,
+            line_weight: LineWeight::ByLayer,
+            transparency: 0.0,
+            xdata: XData::default(),
+            tangents: Vec::new(),
+        }
+    }
+
+    pub fn bounding_box(&self) -> Option<BoundingBox> {
+        self.kind.bounding_box()
     }
 
     pub fn transform(&mut self, t: &Transform2d) {

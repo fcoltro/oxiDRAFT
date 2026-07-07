@@ -39,6 +39,40 @@ impl Curve {
             None
         }
     }
+
+    /// True when every defining number is finite. A NaN/inf smuggled in from
+    /// a corrupt file can't be caught via `bounding_box()` — `f64::min`/`max`
+    /// return the non-NaN operand, so a poisoned corner masks itself — hence
+    /// this explicit walk over the raw fields.
+    pub fn is_finite(&self) -> bool {
+        match self {
+            Curve::Line(l) => l.p0.is_finite() && l.p1.is_finite(),
+            Curve::Arc(a) => {
+                a.center.is_finite()
+                    && a.radius.is_finite()
+                    && a.start_angle.is_finite()
+                    && a.end_angle.is_finite()
+            }
+            Curve::Ellipse(e) => {
+                e.center.is_finite()
+                    && e.semi_major.is_finite()
+                    && e.semi_minor.is_finite()
+                    && e.rotation.is_finite()
+                    && e.start_angle.is_finite()
+                    && e.end_angle.is_finite()
+            }
+            Curve::Bezier(b) => {
+                b.p0.is_finite() && b.p1.is_finite() && b.p2.is_finite() && b.p3.is_finite()
+            }
+            Curve::Poly(pc) => pc.segments.iter().all(|s| s.is_finite()),
+            Curve::Rational(r) => {
+                r.points.iter().all(|p| p.is_finite()) && r.weights.iter().all(|w| w.is_finite())
+            }
+            Curve::Nurbs(n) => {
+                n.control.iter().all(|p| p.is_finite()) && n.weights.iter().all(|w| w.is_finite())
+            }
+        }
+    }
 }
 
 /// Forwards a `CurveSegment` call to whichever variant `Curve` holds, binding the

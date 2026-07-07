@@ -11,7 +11,7 @@ use oxidraft_constraint::{Constraint, PointVar, ScalarVar, Sketch};
 use oxidraft_document::{ConstraintKind, Document, EntityId, EntityKind, SketchConstraint};
 use oxidraft_geometry::{CircularArc, Curve, LineSeg, Point2d};
 use std::collections::HashMap;
-use std::f64::consts::{PI, TAU};
+use std::f64::consts::TAU;
 
 fn line_of(doc: &Document, id: EntityId) -> Option<LineSeg> {
     match &doc.get(id)?.kind {
@@ -973,13 +973,8 @@ fn write_back(doc: &mut Document, s: &Sketch, vars: &HashMap<EntityId, ShapeVars
                         let (ex, ey) = s.point(*pe);
                         let th_s = (sy - cy).atan2(sx - cx);
                         let sweep_old = orig.end_angle - orig.start_angle;
-                        let mut sweep = (ey - cy).atan2(ex - cx) - th_s;
-                        while sweep - sweep_old > PI {
-                            sweep -= TAU;
-                        }
-                        while sweep_old - sweep > PI {
-                            sweep += TAU;
-                        }
+                        let raw = (ey - cy).atan2(ex - cx) - th_s;
+                        let sweep = sweep_old + oxidraft_geometry::wrap_pi(raw - sweep_old);
                         CircularArc::new(center, radius, th_s, th_s + sweep)
                     }
                 };
@@ -1003,6 +998,7 @@ fn write_line(doc: &mut Document, id: EntityId, p0: (f64, f64), p1: (f64, f64)) 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::f64::consts::PI;
 
     fn add_line(doc: &mut Document, x0: f64, y0: f64, x1: f64, y1: f64) -> EntityId {
         doc.add(EntityKind::Curve(Curve::Line(LineSeg::from_endpoints(

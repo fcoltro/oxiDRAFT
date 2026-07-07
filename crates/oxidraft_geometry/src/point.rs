@@ -26,6 +26,11 @@ impl Point2d {
     }
 
     #[inline]
+    pub fn is_finite(&self) -> bool {
+        self.x.is_finite() && self.y.is_finite()
+    }
+
+    #[inline]
     pub fn dist_sq(&self, other: &Point2d) -> f64 {
         let dx = self.x - other.x;
         let dy = self.y - other.y;
@@ -87,6 +92,15 @@ impl BoundingBox {
             && self.min.x <= other.max.x
             && self.max.y >= other.min.y
             && self.min.y <= other.max.y
+    }
+
+    /// True when every coordinate is a finite number — NaN or infinity in a
+    /// box poisons any union/zoom-fit arithmetic it participates in.
+    pub fn is_finite(&self) -> bool {
+        self.min.x.is_finite()
+            && self.min.y.is_finite()
+            && self.max.x.is_finite()
+            && self.max.y.is_finite()
     }
 
     pub fn union(&self, other: &BoundingBox) -> BoundingBox {

@@ -14,6 +14,12 @@ pub struct Transform2d {
 }
 
 impl Transform2d {
+    pub fn is_finite(&self) -> bool {
+        [self.m00, self.m01, self.tx, self.m10, self.m11, self.ty]
+            .iter()
+            .all(|v| v.is_finite())
+    }
+
     pub fn identity() -> Self {
         Transform2d {
             m00: 1.0,

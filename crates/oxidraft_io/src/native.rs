@@ -1,13 +1,12 @@
 use oxidraft_document::{
-    Color, ConstraintKind, Document, Entity, EntityKind, HatchPattern, Layer, LineTypeDef,
-    LineTypeRef, LineWeight, SketchConstraint, Units,
+    Color, ConstraintKind, Document, Entity, EntityId, EntityKind, HatchPattern, Layer,
+    LineTypeDef, LineTypeRef, LineWeight, SketchConstraint, Units,
 };
 use oxidraft_geometry::{
     CircularArc, CubicBezier, Curve, EllipticalArc, LineSeg, NurbsCurve, Point2d, PolyCurve,
     RationalBezier,
 };
 use std::fmt::Write as _;
-use std::io::Write;
 
 const TAU: f64 = std::f64::consts::TAU;
 pub const MAGIC: &str = "O2D";
@@ -51,13 +50,15 @@ pub fn to_string(doc: &Document) -> String {
             esc(&linetype_name(&l.line_type))
         );
     }
+    // Constraints reference entities by ordinal in the write order, because
+    // entity ids are reassigned on load. Only entities that actually produce
+    // a record get an ordinal — a skipped kind must not shift the ones after.
+    let mut index = std::collections::HashMap::new();
     for e in doc.iter() {
-        write_entity(&mut s, e);
+        if write_entity(&mut s, e) {
+            index.insert(e.id, index.len());
+        }
     }
-    // Constraints reference entities by ordinal in the write order above,
-    // because entity ids are reassigned on load.
-    let index: std::collections::HashMap<_, _> =
-        doc.iter().enumerate().map(|(i, e)| (e.id, i)).collect();
     for c in &doc.constraints {
         let Some(&ia) = index.get(&c.a) else { continue };
         match (c.b, c.pts) {
@@ -86,17 +87,11 @@ pub fn to_string(doc: &Document) -> String {
 }
 
 pub fn save(doc: &Document, path: &std::path::Path) -> std::io::Result<()> {
-    let data = to_string(doc);
-    let tmp = path.with_extension("o2d.tmp");
-    {
-        let mut f = std::fs::File::create(&tmp)?;
-        f.write_all(data.as_bytes())?;
-        f.sync_all()?;
-    }
-    std::fs::rename(&tmp, path)
+    crate::write_atomic(path, to_string(doc).as_bytes())
 }
 
-fn write_entity(s: &mut String, e: &Entity) {
+/// Serializes one entity record; returns false for kinds the format skips.
+fn write_entity(s: &mut String, e: &Entity) -> bool {
     let layer = e.layer;
     let color = color_str(&e.color);
     let extra = format!(
@@ -285,8 +280,9 @@ fn write_entity(s: &mut String, e: &Entity) {
                 dim_override(override_text)
             );
         }
-        _ => {}
+        _ => return false,
     }
+    true
 }
 
 fn write_segment(s: &mut String, seg: &Curve) {
@@ -374,6 +370,10 @@ pub fn from_string(text: &str) -> Result<Document, String> {
         Option<f64>,
     );
     let mut pending_constraints: Vec<PendingConstraint> = Vec::new();
+    // Constraints reference entities by ordinal in the file's write order.
+    // Dropped records (corrupt values, unknown types) must still occupy their
+    // slot here, or every later ordinal would shift onto the wrong entity.
+    let mut entity_ids: Vec<Option<EntityId>> = Vec::new();
 
     while let Some(line) = lines.next() {
         let line = line.trim();
@@ -403,7 +403,7 @@ pub fn from_string(text: &str) -> Result<Document, String> {
                 }
             }
             Some("E") => {
-                parse_entity(&mut tok, &mut lines, &mut doc);
+                entity_ids.push(parse_entity(&mut tok, &mut lines, &mut doc));
             }
             Some("C") => {
                 if let Some(kind) = tok.next().and_then(ConstraintKind::from_code)
@@ -439,16 +439,16 @@ pub fn from_string(text: &str) -> Result<Document, String> {
         }
     }
 
-    // Ordinals map onto the load order; out-of-range references (truncated
-    // or hand-edited files) are dropped rather than mis-attached.
+    // Out-of-range references (truncated or hand-edited files) and references
+    // to dropped records are discarded rather than mis-attached.
     for (kind, ia, ib, pts, val) in pending_constraints {
-        let Some(&a) = doc.order.get(ia) else {
+        let Some(&Some(a)) = entity_ids.get(ia) else {
             continue;
         };
         let b = match ib {
-            Some(i) => match doc.order.get(i) {
-                Some(&b) => Some(b),
-                None => continue,
+            Some(i) => match entity_ids.get(i) {
+                Some(&Some(b)) => Some(b),
+                _ => continue,
             },
             None => None,
         };
@@ -472,12 +472,14 @@ pub fn load(path: &std::path::Path) -> std::io::Result<Document> {
     from_string(&text).map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))
 }
 
+/// Parses one entity record; returns the id it was added under, or `None`
+/// when the record is unknown or too corrupt to keep.
 fn parse_entity<'a>(
     tok: &mut impl Iterator<Item = &'a str>,
     lines: &mut std::iter::Peekable<std::str::Lines>,
     doc: &mut Document,
-) {
-    let Some(etype) = tok.next() else { return };
+) -> Option<EntityId> {
+    let etype = tok.next()?;
     let layer: usize = next_parse(tok, 0);
     let color = parse_color(tok.next().unwrap_or("bylayer"));
 
@@ -494,9 +496,10 @@ fn parse_entity<'a>(
             let r = parse_num(tok.next().unwrap_or("1"));
             let start = next_parse(tok, 0.0);
             let end = next_parse(tok, TAU);
-            Some(EntityKind::Curve(Curve::Arc(CircularArc::new(
-                c, r, start, end,
-            ))))
+            // A corrupt radius must drop the record, not panic the app.
+            CircularArc::try_new(c, r, start, end)
+                .ok()
+                .map(|a| EntityKind::Curve(Curve::Arc(a)))
         }
         "ELLIPSE" => {
             let c = parse_pt(tok.next());
@@ -505,9 +508,11 @@ fn parse_entity<'a>(
             let rot = next_parse(tok, 0.0);
             let start = next_parse(tok, 0.0);
             let end = next_parse(tok, TAU);
-            Some(EntityKind::Curve(Curve::Ellipse(EllipticalArc::new(
-                c, major, minor, rot, start, end,
-            ))))
+            (major > 0.0 && minor > 0.0).then(|| {
+                EntityKind::Curve(Curve::Ellipse(EllipticalArc::new(
+                    c, major, minor, rot, start, end,
+                )))
+            })
         }
         "BEZIER" => {
             let p0 = parse_pt(tok.next());
@@ -628,13 +633,13 @@ fn parse_entity<'a>(
             let boundary = read_segs(lines, nb);
             let mut holes = Vec::new();
             for _ in 0..nh {
-                let ns = lines
-                    .next()
-                    .and_then(|l| {
-                        l.trim()
-                            .strip_prefix("HOLE ")
-                            .and_then(|c| c.trim().parse().ok())
-                    })
+                // Stop at EOF: the declared count is untrusted, and a huge
+                // value with no lines behind it must not spin the loop dry.
+                let Some(line) = lines.next() else { break };
+                let ns = line
+                    .trim()
+                    .strip_prefix("HOLE ")
+                    .and_then(|c| c.trim().parse().ok())
                     .unwrap_or(0);
                 holes.push(read_segs(lines, ns));
             }
@@ -651,14 +656,17 @@ fn parse_entity<'a>(
     let line_type = parse_line_type_ref(tok.next().unwrap_or("ByLayer"));
     let line_weight = parse_line_weight(tok.next().unwrap_or("bylayer"));
 
-    if let Some(k) = kind {
-        let id = doc.add_on_layer(k, layer.min(doc.layers.layers.len().saturating_sub(1)));
-        if let Some(e) = doc.get_mut(id) {
-            e.color = color;
-            e.line_type = line_type;
-            e.line_weight = line_weight;
-        }
+    // A single NaN/inf coordinate poisons zoom-to-fit and the spatial index
+    // for the whole session, so drop any entity carrying non-finite numbers —
+    // the same salvage policy as out-of-range constraint references.
+    let k = kind.filter(|k| k.is_finite())?;
+    let id = doc.add_on_layer(k, layer.min(doc.layers.layers.len().saturating_sub(1)));
+    if let Some(e) = doc.get_mut(id) {
+        e.color = color;
+        e.line_type = line_type;
+        e.line_weight = line_weight;
     }
+    Some(id)
 }
 
 fn parse_segment(line: &str) -> Option<Curve> {
@@ -676,7 +684,7 @@ fn parse_segment(line: &str) -> Option<Curve> {
             let r = parse_num(tok.next().unwrap_or("1"));
             let start = next_parse(&mut tok, 0.0);
             let end = next_parse(&mut tok, TAU);
-            Some(Curve::Arc(CircularArc::new(c, r, start, end)))
+            CircularArc::try_new(c, r, start, end).ok().map(Curve::Arc)
         }
         "BEZIER" => Some(Curve::Bezier(CubicBezier::new(
             parse_pt(tok.next()),
@@ -694,9 +702,9 @@ fn parse_segment(line: &str) -> Option<Curve> {
             let rot = next_parse(&mut tok, 0.0);
             let start = next_parse(&mut tok, 0.0);
             let end = next_parse(&mut tok, TAU);
-            Some(Curve::Ellipse(EllipticalArc::new(
-                c, major, minor, rot, start, end,
-            )))
+            (major > 0.0 && minor > 0.0).then(|| {
+                Curve::Ellipse(EllipticalArc::new(c, major, minor, rot, start, end))
+            })
         }
         _ => None,
     }

@@ -13,6 +13,24 @@ pub use svg::{export_svg, import_svg};
 
 use oxidraft_geometry::{Curve, CurveSegment, Point2d, tessellate_curve};
 
+/// Writes through a temp file + fsync + rename so a crash or full disk
+/// mid-write can never leave a truncated file where a good one used to be.
+/// Every save of user work should go through this, whatever the format.
+pub fn write_atomic(path: &std::path::Path, bytes: &[u8]) -> std::io::Result<()> {
+    use std::io::Write as _;
+    let mut tmp_name = path.file_name().map(|n| n.to_os_string()).unwrap_or_default();
+    tmp_name.push(".tmp");
+    let tmp = path.with_file_name(tmp_name);
+    {
+        let mut f = std::fs::File::create(&tmp)?;
+        f.write_all(bytes)?;
+        f.sync_all()?;
+    }
+    std::fs::rename(&tmp, path).inspect_err(|_| {
+        let _ = std::fs::remove_file(&tmp);
+    })
+}
+
 pub(crate) fn flatten_for_export(c: &Curve) -> Vec<Point2d> {
     let bb = c.bounding_box();
     let diag = ((bb.max.x - bb.min.x).powi(2) + (bb.max.y - bb.min.y).powi(2)).sqrt();

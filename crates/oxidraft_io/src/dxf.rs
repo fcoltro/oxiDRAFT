@@ -238,7 +238,7 @@ fn parse_entities(pairs: &[Pair], doc: &mut Document) {
                     _ => break,
                 }
             }
-            if let Some(k) = build_poly(&verts, closed) {
+            if let Some(k) = build_poly(&verts, closed).filter(|k| k.is_finite()) {
                 let id = doc.add_on_layer(k, layer_idx);
                 apply_color(doc, id, &color);
                 apply_line_type(doc, id, &line_type);
@@ -258,7 +258,9 @@ fn parse_entities(pairs: &[Pair], doc: &mut Document) {
             "SPLINE" => parse_spline(rec),
             _ => vec![],
         };
-        for k in entities {
+        // Real-world DXF carries degenerate junk; a NaN/inf value must not
+        // enter the document, where it would poison zoom-to-fit and snapping.
+        for k in entities.into_iter().filter(|k| k.is_finite()) {
             let id = doc.add_on_layer(k, layer_idx);
             apply_color(doc, id, &color);
             apply_line_type(doc, id, &line_type);
@@ -286,12 +288,12 @@ fn parse_circle(rec: &[Pair]) -> Vec<EntityKind> {
     let (Some(cx), Some(cy), Some(r)) = (get(rec, 10), get(rec, 20), get(rec, 40)) else {
         return vec![];
     };
-    vec![EntityKind::Curve(Curve::Arc(CircularArc::new(
-        Point2d::from_f64(cx, cy),
-        r,
-        0.0,
-        TAU,
-    )))]
+    // Zero-radius circles are common junk in real-world files; drop them
+    // rather than panic in the trusted constructor.
+    CircularArc::try_new(Point2d::from_f64(cx, cy), r, 0.0, TAU)
+        .map(|a| EntityKind::Curve(Curve::Arc(a)))
+        .into_iter()
+        .collect()
 }
 
 fn parse_arc(rec: &[Pair]) -> Vec<EntityKind> {
@@ -300,12 +302,10 @@ fn parse_arc(rec: &[Pair]) -> Vec<EntityKind> {
     };
     let start = get(rec, 50).unwrap_or(0.0) * DEG;
     let end = get(rec, 51).unwrap_or(360.0) * DEG;
-    vec![EntityKind::Curve(Curve::Arc(CircularArc::new(
-        Point2d::from_f64(cx, cy),
-        r,
-        start,
-        end,
-    )))]
+    CircularArc::try_new(Point2d::from_f64(cx, cy), r, start, end)
+        .map(|a| EntityKind::Curve(Curve::Arc(a)))
+        .into_iter()
+        .collect()
 }
 
 fn parse_ellipse(rec: &[Pair]) -> Vec<EntityKind> {
@@ -318,11 +318,15 @@ fn parse_ellipse(rec: &[Pair]) -> Vec<EntityKind> {
     let start = get(rec, 41).unwrap_or(0.0);
     let end = get(rec, 42).unwrap_or(TAU);
     let major = (mx * mx + my * my).sqrt();
+    let minor = major * ratio;
+    if !(major > 0.0 && minor > 0.0) {
+        return vec![];
+    }
     let rotation = my.atan2(mx);
     vec![EntityKind::Curve(Curve::Ellipse(EllipticalArc::new(
         Point2d::from_f64(cx, cy),
         major,
-        major * ratio,
+        minor,
         rotation,
         start,
         end,
@@ -514,12 +518,16 @@ fn bulge_arc(x1: f64, y1: f64, x2: f64, y2: f64, bulge: f64) -> Curve {
     } else {
         (end, start)
     };
-    Curve::Arc(CircularArc::new(
-        Point2d::from_f64(cx, cy),
-        radius,
-        start,
-        end,
-    ))
+    // NaN vertices sail past the guards above (NaN fails every `<`); fall
+    // back to the chord like the degenerate cases rather than panic.
+    CircularArc::try_new(Point2d::from_f64(cx, cy), radius, start, end)
+        .map(Curve::Arc)
+        .unwrap_or_else(|_| {
+            Curve::Line(LineSeg::from_endpoints(
+                Point2d::from_f64(x1, y1),
+                Point2d::from_f64(x2, y2),
+            ))
+        })
 }
 
 pub fn export_dxf(doc: &Document) -> String {

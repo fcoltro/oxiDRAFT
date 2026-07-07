@@ -87,10 +87,7 @@ fn angle_in_arc(angle: f64, start: f64, end: f64) -> bool {
         (end, start)
     };
     let pi2 = 2.0 * std::f64::consts::PI;
-    let mut a = angle - lo;
-    while a < 0.0 {
-        a += pi2;
-    }
+    let a = crate::util::wrap_tau(angle - lo);
     let mut span = hi - lo;
     if span <= 0.0 {
         span += pi2;
@@ -107,13 +104,7 @@ fn angle_on_domain(angle: f64, start: f64, end: f64) -> f64 {
         (end, start)
     };
     let pi2 = 2.0 * std::f64::consts::PI;
-    let mut a = angle - lo;
-    while a < 0.0 {
-        a += pi2;
-    }
-    while a > pi2 {
-        a -= pi2;
-    }
+    let a = crate::util::wrap_tau(angle - lo);
     let mut span = hi - lo;
     if span <= 0.0 {
         span += pi2;

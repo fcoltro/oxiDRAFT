@@ -379,10 +379,7 @@ fn quadrants(c: &Curve) -> Vec<(f64, f64)> {
                 .filter_map(|k| {
                     let ang = k as f64 * FRAC_PI_2;
                     let in_range = full || {
-                        let mut t = ang;
-                        while t < a.start_angle {
-                            t += TAU;
-                        }
+                        let t = oxidraft_geometry::wrap_from(ang, a.start_angle);
                         t <= a.end_angle + 1e-9
                     };
                     in_range.then(|| (cx + a.radius * ang.cos(), cy + a.radius * ang.sin()))

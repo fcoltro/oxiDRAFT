@@ -10,5 +10,8 @@ oxidraft_geometry.workspace = true
 oxidraft_document.workspace = true
 svg2pdf.workspace = true
 
+[dev-dependencies]
+proptest.workspace = true
+
 [lints]
 workspace = true

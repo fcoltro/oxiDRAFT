@@ -126,20 +126,8 @@ pub fn project_point_onto_curve(curve: &Curve, px: f64, py: f64) -> ProjectionRe
 
 fn clamp_angle(angle: f64, start: f64, end: f64) -> f64 {
     let pi2 = 2.0 * std::f64::consts::PI;
-    let mut a = angle - start;
-    while a < 0.0 {
-        a += pi2;
-    }
-    while a > pi2 {
-        a -= pi2;
-    }
-    let span = {
-        let mut s = end - start;
-        while s <= 0.0 {
-            s += pi2;
-        }
-        s
-    };
+    let a = crate::util::wrap_tau(angle - start);
+    let span = crate::util::positive_sweep(end - start);
     if a <= span {
         start + a
     } else {

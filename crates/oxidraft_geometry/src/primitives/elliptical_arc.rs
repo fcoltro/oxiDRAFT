@@ -66,11 +66,7 @@ impl EllipticalArc {
     }
 
     pub fn included_angle(&self) -> f64 {
-        let mut a = self.end_angle - self.start_angle;
-        while a <= 0.0 {
-            a += 2.0 * std::f64::consts::PI;
-        }
-        a
+        crate::util::positive_sweep(self.end_angle - self.start_angle)
     }
 }
 

@@ -2597,6 +2597,7 @@ version = "0.2.0-alpha"
 dependencies = [
  "oxidraft_document",
  "oxidraft_geometry",
+ "proptest",
  "svg2pdf",
 ]
 

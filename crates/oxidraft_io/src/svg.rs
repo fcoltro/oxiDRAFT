@@ -399,9 +399,18 @@ pub fn import_svg(svg: &str) -> Document {
                     continue;
                 }
                 let to_doc = flip.compose(&ctm);
+                // A hostile transform attribute (scale(nan)) or NaN shape
+                // coordinates must not reach the document.
+                if !to_doc.is_finite() {
+                    continue;
+                }
                 let color = stroke_color(&attrs);
                 for curve in shape_curves(&name, &attrs) {
-                    let id = doc.add(EntityKind::Curve(to_doc.apply_curve(&curve)));
+                    let kind = EntityKind::Curve(to_doc.apply_curve(&curve));
+                    if !kind.is_finite() {
+                        continue;
+                    }
+                    let id = doc.add(kind);
                     if let (Some(c), Some(e)) = (&color, doc.get_mut(id)) {
                         e.color = c.clone();
                     }
@@ -945,7 +954,9 @@ fn svg_arc_to_curve(
     sweep: bool,
 ) -> Option<Curve> {
     let (mut rx, mut ry) = (rx.abs(), ry.abs());
-    if rx < 1e-12 || ry < 1e-12 || dist2(p0, p1) < 1e-24 {
+    // Positive-polarity guard: NaN radii or endpoints fail every `<` test,
+    // so the degenerate check must require validity rather than reject it.
+    if !(rx >= 1e-12 && ry >= 1e-12 && dist2(p0, p1) >= 1e-24) {
         return None;
     }
     let phi = x_rot_deg.to_radians();

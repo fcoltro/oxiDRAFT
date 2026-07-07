@@ -104,11 +104,7 @@ impl CircularArc {
     }
 
     pub fn included_angle(&self) -> f64 {
-        let mut a = self.end_angle - self.start_angle;
-        while a <= 0.0 {
-            a += 2.0 * std::f64::consts::PI;
-        }
-        a
+        crate::util::positive_sweep(self.end_angle - self.start_angle)
     }
 
     pub fn sagitta(&self) -> f64 {
@@ -141,10 +137,7 @@ impl CurveSegment for CircularArc {
         // cardinal directions (k·90°) fall inside the swept range.
         for k in 0..4 {
             let angle = k as f64 * std::f64::consts::FRAC_PI_2;
-            let mut rel = angle - self.start_angle;
-            while rel < 0.0 {
-                rel += 2.0 * std::f64::consts::PI;
-            }
+            let rel = crate::util::wrap_tau(angle - self.start_angle);
             if rel <= self.included_angle() + 1e-12 {
                 let (x, y) = self.evaluate_f64(self.start_angle + rel);
                 xmin = xmin.min(x);
