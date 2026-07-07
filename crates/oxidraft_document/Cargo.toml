@@ -1,0 +1,12 @@
+[package]
+name = "oxidraft_document"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+oxidraft_geometry.workspace = true
+
+[lints]
+workspace = true

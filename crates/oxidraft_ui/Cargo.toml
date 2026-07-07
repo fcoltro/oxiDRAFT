@@ -1,0 +1,21 @@
+[package]
+name = "oxidraft_ui"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+oxidraft_geometry.workspace = true
+oxidraft_document.workspace = true
+oxidraft_cad.workspace = true
+oxidraft_io.workspace = true
+egui.workspace = true
+rayon.workspace = true
+rfd.workspace = true
+fontdb.workspace = true
+ttf-parser.workspace = true
+resvg.workspace = true
+
+[lints]
+workspace = true

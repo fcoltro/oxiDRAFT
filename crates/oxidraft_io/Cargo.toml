@@ -1,0 +1,14 @@
+[package]
+name = "oxidraft_io"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+oxidraft_geometry.workspace = true
+oxidraft_document.workspace = true
+svg2pdf.workspace = true
+
+[lints]
+workspace = true

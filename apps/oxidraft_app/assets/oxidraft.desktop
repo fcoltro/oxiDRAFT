@@ -1,0 +1,10 @@
+[Desktop Entry]
+Type=Application
+Name=oxiDRAFT
+GenericName=CAD Editor
+Comment=2D CAD drawing and editing
+Exec=oxidraft %f
+Icon=oxidraft
+Terminal=false
+Categories=Graphics;Engineering;2DGraphics;
+StartupNotify=true
