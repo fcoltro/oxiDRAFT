@@ -5,3 +5,4 @@
 # It is recommended to check this file in to source control so that
 # everyone who runs the test benefits from these saved cases.
 cc edb826e913ac9fd856930d4ac28511267098fb0b4410c74229e0003b16cdfedc # shrinks to w = 1.0, h = 1.0, noise = [0.0, 0.0, 0.0, 0.0, 0.3327774098008739, 0.0, 0.0, 0.0]
+cc 4ed89ddbc0b2df4789b578c0e0fddef436e9e2366f85474a426acb04f4ba209d # shrinks to w = 1.441022932807858, h = 9.118437328976492, noise = [-0.2500194697696756, -0.21159623907899536, 0.009096108683423611, 0.38408440784426223, -0.12954499680755016, 0.0, 0.0, 0.17901450506973884]

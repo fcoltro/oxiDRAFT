@@ -427,7 +427,6 @@ impl Sketch {
         /// feature size — and still sits ~4e7 ULPs above f64 resolution at
         /// any scale.
         const TOL: f64 = 1e-8;
-        let tol = TOL * self.feature_scale().max(1.0);
 
         let nv = self.vars.len();
         let mut r = Vec::new();
@@ -445,6 +444,11 @@ impl Sketch {
 
         for iter in 0..MAX_ITER {
             let inf: f64 = r.iter().fold(0.0, |m, v| m.max(v.abs()));
+            // Recomputed from the *current* variables, not the entry guess,
+            // so convergence is a pure predicate of the state being tested: a
+            // sketch that just converged re-converges in zero iterations even
+            // when solving shrank its spread (and with it the tolerance).
+            let tol = TOL * self.feature_scale().max(1.0);
             if inf < tol {
                 return SolveResult {
                     converged: true,
@@ -511,10 +515,11 @@ impl Sketch {
             }
             if !accepted {
                 // No damping level improves the cost: local minimum (possibly
-                // an inconsistent constraint set).
+                // an inconsistent constraint set). Vars are unchanged since
+                // the loop-start check, so this recomputes the same tol.
                 let inf: f64 = r.iter().fold(0.0, |m, v| m.max(v.abs()));
                 return SolveResult {
-                    converged: inf < tol,
+                    converged: inf < TOL * self.feature_scale().max(1.0),
                     residual: inf,
                     iterations: iter,
                 };
@@ -522,7 +527,7 @@ impl Sketch {
         }
         let inf: f64 = r.iter().fold(0.0, |m, v| m.max(v.abs()));
         SolveResult {
-            converged: inf < tol,
+            converged: inf < TOL * self.feature_scale().max(1.0),
             residual: inf,
             iterations: MAX_ITER,
         }
@@ -1089,6 +1094,43 @@ mod tests {
         assert!(res.residual < 1e-6, "no origin-distance slop crept in");
         assert!(dist(s.point(b), (OFF + 4.0, OFF)) < 1e-5);
         assert!(dist(s.point(c), (OFF + 4.0, OFF + 3.0)) < 1e-5);
+    }
+
+    #[test]
+    fn resolve_after_spread_shrinking_solve_is_a_no_op() {
+        // Proptest-found boundary case: the noisy start has a larger spread
+        // (hence looser tolerance) than the solved rectangle, and the first
+        // solve exited with a residual between the two. With the tolerance
+        // computed from the entry state a re-solve then burned an iteration;
+        // computed from the *current* state, convergence is a pure predicate
+        // and the re-solve must be an immediate no-op.
+        let (w, h) = (1.441022932807858, 9.118437328976492);
+        let noise = [
+            -0.2500194697696756,
+            -0.21159623907899536,
+            0.009096108683423611,
+            0.38408440784426223,
+            -0.12954499680755016,
+            0.0,
+            0.0,
+            0.17901450506973884,
+        ];
+        let mut s = Sketch::new();
+        let a = s.add_point(noise[0], noise[1]);
+        let b = s.add_point(w + noise[2], noise[3]);
+        let c = s.add_point(w + noise[4], h + noise[5]);
+        let d = s.add_point(noise[6], h + noise[7]);
+        s.constrain(Constraint::Fixed(a, 0.0, 0.0));
+        s.constrain(Constraint::Horizontal(a, b));
+        s.constrain(Constraint::Vertical(b, c));
+        s.constrain(Constraint::Horizontal(c, d));
+        s.constrain(Constraint::Vertical(d, a));
+        s.constrain(Constraint::Distance(a, b, w));
+        s.constrain(Constraint::Distance(b, c, h));
+        assert!(s.solve().converged);
+        let again = s.solve();
+        assert!(again.converged);
+        assert_eq!(again.iterations, 0, "re-solve must be a no-op");
     }
 
     #[test]
