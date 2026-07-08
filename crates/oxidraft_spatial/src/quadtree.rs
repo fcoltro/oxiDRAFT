@@ -24,6 +24,10 @@ impl QuadNode {
 pub struct Quadtree {
     pub root: QuadNode,
     pub curves: Vec<Curve>,
+    /// Per-curve bounding boxes, parallel to `curves`. Cached at insert:
+    /// recomputing every box on every insert made building O(n²) in
+    /// bounding-box evaluations.
+    bbs: Vec<BoundingBox>,
     pub max_depth: u32,
     pub max_curves_per_leaf: usize,
 }
@@ -38,6 +42,7 @@ impl Quadtree {
                 children: Vec::new(),
             },
             curves: Vec::new(),
+            bbs: Vec::new(),
             max_depth,
             max_curves_per_leaf: 4,
         }
@@ -47,10 +52,18 @@ impl Quadtree {
         let idx = self.curves.len();
         let bb = curve.bounding_box();
         self.curves.push(curve);
-        let bbs: Vec<BoundingBox> = self.curves.iter().map(|c| c.bounding_box()).collect();
+        self.bbs.push(bb);
         let max_depth = self.max_depth;
         let max_per_leaf = self.max_curves_per_leaf;
-        Self::insert_into(&mut self.root, &bbs, idx, &bb, 0, max_depth, max_per_leaf);
+        Self::insert_into(
+            &mut self.root,
+            &self.bbs,
+            idx,
+            &bb,
+            0,
+            max_depth,
+            max_per_leaf,
+        );
         idx
     }
 
@@ -118,7 +131,7 @@ impl Quadtree {
             .collect();
 
         let indices = std::mem::take(&mut node.curve_indices);
-        for idx in indices {
+        for &idx in &indices {
             if let Some(bb) = curve_bbs.get(idx) {
                 for child in node.children.iter_mut() {
                     if child.bounds.intersects(bb) {
@@ -127,6 +140,26 @@ impl Quadtree {
                     }
                 }
             }
+        }
+        // A split must actually separate something and must not strand a
+        // curve outside every quadrant (a poisoned box intersects nothing).
+        // Without the first check, curves that span every quadrant — think
+        // page-sized construction lines — deepen the tree by one full level
+        // per insert and balloon it toward 4^max_depth nodes; such nodes
+        // stay fat leaves instead (later inserts may retry, which is O(n)
+        // per attempt, not exponential).
+        let separated = node
+            .children
+            .iter()
+            .any(|ch| ch.curve_indices.len() < indices.len());
+        let all_placed = indices.iter().all(|idx| {
+            node.children
+                .iter()
+                .any(|ch| ch.curve_indices.contains(idx))
+        });
+        if !(separated && all_placed) {
+            node.children.clear();
+            node.curve_indices = indices;
         }
     }
 
@@ -190,7 +223,12 @@ impl Quadtree {
 
     pub fn nearest_curve(&self, px: f64, py: f64) -> Option<usize> {
         use oxidraft_geometry::point_to_curve_distance;
-        let candidates = {
+        // A non-finite query would make every distance NaN and the winner
+        // arbitrary; there is no meaningful "nearest" to such a point.
+        if !(px.is_finite() && py.is_finite()) {
+            return None;
+        }
+        let mut candidates = {
             let mut bb = BoundingBox::from_corners(px - 0.001, py - 0.001, px + 0.001, py + 0.001);
             let mut result = Vec::new();
             for _ in 0..8 {
@@ -205,6 +243,12 @@ impl Quadtree {
             }
             result
         };
+        // The ring search only reaches a few units out; a drawing whose
+        // curves are all farther away still has a nearest one — fall back
+        // to brute force so the answer stays total.
+        if candidates.is_empty() {
+            candidates = (0..self.curves.len()).collect();
+        }
         candidates.into_iter().min_by(|&a, &b| {
             let da = point_to_curve_distance(&self.curves[a], px, py);
             let db = point_to_curve_distance(&self.curves[b], px, py);

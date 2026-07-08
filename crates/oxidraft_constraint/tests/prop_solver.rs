@@ -40,6 +40,44 @@ proptest! {
     }
 
     #[test]
+    fn angle_targets_are_reached_from_any_start(
+        ref_deg in 0.0..360.0f64,
+        target_deg in 1.0..179.0f64,
+        start_deg in 0.0..360.0f64,
+        mov_len in 0.5..8.0f64,
+    ) {
+        let mut s = Sketch::new();
+        let ref_rad = ref_deg.to_radians();
+        let (bx, by) = (4.0 * ref_rad.cos(), 4.0 * ref_rad.sin());
+        let a = s.add_point(0.0, 0.0);
+        let b = s.add_point(bx, by);
+        let c = s.add_point(1.0, 1.0);
+        let d = s.add_point(
+            1.0 + mov_len * start_deg.to_radians().cos(),
+            1.0 + mov_len * start_deg.to_radians().sin(),
+        );
+        s.constrain(Constraint::Fixed(a, 0.0, 0.0));
+        s.constrain(Constraint::Fixed(b, bx, by));
+        s.constrain(Constraint::Fixed(c, 1.0, 1.0));
+        s.constrain(Constraint::Distance(c, d, mov_len));
+        let theta = target_deg.to_radians();
+        s.constrain(Constraint::Angle(a, b, c, d, theta));
+        let res = s.solve_robust();
+        prop_assert!(res.converged, "residual {} after {} iters", res.residual, res.iterations);
+        let (cx, cy) = s.point(c);
+        let (dx, dy) = s.point(d);
+        // Undirected lines: the relative direction must equal θ mod 180°.
+        let rel = (dy - cy).atan2(dx - cx) - ref_rad;
+        let diff = (rel - theta).rem_euclid(std::f64::consts::PI);
+        let diff = diff.min(std::f64::consts::PI - diff);
+        prop_assert!(diff < 1e-5, "settled {}° off the target", diff.to_degrees());
+        prop_assert!(
+            ((dx - cx).hypot(dy - cy) - mov_len).abs() < 1e-5,
+            "mover length drifted"
+        );
+    }
+
+    #[test]
     fn triangles_from_valid_side_lengths(
         la in 1.0..10.0f64,
         lb in 1.0..10.0f64,
