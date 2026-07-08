@@ -78,8 +78,6 @@ pub(super) enum BadgeGlyph {
     Perpendicular,
     Equal,
     Tangent,
-    Radius,
-    Length,
 }
 
 /// A row of glyph chips: each glyph carries the constraints it stands for
@@ -92,6 +90,12 @@ pub(super) struct BadgeModel {
     /// Welded corners in world coordinates, deduplicated by position,
     /// each carrying the welds anchored there.
     pub corner_dots: Vec<((f64, f64), Vec<SketchConstraint>)>,
+    /// Valued constraints (driving length, radius) shown as dimension-style
+    /// annotations in the constraint accent colour instead of glyph chips.
+    /// Deliberately separate from dimension *entities*: those are drafting
+    /// annotation for the printed drawing, these visualize the sketch's
+    /// driving values and live only in the overlay.
+    pub dim_badges: Vec<SketchConstraint>,
 }
 
 fn badge_line_ends(doc: &Document, id: EntityId) -> Option<((f64, f64), (f64, f64))> {
@@ -148,6 +152,7 @@ fn badge_anchor(doc: &Document, id: EntityId) -> Option<BadgeAnchor> {
 pub(super) fn badge_model(doc: &Document) -> BadgeModel {
     let mut line_badges: Vec<(EntityId, GlyphChips)> = Vec::new();
     let mut corner_dots: Vec<((f64, f64), Vec<SketchConstraint>)> = Vec::new();
+    let mut dim_badges: Vec<SketchConstraint> = Vec::new();
     let push =
         |badges: &mut Vec<(EntityId, GlyphChips)>, id, g: BadgeGlyph, c: SketchConstraint| {
             let row = match badges.iter_mut().find(|(e, _)| *e == id) {
@@ -178,12 +183,10 @@ pub(super) fn badge_model(doc: &Document) -> BadgeModel {
                 push(&mut line_badges, c.a, BadgeGlyph::Vertical, *c);
                 continue;
             }
-            ConstraintKind::Radius => {
-                push(&mut line_badges, c.a, BadgeGlyph::Radius, *c);
-                continue;
-            }
-            ConstraintKind::Distance => {
-                push(&mut line_badges, c.a, BadgeGlyph::Length, *c);
+            ConstraintKind::Radius | ConstraintKind::Distance => {
+                if c.val.is_some() {
+                    dim_badges.push(*c);
+                }
                 continue;
             }
             ConstraintKind::Parallel => BadgeGlyph::Parallel,
@@ -213,6 +216,97 @@ pub(super) fn badge_model(doc: &Document) -> BadgeModel {
     BadgeModel {
         line_badges,
         corner_dots,
+        dim_badges,
+    }
+}
+
+/// Screen-space layout of one valued-constraint dimension annotation:
+/// stroke segments, arrowhead triangles, and the value label. Canvas-local
+/// like `chip_centers`, so drawing adds the painter origin and hit-testing
+/// compares raw positions.
+struct DimBadge {
+    lines: Vec<[egui::Pos2; 2]>,
+    arrows: Vec<[egui::Pos2; 3]>,
+    label: String,
+    text_rect: egui::Rect,
+}
+
+/// Deterministic label box shared by drawing and hit-testing — a galley
+/// needs a painter, which `badge_hit` doesn't have.
+fn dim_label_rect(center: egui::Pos2, label: &str) -> egui::Rect {
+    let w = 7.0 * label.chars().count() as f32 + 10.0;
+    egui::Rect::from_center_size(center, vec2(w, 16.0))
+}
+
+/// Filled arrowhead with its tip at `tip`, fins spreading along `back`.
+fn dim_arrow(tip: egui::Pos2, back: egui::Vec2) -> [egui::Pos2; 3] {
+    let n = vec2(back.y, -back.x);
+    [tip, tip + back * 7.0 + n * 2.6, tip + back * 7.0 - n * 2.6]
+}
+
+fn dim_badge_layout(app: &AppState, c: &SketchConstraint) -> Option<DimBadge> {
+    let val = c.val?;
+    let style = &app.document.settings.dim_style;
+    let units = app.document.settings.units;
+    let px = |wx: f64, wy: f64| {
+        let (x, y) = app.view.world_to_screen(wx, wy);
+        pos2(x as f32, y as f32)
+    };
+    match (c.kind, app.document.get(c.a)?.as_curve()?) {
+        (ConstraintKind::Distance, Curve::Line(l)) => {
+            let a = px(l.p0.x, l.p0.y);
+            let b = px(l.p1.x, l.p1.y);
+            if (b - a).length() < 24.0 {
+                return None;
+            }
+            let d = (b - a).normalized();
+            // The glyph chips stack on the upward side (`chip_centers`
+            // forces n.y < 0); the dimension takes the opposite side.
+            let mut n = vec2(d.y, -d.x);
+            if n.y < 0.0 {
+                n = -n;
+            }
+            let o = 22.0;
+            let (ea, eb) = (a + n * o, b + n * o);
+            let label = units.format_measure(val, style.precision);
+            Some(DimBadge {
+                lines: vec![
+                    [a + n * 4.0, a + n * (o + 5.0)],
+                    [b + n * 4.0, b + n * (o + 5.0)],
+                    [ea, eb],
+                ],
+                arrows: vec![dim_arrow(ea, d), dim_arrow(eb, -d)],
+                text_rect: dim_label_rect(ea + (eb - ea) * 0.5 + n * 13.0, &label),
+                label,
+            })
+        }
+        (ConstraintKind::Radius, Curve::Arc(arc)) => {
+            if arc.radius / app.view.pixel_world_size() < 12.0 {
+                return None;
+            }
+            let full = (arc.end_angle - arc.start_angle).abs() >= 2.0 * std::f64::consts::PI - 1e-9;
+            let ang = if full {
+                std::f64::consts::FRAC_PI_4
+            } else {
+                0.5 * (arc.start_angle + arc.end_angle)
+            };
+            let center = px(arc.center.x, arc.center.y);
+            let rim = px(
+                arc.center.x + arc.radius * ang.cos(),
+                arc.center.y + arc.radius * ang.sin(),
+            );
+            let out = (rim - center).normalized();
+            let tail = rim + out * 14.0;
+            let label = format!("R{}", units.format_measure(val, style.precision));
+            let half_w = 7.0 * label.chars().count() as f32 * 0.5 + 5.0;
+            Some(DimBadge {
+                text_rect: dim_label_rect(tail + out * (half_w + 4.0), &label),
+                lines: vec![[center, rim], [rim, tail]],
+                arrows: vec![dim_arrow(rim, -out)],
+                label,
+            })
+        }
+        _ => None,
     }
 }
 
@@ -254,6 +348,13 @@ pub(crate) fn badge_hit(app: &AppState, sx: f64, sy: f64) -> Option<Vec<SketchCo
             if egui::Rect::from_center_size(c, vec2(20.0, 20.0)).contains(p) {
                 return Some(cs.clone());
             }
+        }
+    }
+    for c in &model.dim_badges {
+        if let Some(dim) = dim_badge_layout(app, c)
+            && dim.text_rect.contains(p)
+        {
+            return Some(vec![*c]);
         }
     }
     for ((wx, wy), cs) in &model.corner_dots {
@@ -314,6 +415,54 @@ pub(super) fn constraint_badges(
             }
         }
     }
+    for c in &model.dim_badges {
+        let Some(dim) = dim_badge_layout(app, c) else {
+            continue;
+        };
+        let tr = dim.text_rect.translate(origin.to_vec2());
+        if !clip.contains(tr.center()) {
+            continue;
+        }
+        let stroke = Stroke::new(1.0, col);
+        for seg in &dim.lines {
+            painter.line_segment(
+                [origin + seg[0].to_vec2(), origin + seg[1].to_vec2()],
+                stroke,
+            );
+        }
+        for tri in &dim.arrows {
+            painter.add(egui::Shape::convex_polygon(
+                tri.iter().map(|q| origin + q.to_vec2()).collect(),
+                col,
+                Stroke::NONE,
+            ));
+        }
+        let hot = hover.map(|h| tr.contains(h)).unwrap_or(false) && !under_grip(tr.center());
+        painter.rect_filled(tr, 4.0, bg);
+        painter.rect_stroke(
+            tr,
+            4.0,
+            Stroke::new(
+                1.0,
+                if hot {
+                    crate::theme::SNAP
+                } else {
+                    crate::theme::OUTLINE
+                },
+            ),
+            egui::StrokeKind::Middle,
+        );
+        painter.text(
+            tr.center(),
+            egui::Align2::CENTER_CENTER,
+            &dim.label,
+            egui::FontId::proportional(11.0),
+            col,
+        );
+        if hot {
+            hint = Some(tr.center());
+        }
+    }
     for ((wx, wy), _) in &model.corner_dots {
         let p = super::render::world_to_screen_pos(app, origin, *wx, *wy);
         if !clip.contains(p) {
@@ -368,8 +517,6 @@ fn badge_icon(g: BadgeGlyph) -> crate::icons::Icon {
         BadgeGlyph::Perpendicular => Icon::ConPerpendicular,
         BadgeGlyph::Equal => Icon::ConEqual,
         BadgeGlyph::Tangent => Icon::ConTangent,
-        BadgeGlyph::Radius => Icon::ConRadiusLock,
-        BadgeGlyph::Length => Icon::ConLengthLock,
     }
 }
 
@@ -1567,19 +1714,53 @@ mod badge_tests {
     }
 
     #[test]
-    fn radius_badges_the_arc_and_carries_its_constraint() {
+    fn radius_becomes_a_dimension_badge_not_a_chip() {
         let mut doc = Document::new();
         let a = doc.add(EntityKind::Curve(Curve::Arc(
             oxidraft_geometry::CircularArc::new(Point2d::from_f64(0.0, 0.0), 2.0, 0.0, 1.5),
         )));
         doc.add_constraint(SketchConstraint::radius(a, 2.0));
         let m = badge_model(&doc);
-        assert_eq!(m.line_badges.len(), 1);
-        let (id, glyphs) = &m.line_badges[0];
-        assert_eq!(*id, a);
-        assert_eq!(glyphs.len(), 1);
-        assert_eq!(glyphs[0].0, BadgeGlyph::Radius);
-        assert_eq!(glyphs[0].1.as_slice(), &[SketchConstraint::radius(a, 2.0)]);
+        assert!(
+            m.line_badges.is_empty(),
+            "valued constraints get dimension annotations, not glyph chips"
+        );
+        assert_eq!(m.dim_badges.as_slice(), &[SketchConstraint::radius(a, 2.0)]);
+    }
+
+    #[test]
+    fn dimension_badge_shows_the_value_and_deletes_on_click() {
+        let mut app = AppState::new(800.0, 600.0);
+        app.snap_on = false;
+        let a = app.add_entity(EntityKind::Curve(Curve::Line(LineSeg::from_endpoints(
+            Point2d::from_f64(0.0, 0.0),
+            Point2d::from_f64(4.0, 0.0),
+        ))));
+        app.document
+            .add_constraint(SketchConstraint::distance(a, 4.0));
+        let c = app.document.constraints[app.document.constraints.len() - 1];
+        let dim = dim_badge_layout(&app, &c).expect("line is large enough on screen");
+        assert!(
+            dim.label.starts_with("4.0"),
+            "label carries the driving value: {}",
+            dim.label
+        );
+        let hit = badge_hit(
+            &app,
+            dim.text_rect.center().x as f64,
+            dim.text_rect.center().y as f64,
+        )
+        .expect("label is clickable");
+        assert_eq!(hit.as_slice(), &[c]);
+        app.tool = Tool::Select;
+        app.canvas_click(
+            dim.text_rect.center().x as f64,
+            dim.text_rect.center().y as f64,
+        );
+        assert!(
+            user_constraints(&app).is_empty(),
+            "clicking the dimension badge deletes the driving constraint"
+        );
     }
 
     #[test]
