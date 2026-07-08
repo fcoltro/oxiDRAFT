@@ -81,6 +81,12 @@ pub struct SolveResult {
 pub struct Sketch {
     vars: Vec<f64>,
     constraints: Vec<Constraint>,
+    /// Base indices of point variables (x at base, y at base+1) and indices
+    /// of scalar variables — kept so [`Sketch::feature_scale`] can measure
+    /// the sketch's coordinate *spread* per axis rather than its distance
+    /// from the origin.
+    point_bases: Vec<usize>,
+    scalar_idx: Vec<usize>,
 }
 
 impl Sketch {
@@ -92,6 +98,7 @@ impl Sketch {
         let idx = self.vars.len();
         self.vars.push(x);
         self.vars.push(y);
+        self.point_bases.push(idx);
         PointVar(idx)
     }
 
@@ -107,7 +114,29 @@ impl Sketch {
     pub fn add_scalar(&mut self, v: f64) -> ScalarVar {
         let idx = self.vars.len();
         self.vars.push(v);
+        self.scalar_idx.push(idx);
         ScalarVar(idx)
+    }
+
+    /// Characteristic feature size of the sketch: the larger of the points'
+    /// per-axis coordinate spread and the largest scalar magnitude (radii).
+    /// Per-axis spread, not coordinate magnitude, so a small part drawn far
+    /// from the origin still reads as small.
+    fn feature_scale(&self) -> f64 {
+        let mut spread = 0.0f64;
+        for axis in 0..2 {
+            let vals = self.point_bases.iter().map(|&b| self.vars[b + axis]);
+            let (min, max) = vals.fold((f64::INFINITY, f64::NEG_INFINITY), |(lo, hi), v| {
+                (lo.min(v), hi.max(v))
+            });
+            spread = spread.max(max - min);
+        }
+        let scalar_mag = self
+            .scalar_idx
+            .iter()
+            .map(|&i| self.vars[i].abs())
+            .fold(0.0f64, f64::max);
+        spread.max(scalar_mag)
     }
 
     pub fn scalar(&self, s: ScalarVar) -> f64 {
@@ -385,7 +414,20 @@ impl Sketch {
     #[allow(clippy::needless_range_loop)]
     pub fn solve(&mut self) -> SolveResult {
         const MAX_ITER: u32 = 200;
-        const TOL: f64 = 1e-7;
+        /// Convergence tolerance per unit of feature size. Residuals are in
+        /// length units, so an absolute cutoff can't serve both a 4-unit part
+        /// and a 4-billion-unit site plan: at 4e9 an f64 ULP is already
+        /// ~9e-7, making the old absolute 1e-7 unreachable and every such
+        /// solve report failure. Scaling by [`Sketch::feature_scale`]
+        /// (floored at unit scale so sub-unit parts keep an absolute cutoff)
+        /// asks every sketch for the same *relative* accuracy instead. 1e-8
+        /// reproduces the old cutoff at part scale (~10 units) — which sat
+        /// deliberately above the ~κ²·ε precision floor that stiff systems
+        /// (e.g. a tangent-welded slot) plateau at, itself proportional to
+        /// feature size — and still sits ~4e7 ULPs above f64 resolution at
+        /// any scale.
+        const TOL: f64 = 1e-8;
+        let tol = TOL * self.feature_scale().max(1.0);
 
         let nv = self.vars.len();
         let mut r = Vec::new();
@@ -403,7 +445,7 @@ impl Sketch {
 
         for iter in 0..MAX_ITER {
             let inf: f64 = r.iter().fold(0.0, |m, v| m.max(v.abs()));
-            if inf < TOL {
+            if inf < tol {
                 return SolveResult {
                     converged: true,
                     residual: inf,
@@ -472,7 +514,7 @@ impl Sketch {
                 // an inconsistent constraint set).
                 let inf: f64 = r.iter().fold(0.0, |m, v| m.max(v.abs()));
                 return SolveResult {
-                    converged: inf < TOL,
+                    converged: inf < tol,
                     residual: inf,
                     iterations: iter,
                 };
@@ -480,7 +522,7 @@ impl Sketch {
         }
         let inf: f64 = r.iter().fold(0.0, |m, v| m.max(v.abs()));
         SolveResult {
-            converged: inf < TOL,
+            converged: inf < tol,
             residual: inf,
             iterations: MAX_ITER,
         }
@@ -574,6 +616,8 @@ impl Sketch {
             let mut trial = Sketch {
                 vars: initial.to_vec(),
                 constraints,
+                point_bases: self.point_bases.clone(),
+                scalar_idx: self.scalar_idx.clone(),
             };
             if trial.solve_robust().converged {
                 culprits.push(i);
@@ -999,6 +1043,52 @@ mod tests {
                 );
             }
         }
+    }
+
+    #[test]
+    fn billion_unit_sketch_converges_with_scale_relative_tolerance() {
+        // At coordinates ~4e9 an f64 ULP is ~9e-7, so the old absolute 1e-7
+        // cutoff was unreachable and this solve reported failure forever.
+        const S: f64 = 1e9;
+        let mut s = Sketch::new();
+        let a = s.add_point(0.1 * S, -0.2 * S);
+        let b = s.add_point(4.3 * S, 0.15 * S);
+        let c = s.add_point(3.9 * S, 3.2 * S);
+        let d = s.add_point(-0.2 * S, 2.8 * S);
+        s.constrain(Constraint::Fixed(a, 0.0, 0.0));
+        s.constrain(Constraint::Horizontal(a, b));
+        s.constrain(Constraint::Vertical(b, c));
+        s.constrain(Constraint::Horizontal(c, d));
+        s.constrain(Constraint::Vertical(d, a));
+        s.constrain(Constraint::Distance(a, b, 4.0 * S));
+        s.constrain(Constraint::Distance(b, c, 3.0 * S));
+        let res = s.solve();
+        assert!(res.converged, "must converge, residual {}", res.residual);
+        // Same relative accuracy the unit-scale rectangle test demands.
+        assert!(dist(s.point(b), (4.0 * S, 0.0)) < 1e-6 * S);
+        assert!(dist(s.point(c), (4.0 * S, 3.0 * S)) < 1e-6 * S);
+    }
+
+    #[test]
+    fn small_part_far_from_origin_keeps_tight_tolerance() {
+        // feature_scale measures per-axis spread, not coordinate magnitude:
+        // a 4x3 part drawn a million units out must still be solved to the
+        // unit-scale tolerance, not to 1e6 * 1e-7 = 0.1 units of slop.
+        const OFF: f64 = 1e6;
+        let mut s = Sketch::new();
+        let a = s.add_point(OFF + 0.1, OFF - 0.2);
+        let b = s.add_point(OFF + 4.3, OFF + 0.15);
+        let c = s.add_point(OFF + 3.9, OFF + 3.2);
+        s.constrain(Constraint::Fixed(a, OFF, OFF));
+        s.constrain(Constraint::Horizontal(a, b));
+        s.constrain(Constraint::Vertical(b, c));
+        s.constrain(Constraint::Distance(a, b, 4.0));
+        s.constrain(Constraint::Distance(b, c, 3.0));
+        let res = s.solve();
+        assert!(res.converged, "must converge, residual {}", res.residual);
+        assert!(res.residual < 1e-6, "no origin-distance slop crept in");
+        assert!(dist(s.point(b), (OFF + 4.0, OFF)) < 1e-5);
+        assert!(dist(s.point(c), (OFF + 4.0, OFF + 3.0)) < 1e-5);
     }
 
     #[test]
