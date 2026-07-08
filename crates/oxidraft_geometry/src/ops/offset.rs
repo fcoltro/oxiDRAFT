@@ -153,23 +153,33 @@ pub fn interpolate_nurbs(data: &[Point2d], weights: &[f64]) -> Option<NurbsCurve
     if m < 2 || weights.len() != m {
         return None;
     }
+    // Reject poisoned input before it reaches the solver: Gaussian
+    // elimination only launders a NaN into every control point, and the
+    // final construction goes through the trusted `NurbsCurve::new`, which
+    // panics on bad weights instead of reporting them.
+    if data.iter().any(|p| !p.is_finite()) || weights.iter().any(|&w| !w.is_finite() || w <= 0.0) {
+        return None;
+    }
     let params: Vec<f64> = (0..m).map(|k| k as f64 / (m - 1) as f64).collect();
     let mut qx: Vec<f64> = data.iter().map(|p| p.x).collect();
     let mut qy: Vec<f64> = data.iter().map(|p| p.y).collect();
 
-    let mat: Vec<Vec<f64>> = params
+    let mut mat: Vec<Vec<f64>> = params
         .iter()
         .map(|&t| crate::nurbs::rational_basis_all(m, weights, t))
         .collect();
-    let mut mat = mat;
-    solve2(&mut mat, &mut qx, &mut qy).map(|()| {
-        let control = qx
-            .iter()
-            .zip(&qy)
-            .map(|(&x, &y)| Point2d::from_f64(x, y))
-            .collect();
-        NurbsCurve::new(control, weights.to_vec())
-    })
+    solve2(&mut mat, &mut qx, &mut qy)?;
+    let control: Vec<Point2d> = qx
+        .iter()
+        .zip(&qy)
+        .map(|(&x, &y)| Point2d::from_f64(x, y))
+        .collect();
+    // Extreme-but-valid weights can still overflow the solve; a non-finite
+    // fit must fall back (offset falls back to sampling), not escape.
+    if control.iter().any(|q| !q.is_finite()) {
+        return None;
+    }
+    Some(NurbsCurve::new(control, weights.to_vec()))
 }
 
 pub fn refit_nurbs_subcurve(nc: &NurbsCurve, a: f64, b: f64) -> NurbsCurve {

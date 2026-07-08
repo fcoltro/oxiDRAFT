@@ -159,6 +159,24 @@ impl RationalBezier {
     }
 
     pub fn to_polyline(&self, tol: f64) -> Vec<Point2d> {
+        // The flatness cutoff below is `dev <= tol`, which a negative or NaN
+        // tolerance never satisfies — even a straight segment then expands
+        // the full 2^24-leaf recursion, a ~16M-point memory balloon. Floor
+        // the tolerance relative to the segment's own extent (the arc path
+        // caps at 65,536 vertices in the same spirit); a non-finite extent
+        // means poisoned control points that no subdivision can rescue, so
+        // the segment flattens to its endpoints.
+        let bb = self.bounding_box();
+        let diag = (bb.max.x - bb.min.x).hypot(bb.max.y - bb.min.y);
+        if !diag.is_finite() {
+            return vec![self.evaluate(0.0), self.evaluate(1.0)];
+        }
+        let floor = diag * 1e-9;
+        let tol = if tol.is_finite() {
+            tol.max(floor)
+        } else {
+            floor
+        };
         let mut out = vec![self.evaluate(0.0)];
         self.flatten_into(0.0, 1.0, tol, 0, &mut out);
         out

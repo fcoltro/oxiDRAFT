@@ -14,7 +14,16 @@ pub fn curvature_at(curve: &Curve, t: f64) -> Option<f64> {
     let (lo, hi) = (t0.min(t1), t0.max(t1));
     let span = (hi - lo).max(1e-9);
     let h = span * 1e-4;
-    let tc = t.clamp(lo + h, hi - h);
+    // A domain narrower than the stencil (a zero-sweep arc from two identical
+    // picks has lo == hi) inverts the clamp interval, which std's clamp
+    // punishes with a panic; sample the midpoint instead.
+    let (clo, chi) = if lo + h <= hi - h {
+        (lo + h, hi - h)
+    } else {
+        let mid = 0.5 * (lo + hi);
+        (mid, mid)
+    };
+    let tc = t.clamp(clo, chi);
     let (xm, ym) = curve.evaluate_f64(tc - h);
     let (xc, yc) = curve.evaluate_f64(tc);
     let (xp, yp) = curve.evaluate_f64(tc + h);
