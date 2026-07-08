@@ -68,97 +68,97 @@ pub enum Icon {
 impl Icon {
     fn png_bytes(self) -> &'static [u8] {
         match self {
-            Icon::Select => include_bytes!("../assets/icons/icons_curve_ui_select.png"),
-            Icon::Point => include_bytes!("../assets/icons/icons_curve_tool_point.png"),
-            Icon::Line => include_bytes!("../assets/icons/icons_curve_tool_line.png"),
-            Icon::Circle => include_bytes!("../assets/icons/icons_curve_tool_circle.png"),
-            Icon::Circle2P => include_bytes!("../assets/icons/icons_curve_tool_circle_2p.png"),
-            Icon::Circle3P => include_bytes!("../assets/icons/icons_curve_tool_circle_3p.png"),
+            Icon::Select => include_bytes!("../assets/icons/icons_ui_select.png"),
+            Icon::Point => include_bytes!("../assets/icons/icons_tool_point.png"),
+            Icon::Line => include_bytes!("../assets/icons/icons_tool_line.png"),
+            Icon::Circle => include_bytes!("../assets/icons/icons_tool_circle.png"),
+            Icon::Circle2P => include_bytes!("../assets/icons/icons_tool_circle_2p.png"),
+            Icon::Circle3P => include_bytes!("../assets/icons/icons_tool_circle_3p.png"),
             Icon::CircleTtr => {
-                include_bytes!("../assets/icons/icons_curve_tool_circle_tan_tan_radius.png")
+                include_bytes!("../assets/icons/icons_tool_circle_tan_tan_radius.png")
             }
             Icon::CircleTtt => {
-                include_bytes!("../assets/icons/icons_curve_tool_circle_tan_tan_tan.png")
+                include_bytes!("../assets/icons/icons_tool_circle_tan_tan_tan.png")
             }
-            Icon::Ellipse => include_bytes!("../assets/icons/icons_curve_tool_ellipse.png"),
-            Icon::Arc => include_bytes!("../assets/icons/icons_curve_tool_arc_3P.png"),
+            Icon::Ellipse => include_bytes!("../assets/icons/icons_tool_ellipse.png"),
+            Icon::Arc => include_bytes!("../assets/icons/icons_tool_arc_3P.png"),
             Icon::ArcStartCenterEnd => {
-                include_bytes!("../assets/icons/icons_curve_tool_arc_start_center_end.png")
+                include_bytes!("../assets/icons/icons_tool_arc_start_center_end.png")
             }
             Icon::ArcCenterStartEnd => {
-                include_bytes!("../assets/icons/icons_curve_tool_arc_center_start_end.png")
+                include_bytes!("../assets/icons/icons_tool_arc_center_start_end.png")
             }
-            Icon::Rectangle => include_bytes!("../assets/icons/icons_curve_tool_rectangle.png"),
-            Icon::Polygon => include_bytes!("../assets/icons/icons_curve_tool_polygon.png"),
-            Icon::Spline => include_bytes!("../assets/icons/icons_curve_tool_spline.png"),
-            Icon::Polyline => include_bytes!("../assets/icons/icons_curve_tool_polyline.png"),
-            Icon::Text => include_bytes!("../assets/icons/icons_curve_tool_text.png"),
-            Icon::Move => include_bytes!("../assets/icons/icons_curve_mod_move.png"),
-            Icon::Copy => include_bytes!("../assets/icons/icons_curve_mod_copy.png"),
-            Icon::Rotate => include_bytes!("../assets/icons/icons_curve_mod_rotate.png"),
-            Icon::Scale => include_bytes!("../assets/icons/icons_curve_mod_scale.png"),
-            Icon::Mirror => include_bytes!("../assets/icons/icons_curve_mod_mirror.png"),
-            Icon::Offset => include_bytes!("../assets/icons/icons_curve_mod_offset.png"),
-            Icon::Trim => include_bytes!("../assets/icons/icons_curve_mod_trim.png"),
-            Icon::Extend => include_bytes!("../assets/icons/icons_curve_mod_extend.png"),
-            Icon::Fillet => include_bytes!("../assets/icons/icons_curve_mod_fillet.png"),
-            Icon::Chamfer => include_bytes!("../assets/icons/icons_curve_mod_chamfer.png"),
-            Icon::Blend => include_bytes!("../assets/icons/icons_curve_tool_blend_curve.png"),
-            Icon::Stretch => include_bytes!("../assets/icons/icons_curve_mod_stretch.png"),
-            Icon::Explode => include_bytes!("../assets/icons/icons_curve_mod_disjoint.png"),
-            Icon::Join => include_bytes!("../assets/icons/icons_curve_mod_join.png"),
-            Icon::Hatch => include_bytes!("../assets/icons/icons_curve_tool_hatch.png"),
-            Icon::Undo => include_bytes!("../assets/icons/icons_curve_ui_undo.png"),
-            Icon::Redo => include_bytes!("../assets/icons/icons_curve_ui_redo.png"),
-            Icon::Eye => include_bytes!("../assets/icons/icons_curve_ui_show.png"),
-            Icon::EyeOff => include_bytes!("../assets/icons/icons_curve_ui_hide.png"),
-            Icon::ZoomIn => include_bytes!("../assets/icons/icons_curve_ui_zoom_in.png"),
-            Icon::ZoomOut => include_bytes!("../assets/icons/icons_curve_ui_zoom_out.png"),
-            Icon::ZoomFit => include_bytes!("../assets/icons/icons_curve_ui_zoom_extents.png"),
-            Icon::Pan => include_bytes!("../assets/icons/icons_curve_ui_pan.png"),
-            Icon::AddLayer => include_bytes!("../assets/icons/icons_curve_ui_add_layer.png"),
-            Icon::Delete => include_bytes!("../assets/icons/icons_curve_ui_delete.png"),
-            Icon::Plus => include_bytes!("../assets/icons/icons_curve_ui_plus.png"),
-            Icon::Minus => include_bytes!("../assets/icons/icons_curve_ui_minus.png"),
-            Icon::Dimension => include_bytes!("../assets/icons/icons_curve_tool_dimension.png"),
-            Icon::DimAngle => include_bytes!("../assets/icons/icons_curve_tool_dim_angle.png"),
-            Icon::DimRadius => include_bytes!("../assets/icons/icons_curve_tool_dim_radius.png"),
+            Icon::Rectangle => include_bytes!("../assets/icons/icons_tool_rectangle.png"),
+            Icon::Polygon => include_bytes!("../assets/icons/icons_tool_polygon.png"),
+            Icon::Spline => include_bytes!("../assets/icons/icons_tool_spline.png"),
+            Icon::Polyline => include_bytes!("../assets/icons/icons_tool_polyline.png"),
+            Icon::Text => include_bytes!("../assets/icons/icons_tool_text.png"),
+            Icon::Move => include_bytes!("../assets/icons/icons_mod_move.png"),
+            Icon::Copy => include_bytes!("../assets/icons/icons_mod_copy.png"),
+            Icon::Rotate => include_bytes!("../assets/icons/icons_mod_rotate.png"),
+            Icon::Scale => include_bytes!("../assets/icons/icons_mod_scale.png"),
+            Icon::Mirror => include_bytes!("../assets/icons/icons_mod_mirror.png"),
+            Icon::Offset => include_bytes!("../assets/icons/icons_mod_offset.png"),
+            Icon::Trim => include_bytes!("../assets/icons/icons_mod_trim.png"),
+            Icon::Extend => include_bytes!("../assets/icons/icons_mod_extend.png"),
+            Icon::Fillet => include_bytes!("../assets/icons/icons_mod_fillet.png"),
+            Icon::Chamfer => include_bytes!("../assets/icons/icons_mod_chamfer.png"),
+            Icon::Blend => include_bytes!("../assets/icons/icons_tool_blend_curve.png"),
+            Icon::Stretch => include_bytes!("../assets/icons/icons_mod_stretch.png"),
+            Icon::Explode => include_bytes!("../assets/icons/icons_mod_disjoint.png"),
+            Icon::Join => include_bytes!("../assets/icons/icons_mod_join.png"),
+            Icon::Hatch => include_bytes!("../assets/icons/icons_tool_hatch.png"),
+            Icon::Undo => include_bytes!("../assets/icons/icons_ui_undo.png"),
+            Icon::Redo => include_bytes!("../assets/icons/icons_ui_redo.png"),
+            Icon::Eye => include_bytes!("../assets/icons/icons_ui_show.png"),
+            Icon::EyeOff => include_bytes!("../assets/icons/icons_ui_hide.png"),
+            Icon::ZoomIn => include_bytes!("../assets/icons/icons_ui_zoom_in.png"),
+            Icon::ZoomOut => include_bytes!("../assets/icons/icons_ui_zoom_out.png"),
+            Icon::ZoomFit => include_bytes!("../assets/icons/icons_ui_zoom_extents.png"),
+            Icon::Pan => include_bytes!("../assets/icons/icons_ui_pan.png"),
+            Icon::AddLayer => include_bytes!("../assets/icons/icons_ui_add_layer.png"),
+            Icon::Delete => include_bytes!("../assets/icons/icons_ui_delete.png"),
+            Icon::Plus => include_bytes!("../assets/icons/icons_ui_plus.png"),
+            Icon::Minus => include_bytes!("../assets/icons/icons_ui_minus.png"),
+            Icon::Dimension => include_bytes!("../assets/icons/icons_tool_dimension.png"),
+            Icon::DimAngle => include_bytes!("../assets/icons/icons_tool_dim_angle.png"),
+            Icon::DimRadius => include_bytes!("../assets/icons/icons_tool_dim_radius.png"),
             Icon::DimDiameter => {
-                include_bytes!("../assets/icons/icons_curve_tool_dim_diameter.png")
+                include_bytes!("../assets/icons/icons_tool_dim_diameter.png")
             }
             Icon::ConHorizontal => {
-                include_bytes!("../assets/icons/icons_curve_constrait_horizontal.png")
+                include_bytes!("../assets/icons/icons_constraint_horizontal.png")
             }
             Icon::ConVertical => {
-                include_bytes!("../assets/icons/icons_curve_constrait_vertical.png")
+                include_bytes!("../assets/icons/icons_constraint_vertical.png")
             }
             Icon::ConParallel => {
-                include_bytes!("../assets/icons/icons_curve_constrait_parallel.png")
+                include_bytes!("../assets/icons/icons_constraint_parallel.png")
             }
             Icon::ConPerpendicular => {
-                include_bytes!("../assets/icons/icons_curve_constrait_perpendicular.png")
+                include_bytes!("../assets/icons/icons_constraint_perpendicular.png")
             }
-            Icon::ConEqual => include_bytes!("../assets/icons/icons_curve_constrait_equal.png"),
+            Icon::ConEqual => include_bytes!("../assets/icons/icons_constraint_equal.png"),
             Icon::ConTangent => {
-                include_bytes!("../assets/icons/icons_curve_constrait_tangent.png")
+                include_bytes!("../assets/icons/icons_constraint_tangent.png")
             }
             Icon::ConRadiusLock => {
-                include_bytes!("../assets/icons/icons_curve_constrait_radius_lock.png")
+                include_bytes!("../assets/icons/icons_constraint_radius_lock.png")
             }
             Icon::ConLengthLock => {
-                include_bytes!("../assets/icons/icons_curve_constrait_length_lock.png")
+                include_bytes!("../assets/icons/icons_constraint_length_lock.png")
             }
             Icon::ConCoincident => {
-                include_bytes!("../assets/icons/icons_curve_constrait_coincident.png")
+                include_bytes!("../assets/icons/icons_constraint_coincident.png")
             }
             Icon::ConRemove => {
-                include_bytes!("../assets/icons/icons_curve_constrait_remove.png")
+                include_bytes!("../assets/icons/icons_constraint_remove.png")
             }
-            Icon::ConstAuto => include_bytes!("../assets/icons/icons_curve_ui_const_auto.png"),
+            Icon::ConstAuto => include_bytes!("../assets/icons/icons_ui_const_auto.png"),
             Icon::ConstShowHide => {
-                include_bytes!("../assets/icons/icons_curve_ui_const_show-hide.png")
+                include_bytes!("../assets/icons/icons_ui_const_show-hide.png")
             }
-            Icon::CurvComb => include_bytes!("../assets/icons/icons_curve_ui_curv_comb.png"),
+            Icon::CurvComb => include_bytes!("../assets/icons/icons_ui_curv_comb.png"),
         }
     }
 }
