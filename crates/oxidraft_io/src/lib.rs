@@ -18,7 +18,10 @@ use oxidraft_geometry::{Curve, CurveSegment, Point2d, tessellate_curve};
 /// Every save of user work should go through this, whatever the format.
 pub fn write_atomic(path: &std::path::Path, bytes: &[u8]) -> std::io::Result<()> {
     use std::io::Write as _;
-    let mut tmp_name = path.file_name().map(|n| n.to_os_string()).unwrap_or_default();
+    let mut tmp_name = path
+        .file_name()
+        .map(|n| n.to_os_string())
+        .unwrap_or_default();
     tmp_name.push(".tmp");
     let tmp = path.with_file_name(tmp_name);
     {

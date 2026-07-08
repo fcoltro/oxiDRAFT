@@ -111,10 +111,18 @@ impl EntityKind {
                     && holes.iter().flatten().all(|c| c.is_finite())
             }
             EntityKind::Dimension {
-                p1, p2, line, height, ..
+                p1,
+                p2,
+                line,
+                height,
+                ..
             }
             | EntityKind::OrthoDim {
-                p1, p2, line, height, ..
+                p1,
+                p2,
+                line,
+                height,
+                ..
             } => pts_finite(&[p1, p2, line]) && height.is_finite(),
             EntityKind::AngularDim {
                 center,

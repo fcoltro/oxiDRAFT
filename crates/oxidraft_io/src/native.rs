@@ -702,9 +702,8 @@ fn parse_segment(line: &str) -> Option<Curve> {
             let rot = next_parse(&mut tok, 0.0);
             let start = next_parse(&mut tok, 0.0);
             let end = next_parse(&mut tok, TAU);
-            (major > 0.0 && minor > 0.0).then(|| {
-                Curve::Ellipse(EllipticalArc::new(c, major, minor, rot, start, end))
-            })
+            (major > 0.0 && minor > 0.0)
+                .then(|| Curve::Ellipse(EllipticalArc::new(c, major, minor, rot, start, end)))
         }
         _ => None,
     }

@@ -2053,17 +2053,20 @@ impl AppState {
             .to_ascii_lowercase();
         // Every format saves atomically: a crash or full disk mid-write must
         // never truncate the existing good file on disk.
-        let result =
-            match ext.as_str() {
-                "dxf" => oxidraft_io::write_atomic(&path, oxidraft_io::export_dxf(&save_doc).as_bytes())
-                    .map_err(|e| e.to_string()),
-                "svg" => oxidraft_io::write_atomic(&path, oxidraft_io::export_svg(&save_doc).as_bytes())
-                    .map_err(|e| e.to_string()),
-                "dwg" => Err("oxiDRAFT can't write DWG (proprietary binary). \
+        let result = match ext.as_str() {
+            "dxf" => {
+                oxidraft_io::write_atomic(&path, oxidraft_io::export_dxf(&save_doc).as_bytes())
+                    .map_err(|e| e.to_string())
+            }
+            "svg" => {
+                oxidraft_io::write_atomic(&path, oxidraft_io::export_svg(&save_doc).as_bytes())
+                    .map_err(|e| e.to_string())
+            }
+            "dwg" => Err("oxiDRAFT can't write DWG (proprietary binary). \
                           Save as DXF for CAD interchange."
-                    .to_string()),
-                _ => oxidraft_io::save_native(&save_doc, &path).map_err(|e| e.to_string()),
-            };
+                .to_string()),
+            _ => oxidraft_io::save_native(&save_doc, &path).map_err(|e| e.to_string()),
+        };
         match result {
             Ok(()) => {
                 self.current_file_path = Some(path);

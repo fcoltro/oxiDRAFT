@@ -218,10 +218,7 @@ mod tests {
         v.zoom_at(1.0, 1.0, 0.0);
         v.pan_pixels(f64::INFINITY, 3.0);
         assert!(
-            v.zoom.is_finite()
-                && v.zoom > 0.0
-                && v.center.0.is_finite()
-                && v.center.1.is_finite(),
+            v.zoom.is_finite() && v.zoom > 0.0 && v.center.0.is_finite() && v.center.1.is_finite(),
             "view must ignore hostile input: zoom={} center={:?}",
             v.zoom,
             v.center

@@ -90,7 +90,11 @@ fn unserialized_kinds_do_not_shift_constraint_ordinals_on_save() {
 
     let reloaded = from_o2d(&to_o2d(&doc)).expect("round trip");
     let ids: Vec<_> = reloaded.iter().map(|e| e.id).collect();
-    assert_eq!(ids.len(), 2, "the two lines round-trip; the xline is skipped");
+    assert_eq!(
+        ids.len(),
+        2,
+        "the two lines round-trip; the xline is skipped"
+    );
     assert_eq!(reloaded.constraints.len(), 1);
     let c = &reloaded.constraints[0];
     assert_eq!(

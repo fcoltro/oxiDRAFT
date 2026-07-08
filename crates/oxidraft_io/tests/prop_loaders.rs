@@ -66,7 +66,12 @@ fn seed_doc() -> Document {
             Curve::Line(LineSeg::from_endpoints(p(4.0, 4.0), p(0.0, 4.0))),
             Curve::Line(LineSeg::from_endpoints(p(0.0, 4.0), p(0.0, 0.0))),
         ],
-        holes: vec![vec![Curve::Arc(CircularArc::new(p(2.0, 2.0), 1.0, 0.0, TAU))]],
+        holes: vec![vec![Curve::Arc(CircularArc::new(
+            p(2.0, 2.0),
+            1.0,
+            0.0,
+            TAU,
+        ))]],
         fill: (200, 60, 60),
         pattern: HatchPattern::Lines {
             angle_deg: 45.0,
@@ -116,7 +121,13 @@ const JUNK: &[&str] = &[
 
 /// Applies one structural mutation to a valid file text. Seeds are ASCII, so
 /// byte-index truncation is safe.
-fn mutate(seed: &str, mode: u8, i: prop::sample::Index, j: prop::sample::Index, junk: &str) -> String {
+fn mutate(
+    seed: &str,
+    mode: u8,
+    i: prop::sample::Index,
+    j: prop::sample::Index,
+    junk: &str,
+) -> String {
     let lines: Vec<&str> = seed.lines().collect();
     match mode % 5 {
         0 => seed[..i.index(seed.len() + 1).min(seed.len())].to_string(),

@@ -137,10 +137,17 @@ mod tests {
 
     #[test]
     fn positive_sweep_matches_old_loop_semantics() {
-        assert!((positive_sweep(0.0) - TAU).abs() < 1e-12, "zero sweep is a full turn");
+        assert!(
+            (positive_sweep(0.0) - TAU).abs() < 1e-12,
+            "zero sweep is a full turn"
+        );
         assert!((positive_sweep(-TAU) - TAU).abs() < 1e-12);
         assert!((positive_sweep(-PI) - PI).abs() < 1e-12);
-        assert_eq!(positive_sweep(3.0 * TAU), 3.0 * TAU, "positive sweeps pass through");
+        assert_eq!(
+            positive_sweep(3.0 * TAU),
+            3.0 * TAU,
+            "positive sweeps pass through"
+        );
         assert_eq!(positive_sweep(0.5), 0.5);
     }
 
