@@ -2662,6 +2662,13 @@ pub(super) fn constraint_bar(ctx: &Context, app: &mut AppState, canvas_rect: egu
                         ) {
                             cmd = Some(Command::ConstrainDistance(None));
                         }
+                        if con_glyph_button(
+                            ui,
+                            "Angle (ANGCON) — hold the angle between two lines",
+                            Icon::ConAngle,
+                        ) {
+                            cmd = Some(Command::ConstrainAngle(None));
+                        }
                         bar_divider(ui);
                         if con_glyph_button(
                             ui,

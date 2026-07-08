@@ -1581,6 +1581,7 @@ impl AppState {
             Command::Constrain(kind) => self.constrain_selection(kind),
             Command::ConstrainRadius(value) => self.constrain_radius_selection(value),
             Command::ConstrainDistance(value) => self.constrain_distance_selection(value),
+            Command::ConstrainAngle(value) => self.constrain_angle_selection(value),
             Command::Unconstrain => self.unconstrain_selection(),
             Command::Hatch => {
                 if self.selection.is_empty() {
@@ -1748,6 +1749,21 @@ impl AppState {
     pub fn constrain_distance_selection(&mut self, value: Option<f64>) {
         let mut doc = self.document.clone();
         match oxidraft_cad::constrain_distance(&mut doc, &self.selection, value) {
+            Ok(msg) => {
+                self.history.snapshot(&self.document);
+                self.document = doc;
+                self.command_log.push(msg);
+            }
+            Err(e) => self.command_log.push(e),
+        }
+    }
+
+    /// Applies and records a driving angle between the two selected lines;
+    /// `None` locks the current angle. Solving happens on a scratch copy so
+    /// a failed solve leaves the document untouched.
+    pub fn constrain_angle_selection(&mut self, value: Option<f64>) {
+        let mut doc = self.document.clone();
+        match oxidraft_cad::constrain_angle(&mut doc, &self.selection, value) {
             Ok(msg) => {
                 self.history.snapshot(&self.document);
                 self.document = doc;

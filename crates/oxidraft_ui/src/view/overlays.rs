@@ -183,7 +183,7 @@ pub(super) fn badge_model(doc: &Document) -> BadgeModel {
                 push(&mut line_badges, c.a, BadgeGlyph::Vertical, *c);
                 continue;
             }
-            ConstraintKind::Radius | ConstraintKind::Distance => {
+            ConstraintKind::Radius | ConstraintKind::Distance | ConstraintKind::Angle => {
                 if c.val.is_some() {
                     dim_badges.push(*c);
                 }
@@ -277,6 +277,69 @@ fn dim_badge_layout(app: &AppState, c: &SketchConstraint) -> Option<DimBadge> {
                 ],
                 arrows: vec![dim_arrow(ea, d), dim_arrow(eb, -d)],
                 text_rect: dim_label_rect(ea + (eb - ea) * 0.5 + n * 13.0, &label),
+                label,
+            })
+        }
+        (ConstraintKind::Angle, Curve::Line(la)) => {
+            let Curve::Line(lb) = app.document.get(c.b?)?.as_curve()? else {
+                return None;
+            };
+            let a0 = px(la.p0.x, la.p0.y);
+            let a1 = px(la.p1.x, la.p1.y);
+            let b0 = px(lb.p0.x, lb.p0.y);
+            let b1 = px(lb.p1.x, lb.p1.y);
+            if (a1 - a0).length() < 24.0 || (b1 - b0).length() < 24.0 {
+                return None;
+            }
+            // Vertex: intersection of the two infinite lines in screen
+            // space. Near-parallel legs put it far off-screen — no useful
+            // place to dimension.
+            let (r, s) = (a1 - a0, b1 - b0);
+            let denom = r.x * s.y - r.y * s.x;
+            if denom.abs() < 1e-6 {
+                return None;
+            }
+            let t = ((b0.x - a0.x) * s.y - (b0.y - a0.y) * s.x) / denom;
+            let vtx = a0 + r * t;
+            // Each leg's ray points toward its segment's farther endpoint,
+            // so the arc opens into the drawn corner.
+            let ray = |p0: egui::Pos2, p1: egui::Pos2| {
+                let q = if (p1 - vtx).length() >= (p0 - vtx).length() {
+                    p1
+                } else {
+                    p0
+                };
+                (q - vtx).normalized()
+            };
+            let (da, db) = (ray(a0, a1), ray(b0, b1));
+            let ang_a = da.y.atan2(da.x);
+            let mut sweep = db.y.atan2(db.x) - ang_a;
+            if sweep > std::f32::consts::PI {
+                sweep -= std::f32::consts::TAU;
+            }
+            if sweep <= -std::f32::consts::PI {
+                sweep += std::f32::consts::TAU;
+            }
+            let rad = 26.0;
+            let at = |ang: f32| vtx + vec2(ang.cos(), ang.sin()) * rad;
+            let mut lines = vec![[vtx, vtx + da * (rad + 5.0)], [vtx, vtx + db * (rad + 5.0)]];
+            let steps = 16;
+            for i in 0..steps {
+                let u0 = ang_a + sweep * i as f32 / steps as f32;
+                let u1 = ang_a + sweep * (i + 1) as f32 / steps as f32;
+                lines.push([at(u0), at(u1)]);
+            }
+            let tangent = |ang: f32| vec2(-ang.sin(), ang.cos()) * sweep.signum();
+            let ang_b = ang_a + sweep;
+            let mid = ang_a + sweep * 0.5;
+            let label = format!("{:.*}\u{00b0}", style.precision, val);
+            Some(DimBadge {
+                arrows: vec![
+                    dim_arrow(at(ang_a), tangent(ang_a)),
+                    dim_arrow(at(ang_b), -tangent(ang_b)),
+                ],
+                text_rect: dim_label_rect(vtx + vec2(mid.cos(), mid.sin()) * (rad + 15.0), &label),
+                lines,
                 label,
             })
         }
@@ -1726,6 +1789,44 @@ mod badge_tests {
             "valued constraints get dimension annotations, not glyph chips"
         );
         assert_eq!(m.dim_badges.as_slice(), &[SketchConstraint::radius(a, 2.0)]);
+    }
+
+    #[test]
+    fn angle_becomes_an_angular_dimension_badge() {
+        let mut app = AppState::new(800.0, 600.0);
+        app.snap_on = false;
+        let a = app.add_entity(EntityKind::Curve(Curve::Line(LineSeg::from_endpoints(
+            Point2d::from_f64(0.0, 0.0),
+            Point2d::from_f64(6.0, 0.0),
+        ))));
+        let b = app.add_entity(EntityKind::Curve(Curve::Line(LineSeg::from_endpoints(
+            Point2d::from_f64(0.0, 0.0),
+            Point2d::from_f64(4.0, 4.0),
+        ))));
+        app.document
+            .add_constraint(SketchConstraint::angle(a, b, 45.0));
+        let c = app.document.constraints[app.document.constraints.len() - 1];
+        let m = badge_model(&app.document);
+        assert!(m.line_badges.is_empty(), "angle badges as a dimension");
+        assert_eq!(m.dim_badges.as_slice(), &[c]);
+        let dim = dim_badge_layout(&app, &c).expect("lines are large enough on screen");
+        assert!(
+            dim.label.ends_with('\u{00b0}') && dim.label.starts_with("45"),
+            "angular label: {}",
+            dim.label
+        );
+        assert!(
+            dim.lines.len() > 10,
+            "legs plus a swept arc: {} segments",
+            dim.lines.len()
+        );
+        let hit = badge_hit(
+            &app,
+            dim.text_rect.center().x as f64,
+            dim.text_rect.center().y as f64,
+        )
+        .expect("label is clickable");
+        assert_eq!(hit.as_slice(), &[c]);
     }
 
     #[test]

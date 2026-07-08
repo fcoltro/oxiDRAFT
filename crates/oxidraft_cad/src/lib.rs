@@ -9,8 +9,8 @@ pub mod selection;
 pub mod snap;
 
 pub use constrain::{
-    DofSummary, constrain_distance, constrain_lines, constrain_radius, diagnose_conflict,
-    dof_report, resolve_after_edit, resolve_after_transform,
+    DofSummary, constrain_angle, constrain_distance, constrain_lines, constrain_radius,
+    diagnose_conflict, dof_report, resolve_after_edit, resolve_after_transform,
 };
 pub use draw as commands;
 pub use grips::{Grip, GripRole, apply_grip, apply_grip_value, grip_value_label, grips_for};

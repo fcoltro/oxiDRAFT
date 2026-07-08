@@ -14,6 +14,11 @@ pub enum ConstraintKind {
     Radius,
     /// A line entity holding a driving length, stored in `val`.
     Distance,
+    /// Two line entities held at a driving angle. `val` is in degrees,
+    /// normalized to (0, 180] — lines are undirected, so θ and θ+180° are
+    /// the same relation, and 0° is recorded as 180° to survive the
+    /// loader's positive-value check.
+    Angle,
     /// A point entity permanently pinned wherever it currently sits — set
     /// automatically on structural anchors (the origin), never by a user
     /// command, so there's no bar/menu path that creates one.
@@ -32,6 +37,7 @@ impl ConstraintKind {
             ConstraintKind::Tangent => "tangent",
             ConstraintKind::Radius => "radius",
             ConstraintKind::Distance => "length",
+            ConstraintKind::Angle => "angle",
             ConstraintKind::Fixed => "fixed",
         }
     }
@@ -45,13 +51,17 @@ impl ConstraintKind {
                 | ConstraintKind::EqualLength
                 | ConstraintKind::Coincident
                 | ConstraintKind::Tangent
+                | ConstraintKind::Angle
         )
     }
 
-    /// Valued kinds carry a driving number in `val` (a radius, a length);
-    /// their record is corrupt without a positive value.
+    /// Valued kinds carry a driving number in `val` (a radius, a length,
+    /// an angle); their record is corrupt without a positive value.
     pub fn is_valued(&self) -> bool {
-        matches!(self, ConstraintKind::Radius | ConstraintKind::Distance)
+        matches!(
+            self,
+            ConstraintKind::Radius | ConstraintKind::Distance | ConstraintKind::Angle
+        )
     }
 
     pub fn code(&self) -> &'static str {
@@ -65,6 +75,7 @@ impl ConstraintKind {
             ConstraintKind::Tangent => "TAN",
             ConstraintKind::Radius => "RAD",
             ConstraintKind::Distance => "LEN",
+            ConstraintKind::Angle => "ANG",
             ConstraintKind::Fixed => "FIX",
         }
     }
@@ -81,6 +92,7 @@ impl ConstraintKind {
             "TAN" => ConstraintKind::Tangent,
             "RAD" => ConstraintKind::Radius,
             "LEN" => ConstraintKind::Distance,
+            "ANG" => ConstraintKind::Angle,
             _ => return None,
         })
     }
@@ -140,6 +152,18 @@ impl SketchConstraint {
             b: None,
             pts: None,
             val: Some(value),
+        }
+    }
+
+    /// A driving angle between two line entities, in degrees normalized
+    /// to (0, 180] (see [`ConstraintKind::Angle`]).
+    pub fn angle(a: EntityId, b: EntityId, degrees: f64) -> Self {
+        SketchConstraint {
+            kind: ConstraintKind::Angle,
+            a,
+            b: Some(b),
+            pts: None,
+            val: Some(degrees),
         }
     }
 

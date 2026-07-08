@@ -58,6 +58,7 @@ pub enum Icon {
     ConTangent,
     ConRadiusLock,
     ConLengthLock,
+    ConAngle,
     ConCoincident,
     ConRemove,
     ConstAuto,
@@ -147,6 +148,9 @@ impl Icon {
             }
             Icon::ConLengthLock => {
                 include_bytes!("../assets/icons/icons_constraint_length_lock.png")
+            }
+            Icon::ConAngle => {
+                include_bytes!("../assets/icons/icons_constraint_angle.png")
             }
             Icon::ConCoincident => {
                 include_bytes!("../assets/icons/icons_constraint_coincident.png")

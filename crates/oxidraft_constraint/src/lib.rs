@@ -44,6 +44,10 @@ pub enum Constraint {
     Parallel(PointVar, PointVar, PointVar, PointVar),
     /// Segment a→b is perpendicular to segment c→d.
     Perpendicular(PointVar, PointVar, PointVar, PointVar),
+    /// Segment a→b meets segment c→d at the given angle (radians). Lines
+    /// are undirected, so the residual is zero at θ and θ+π alike;
+    /// Parallel (θ=0) and Perpendicular (θ=π/2) are its special cases.
+    Angle(PointVar, PointVar, PointVar, PointVar, f64),
     /// The point is pinned to fixed coordinates.
     Fixed(PointVar, f64, f64),
     /// Point p lies on the infinite line through a and b.
@@ -201,6 +205,21 @@ impl Sketch {
                     let n = ux.hypot(uy).max(1e-12);
                     out.push((ux * vx + uy * vy) / n);
                 }
+                Constraint::Angle(a, b, c2, d, theta) => {
+                    let (ax, ay) = p(a);
+                    let (bx, by) = p(b);
+                    let (cx, cy) = p(c2);
+                    let (dx, dy) = p(d);
+                    let (ux, uy) = (bx - ax, by - ay);
+                    let (vx, vy) = (dx - cx, dy - cy);
+                    let n = ux.hypot(uy).max(1e-12);
+                    // cross·cosθ − dot·sinθ = |u||v|·sin(angle − θ), the
+                    // same normalised-by-one-factor scheme as Parallel and
+                    // Perpendicular above.
+                    let cross = ux * vy - uy * vx;
+                    let dot = ux * vx + uy * vy;
+                    out.push((cross * theta.cos() - dot * theta.sin()) / n);
+                }
                 Constraint::Fixed(a, x, y) => {
                     let (ax, ay) = p(a);
                     out.push(ax - x);
@@ -336,6 +355,22 @@ impl Sketch {
                     let n = floor(&n);
                     let dot = &(&ux * &vx) + &(&uy * &vy);
                     push(ci, &dot / &n);
+                }
+                Constraint::Angle(a, b, c2, d, theta) => {
+                    let (ax, ay) = p(a);
+                    let (bx, by) = p(b);
+                    let (cx, cy) = p(c2);
+                    let (dx, dy) = p(d);
+                    let (ux, uy) = (&bx - &ax, &by - &ay);
+                    let (vx, vy) = (&dx - &cx, &dy - &cy);
+                    let n = dual::hypot(&ux, &uy);
+                    let n = floor(&n);
+                    let cross = &(&ux * &vy) - &(&uy * &vx);
+                    let dot = &(&ux * &vx) + &(&uy * &vy);
+                    let ct = Dual::constant(theta.cos(), nv);
+                    let st = Dual::constant(theta.sin(), nv);
+                    let r = &(&cross * &ct) - &(&dot * &st);
+                    push(ci, &r / &n);
                 }
                 Constraint::Fixed(a, x, y) => {
                     let (ax, ay) = p(a);
@@ -984,6 +1019,33 @@ mod tests {
         );
     }
 
+    #[test]
+    fn angle_constraint_rotates_the_mover_to_the_target() {
+        let mut s = Sketch::new();
+        let a = s.add_point(0.0, 0.0);
+        let b = s.add_point(4.0, 0.0);
+        let c = s.add_point(0.0, 1.0);
+        let d = s.add_point(3.0, 1.4);
+        s.constrain(Constraint::Fixed(a, 0.0, 0.0));
+        s.constrain(Constraint::Fixed(b, 4.0, 0.0));
+        s.constrain(Constraint::Fixed(c, 0.0, 1.0));
+        let theta = 60f64.to_radians();
+        s.constrain(Constraint::Angle(a, b, c, d, theta));
+        let res = s.solve_robust();
+        assert!(res.converged, "residual {}", res.residual);
+        let (cx, cy) = s.point(c);
+        let (dx, dy) = s.point(d);
+        let got = (dy - cy).atan2(dx - cx);
+        // Undirected lines: θ and θ±π are both correct.
+        let diff = (got - theta).rem_euclid(std::f64::consts::PI);
+        let diff = diff.min(std::f64::consts::PI - diff);
+        assert!(
+            diff < 1e-6,
+            "cd settled {}° off the target",
+            diff.to_degrees()
+        );
+    }
+
     /// One of every constraint kind, at non-degenerate values (no zero-length
     /// segments, so the near-zero-denominator floor never engages and can't
     /// mask a transcription error). Cross-checks `residuals_and_jacobian`'s
@@ -1008,6 +1070,7 @@ mod tests {
         s.constrain(Constraint::Distance(a, b, 2.5));
         s.constrain(Constraint::Parallel(a, b, c, d));
         s.constrain(Constraint::Perpendicular(a, b, c, d));
+        s.constrain(Constraint::Angle(a, b, c, d, 0.6));
         s.constrain(Constraint::Fixed(a, 0.3, 0.2));
         s.constrain(Constraint::PointOnLine(q, a, b));
         s.constrain(Constraint::EqualLength(a, b, c, d));

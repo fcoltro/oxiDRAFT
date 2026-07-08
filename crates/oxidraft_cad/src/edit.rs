@@ -106,7 +106,10 @@ fn remap_constraints_to_pieces(
                     }
                 }
             }
-            ConstraintKind::Parallel | ConstraintKind::Perpendicular | ConstraintKind::Tangent => {
+            ConstraintKind::Parallel
+            | ConstraintKind::Perpendicular
+            | ConstraintKind::Tangent
+            | ConstraintKind::Angle => {
                 let Some(other) = (if c.a == old { c.b } else { Some(c.a) }) else {
                     continue;
                 };
@@ -114,11 +117,13 @@ fn remap_constraints_to_pieces(
                     if piece == other {
                         continue;
                     }
-                    let rec = if c.a == old {
+                    let mut rec = if c.a == old {
                         SketchConstraint::pair(c.kind, piece, other)
                     } else {
                         SketchConstraint::pair(c.kind, other, piece)
                     };
+                    // Angle keeps its driving value; the others carry none.
+                    rec.val = c.val;
                     doc.add_constraint(rec);
                 }
             }

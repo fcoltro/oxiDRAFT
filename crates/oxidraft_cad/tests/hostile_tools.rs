@@ -428,6 +428,15 @@ fn constraints_survive_degenerate_selections() {
         assert!(constrain::constrain_radius(&mut doc, &ids, Some(v)).is_err());
         assert!(constrain::constrain_distance(&mut doc, &ids, Some(v)).is_err());
     }
+    // Angle: NaN/inf decline; degenerate legs and bogus ids must not panic.
+    for v in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
+        assert!(constrain::constrain_angle(&mut doc, &[normal, zero_a], Some(v)).is_err());
+    }
+    let _ = constrain::constrain_angle(&mut doc, &[normal, zero_a], Some(45.0));
+    let _ = constrain::constrain_angle(&mut doc, &[normal, zero_a], None);
+    let _ = constrain::constrain_angle(&mut doc, &[zero_a, zero_a], Some(45.0));
+    let _ = constrain::constrain_angle(&mut doc, &[bogus_id(), normal], None);
+    assert_doc_finite(&doc, "angle constraints over degenerate entities");
     // Tangent between a line and a degenerate circle.
     let tiny = ids[3];
     let _ = constrain::constrain_lines(&mut doc, &[normal, tiny], ConstraintKind::Tangent);

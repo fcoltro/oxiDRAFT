@@ -100,6 +100,7 @@ pub fn constrain_lines(
         ConstraintKind::Tangent => constrain_tangent(doc, selection),
         ConstraintKind::Radius => constrain_radius(doc, selection, None),
         ConstraintKind::Distance => constrain_distance(doc, selection, None),
+        ConstraintKind::Angle => constrain_angle(doc, selection, None),
         ConstraintKind::Horizontal | ConstraintKind::Vertical => {
             if lines.is_empty() {
                 return Err(format!("Select at least one line to make {}", kind.label()));
@@ -547,6 +548,121 @@ pub fn constrain_distance(
     Ok(format!("Constrained the length of {count} line(s)"))
 }
 
+/// Holds two lines at a driving angle (degrees), recorded so later edits
+/// re-satisfy it. The first-selected line is the fixed reference; the
+/// second rotates (length kept) to meet the target. `value: None` locks
+/// the current angle in place. Lines are undirected, so the recorded
+/// angle lives in (0, 180].
+pub fn constrain_angle(
+    doc: &mut Document,
+    selection: &[EntityId],
+    value: Option<f64>,
+) -> Result<String, String> {
+    let lines: Vec<(EntityId, LineSeg)> = selection
+        .iter()
+        .filter_map(|&id| line_of(doc, id).map(|l| (id, l)))
+        .collect();
+    if lines.len() != 2 {
+        return Err(format!(
+            "Select exactly two lines to constrain their angle (got {})",
+            lines.len()
+        ));
+    }
+    if let Some(v) = value
+        && !v.is_finite()
+    {
+        return Err("Angle must be a finite number of degrees".into());
+    }
+    let (ref_id, ref_line) = lines[0].clone();
+    let (mov_id, mov_line) = lines[1].clone();
+    if ref_id == mov_id {
+        return Err("Select two different lines to constrain their angle".into());
+    }
+    let dir = |l: &LineSeg| (l.p1.y - l.p0.y).atan2(l.p1.x - l.p0.x);
+    let target = normalize_angle_deg(match value {
+        Some(v) => v,
+        None => (dir(&mov_line) - dir(&ref_line)).to_degrees(),
+    });
+
+    // Record (or retarget) first and validate against the FULL connected
+    // component, like the other pair kinds; restore the previous record on
+    // failure — the relation may already have existed with another value.
+    let candidate = SketchConstraint::angle(ref_id, mov_id, target);
+    let prev = doc
+        .constraints
+        .iter()
+        .find(|c| c.same_relation(&candidate))
+        .copied();
+    if doc.add_constraint(candidate) {
+        let CompSketch {
+            mut s,
+            vars,
+            constraint_doc_idx,
+        } = component_sketch(doc, &[ref_id, mov_id]);
+        anchor_line_lengths(&mut s, doc, &vars);
+        let initial = s.snapshot();
+        if !s.solve_robust().converged {
+            let touched = doc
+                .constraints
+                .iter()
+                .position(|c| c.same_relation(&candidate));
+            let culprits: Vec<usize> = s
+                .diagnose_conflict(&initial)
+                .culprits
+                .into_iter()
+                .filter_map(|i| constraint_doc_idx.get(i).copied())
+                .collect();
+            let conflict = describe_conflict(doc, &culprits, touched);
+            match prev {
+                Some(p) => {
+                    doc.add_constraint(p);
+                }
+                None => doc.constraints.retain(|c| !c.same_relation(&candidate)),
+            }
+            return Err(format!(
+                "Could not hold the lines at {target}° against their existing constraints{conflict}"
+            ));
+        }
+    }
+
+    let mut s = Sketch::new();
+    let a0 = s.add_point(ref_line.p0.x, ref_line.p0.y);
+    let a1 = s.add_point(ref_line.p1.x, ref_line.p1.y);
+    let b0 = s.add_point(mov_line.p0.x, mov_line.p0.y);
+    let b1 = s.add_point(mov_line.p1.x, mov_line.p1.y);
+    s.constrain(Constraint::Fixed(a0, ref_line.p0.x, ref_line.p0.y));
+    s.constrain(Constraint::Fixed(a1, ref_line.p1.x, ref_line.p1.y));
+    // The mover keeps its length so it rotates rather than collapsing.
+    s.constrain(Constraint::Distance(b0, b1, len(&mov_line)));
+    s.constrain(Constraint::Angle(a0, a1, b0, b1, target.to_radians()));
+    let mut res = s.solve();
+    if !res.converged {
+        s.set_point(a0, ref_line.p0.x, ref_line.p0.y);
+        s.set_point(a1, ref_line.p1.x, ref_line.p1.y);
+        perturb_line(&mut s, b0, b1, &mov_line);
+        res = s.solve();
+    }
+    if !res.converged {
+        return Err(format!(
+            "Could not hold the lines at {target}° (residual {:.2e})",
+            res.residual
+        ));
+    }
+    write_line(doc, mov_id, s.point(b0), s.point(b1));
+    // Same as the other pair solves: linked neighbours of the mover are
+    // still at their pre-solve positions — drag them back into place.
+    resolve_after_transform(doc, &[mov_id]);
+    Ok(format!("Held the angle between the lines at {target}°"))
+}
+
+/// Folds a degree value into (0, 180]: lines are undirected, so θ and
+/// θ+180° name the same relation, and 0° is stored as 180° so the record
+/// keeps a positive driving value (the loader rejects non-positive ones).
+fn normalize_angle_deg(deg: f64) -> f64 {
+    let a = deg.rem_euclid(180.0);
+    if a == 0.0 { 180.0 } else { a }
+}
+
 /// Solver variables for one entity: a line's two endpoints, or an arc's
 /// center + radius (+ endpoint points kept on the rim for partial arcs).
 enum ShapeVars {
@@ -774,6 +890,15 @@ fn component_sketch(doc: &Document, seeds: &[EntityId]) -> CompSketch {
                     continue;
                 };
                 s.constrain(Constraint::Distance(a0, a1, v));
+                constraint_doc_idx.push(doc_idx);
+            }
+            ConstraintKind::Angle => {
+                let (Some((a0, a1)), Some((b0, b1)), Some(v)) =
+                    (sa.line(), sb.and_then(|s| s.line()), c.val)
+                else {
+                    continue;
+                };
+                s.constrain(Constraint::Angle(a0, a1, b0, b1, v.to_radians()));
                 constraint_doc_idx.push(doc_idx);
             }
             ConstraintKind::Tangent => {
@@ -1009,6 +1134,95 @@ mod tests {
 
     fn set_line(doc: &mut Document, id: EntityId, x0: f64, y0: f64, x1: f64, y1: f64) {
         write_line(doc, id, (x0, y0), (x1, y1));
+    }
+
+    fn line_angle_deg(l: &LineSeg) -> f64 {
+        (l.p1.y - l.p0.y).atan2(l.p1.x - l.p0.x).to_degrees()
+    }
+
+    #[test]
+    fn angle_rotates_only_the_second_line_to_the_target() {
+        let mut doc = Document::new();
+        let a = add_line(&mut doc, 0.0, 0.0, 5.0, 0.0);
+        let b = add_line(&mut doc, 2.0, 1.0, 6.0, 1.5);
+        constrain_angle(&mut doc, &[a, b], Some(60.0)).expect("must solve");
+        let la = line_of(&doc, a).unwrap();
+        let lb = line_of(&doc, b).unwrap();
+        assert!(
+            (la.p0.x, la.p0.y, la.p1.x, la.p1.y) == (0.0, 0.0, 5.0, 0.0),
+            "the first pick is the fixed reference: {la:?}"
+        );
+        let diff = (line_angle_deg(&lb) - 60.0).rem_euclid(180.0);
+        assert!(
+            diff.min(180.0 - diff) < 1e-6,
+            "mover settled at {}°",
+            line_angle_deg(&lb)
+        );
+        assert!(
+            (len(&lb) - 4.0f64.hypot(0.5)).abs() < 1e-7,
+            "mover length kept"
+        );
+        assert_eq!(doc.constraints.len(), 1);
+        assert_eq!(doc.constraints[0].kind, ConstraintKind::Angle);
+        assert_eq!(doc.constraints[0].val, Some(60.0));
+
+        // Re-constraining the same pair retargets the record in place.
+        constrain_angle(&mut doc, &[a, b], Some(30.0)).expect("must solve");
+        assert_eq!(doc.constraints.len(), 1);
+        assert_eq!(doc.constraints[0].val, Some(30.0));
+        let lb = line_of(&doc, b).unwrap();
+        let diff = (line_angle_deg(&lb) - 30.0).rem_euclid(180.0);
+        assert!(diff.min(180.0 - diff) < 1e-6);
+    }
+
+    #[test]
+    fn angle_none_locks_the_current_angle() {
+        let mut doc = Document::new();
+        let a = add_line(&mut doc, 0.0, 0.0, 4.0, 0.0);
+        let b = add_line(&mut doc, 0.0, 0.0, 3.0, 3.0);
+        let before = line_of(&doc, b).unwrap();
+        constrain_angle(&mut doc, &[a, b], None).expect("must solve");
+        let c = doc.constraints[0];
+        assert_eq!(c.kind, ConstraintKind::Angle);
+        assert!((c.val.unwrap() - 45.0).abs() < 1e-9, "locked {:?}", c.val);
+        let after = line_of(&doc, b).unwrap();
+        assert!(
+            after.p0.dist_f64(&before.p0) < 1e-7 && after.p1.dist_f64(&before.p1) < 1e-7,
+            "locking the current angle must not move the line"
+        );
+        // The record now drives later edits: re-solve after moving the
+        // reference keeps the pair at 45°.
+        set_line(&mut doc, a, 0.0, 0.0, 4.0, 2.0);
+        resolve_after_edit(&mut doc, a, None);
+        let la = line_of(&doc, a).unwrap();
+        let lb = line_of(&doc, b).unwrap();
+        let rel = (line_angle_deg(&lb) - line_angle_deg(&la) - 45.0).rem_euclid(180.0);
+        assert!(
+            rel.min(180.0 - rel) < 1e-5,
+            "relative angle re-solved to {}°",
+            line_angle_deg(&lb) - line_angle_deg(&la)
+        );
+    }
+
+    #[test]
+    fn angle_declines_hostile_values_and_selections() {
+        let mut doc = Document::new();
+        let a = add_line(&mut doc, 0.0, 0.0, 4.0, 0.0);
+        let b = add_line(&mut doc, 0.0, 1.0, 4.0, 2.0);
+        assert!(constrain_angle(&mut doc, &[a, b], Some(f64::NAN)).is_err());
+        assert!(constrain_angle(&mut doc, &[a, b], Some(f64::INFINITY)).is_err());
+        assert!(constrain_angle(&mut doc, &[a], Some(45.0)).is_err());
+        assert!(constrain_angle(&mut doc, &[a, a], Some(45.0)).is_err());
+        assert!(constrain_angle(&mut doc, &[], None).is_err());
+        assert!(
+            doc.constraints.is_empty(),
+            "declined commands record nothing"
+        );
+        // 0° and negative degrees are legal picks, folded into (0, 180].
+        constrain_angle(&mut doc, &[a, b], Some(0.0)).expect("0° is parallel");
+        assert_eq!(doc.constraints[0].val, Some(180.0));
+        constrain_angle(&mut doc, &[a, b], Some(-45.0)).expect("negative folds");
+        assert_eq!(doc.constraints[0].val, Some(135.0));
     }
 
     #[test]

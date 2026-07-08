@@ -68,7 +68,16 @@ pub fn to_string(doc: &Document) -> String {
             }
             (Some(b), None) => {
                 let Some(&ib) = index.get(&b) else { continue };
-                let _ = writeln!(s, "C {} {} {}", c.kind.code(), ia, ib);
+                // Valued pair kinds (Angle) append their value; the loader
+                // reads the pair token first, then an optional value.
+                match c.val {
+                    Some(v) => {
+                        let _ = writeln!(s, "C {} {} {} {}", c.kind.code(), ia, ib, v);
+                    }
+                    None => {
+                        let _ = writeln!(s, "C {} {} {}", c.kind.code(), ia, ib);
+                    }
+                }
             }
             (None, _) => {
                 // Valued single kinds (Radius, Distance) append their value.
@@ -1050,6 +1059,29 @@ mod tests {
         assert_eq!(c.val, Some(4.0));
         let ids: Vec<_> = doc2.iter().map(|e| e.id).collect();
         assert_eq!((c.a, c.b), (ids[0], None));
+    }
+
+    #[test]
+    fn roundtrip_angle_keeps_the_driving_value_and_both_lines() {
+        let mut doc = Document::new();
+        let a = doc.add(EntityKind::Curve(Curve::Line(LineSeg::from_endpoints(
+            pt_i(0, 0),
+            pt_i(4, 0),
+        ))));
+        let b = doc.add(EntityKind::Curve(Curve::Line(LineSeg::from_endpoints(
+            pt_i(0, 1),
+            pt_i(3, 4),
+        ))));
+        doc.add_constraint(SketchConstraint::angle(a, b, 72.5));
+
+        let doc2 = from_string(&to_string(&doc)).unwrap();
+        assert_eq!(doc2.constraints.len(), 1);
+        let c = doc2.constraints[0];
+        let ids: Vec<_> = doc2.iter().map(|e| e.id).collect();
+        assert_eq!(
+            (c.kind, c.a, c.b, c.val),
+            (ConstraintKind::Angle, ids[0], Some(ids[1]), Some(72.5))
+        );
     }
 
     #[test]

@@ -18,6 +18,9 @@ pub enum Command {
     ConstrainRadius(Option<f64>),
     /// Drives the selected lines' length; `None` locks the current length.
     ConstrainDistance(Option<f64>),
+    /// Drives the angle between two selected lines (degrees); `None` locks
+    /// the current angle.
+    ConstrainAngle(Option<f64>),
     Unconstrain,
     LayerSet(String),
     LayerNew(String),
@@ -251,6 +254,11 @@ pub fn parse_command(input: &str) -> Command {
         "LENCON" | "GCLEN" | "GCLENGTH" => {
             Command::ConstrainDistance(rest.first().and_then(|v| parse_finite_f64(v)))
         }
+        // A bare ANGCON locks the current angle between the two selected
+        // lines; ANGCON <degrees> drives it.
+        "ANGCON" | "GCANG" | "GCANGLE" => {
+            Command::ConstrainAngle(rest.first().and_then(|v| parse_finite_f64(v)))
+        }
         "UNCONSTRAIN" | "UNCON" => Command::Unconstrain,
         "ERASE" | "E" | "DELETE" => Command::Erase,
         "DISJOINT" | "EXPLODE" | "X" => Command::Explode,
@@ -462,6 +470,14 @@ mod tests {
         assert!(matches!(
             parse_command("lencon"),
             Command::ConstrainDistance(None)
+        ));
+        assert!(matches!(
+            parse_command("ANGCON 33.5"),
+            Command::ConstrainAngle(Some(v)) if v == 33.5
+        ));
+        assert!(matches!(
+            parse_command("angcon"),
+            Command::ConstrainAngle(None)
         ));
         assert!(matches!(
             parse_command("tancon"),
