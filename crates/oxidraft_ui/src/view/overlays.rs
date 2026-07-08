@@ -292,14 +292,25 @@ fn dim_badge_layout(app: &AppState, c: &SketchConstraint) -> Option<DimBadge> {
                 return None;
             }
             // Vertex: intersection of the two infinite lines in screen
-            // space. Near-parallel legs put it far off-screen — no useful
-            // place to dimension.
+            // space. Near-parallel legs have no usable vertex; fall back to
+            // a label-only badge between the segment midpoints — the value
+            // must stay visible and click-deletable even when there is no
+            // corner to sweep an arc at.
             let (r, s) = (a1 - a0, b1 - b0);
             let denom = r.x * s.y - r.y * s.x;
-            if denom.abs() < 1e-6 {
-                return None;
-            }
             let t = ((b0.x - a0.x) * s.y - (b0.y - a0.y) * s.x) / denom;
+            if denom.abs() < 1e-6 || !t.is_finite() {
+                let mid_a = a0 + (a1 - a0) * 0.5;
+                let mid_b = b0 + (b1 - b0) * 0.5;
+                let center = mid_a + (mid_b - mid_a) * 0.5;
+                let label = format!("{:.*}\u{00b0}", style.precision, val);
+                return Some(DimBadge {
+                    lines: vec![[center, mid_a], [center, mid_b]],
+                    arrows: Vec::new(),
+                    text_rect: dim_label_rect(center, &label),
+                    label,
+                });
+            }
             let vtx = a0 + r * t;
             // Each leg's ray points toward its segment's farther endpoint,
             // so the arc opens into the drawn corner.
@@ -1826,6 +1837,34 @@ mod badge_tests {
             dim.text_rect.center().y as f64,
         )
         .expect("label is clickable");
+        assert_eq!(hit.as_slice(), &[c]);
+    }
+
+    #[test]
+    fn near_parallel_angle_badge_still_renders_and_deletes() {
+        let mut app = AppState::new(800.0, 600.0);
+        app.snap_on = false;
+        let a = app.add_entity(EntityKind::Curve(Curve::Line(LineSeg::from_endpoints(
+            Point2d::from_f64(0.0, 0.0),
+            Point2d::from_f64(6.0, 0.0),
+        ))));
+        let b = app.add_entity(EntityKind::Curve(Curve::Line(LineSeg::from_endpoints(
+            Point2d::from_f64(0.0, 2.0),
+            Point2d::from_f64(6.0, 2.0),
+        ))));
+        app.document
+            .add_constraint(SketchConstraint::angle(a, b, 180.0));
+        let c = app.document.constraints[app.document.constraints.len() - 1];
+        let dim = dim_badge_layout(&app, &c)
+            .expect("parallel legs still get a label-only fallback badge");
+        assert!(dim.arrows.is_empty(), "no arc without a vertex");
+        assert!(dim.label.ends_with('\u{00b0}'));
+        let hit = badge_hit(
+            &app,
+            dim.text_rect.center().x as f64,
+            dim.text_rect.center().y as f64,
+        )
+        .expect("fallback label is clickable");
         assert_eq!(hit.as_slice(), &[c]);
     }
 

@@ -898,6 +898,10 @@ fn component_sketch(doc: &Document, seeds: &[EntityId]) -> CompSketch {
                 else {
                     continue;
                 };
+                // constrain_angle records values already folded, but a
+                // hand-edited file can carry any positive degrees — 1e300°
+                // in radians would shred sin/cos precision in the residual.
+                let v = normalize_angle_deg(v);
                 s.constrain(Constraint::Angle(a0, a1, b0, b1, v.to_radians()));
                 constraint_doc_idx.push(doc_idx);
             }
@@ -1200,6 +1204,25 @@ mod tests {
         assert!(
             rel.min(180.0 - rel) < 1e-5,
             "relative angle re-solved to {}°",
+            line_angle_deg(&lb) - line_angle_deg(&la)
+        );
+    }
+
+    #[test]
+    fn wild_recorded_angle_values_are_folded_at_lowering() {
+        let mut doc = Document::new();
+        let a = add_line(&mut doc, 0.0, 0.0, 4.0, 0.0);
+        let b = add_line(&mut doc, 0.0, 1.0, 4.0, 1.0);
+        // A hand-edited file can carry any positive degrees; 36045° must
+        // lower as 45°, not as 629 radians fed to the residual.
+        doc.add_constraint(SketchConstraint::angle(a, b, 36045.0));
+        assert!(resolve_after_edit(&mut doc, a, None), "must re-solve");
+        let la = line_of(&doc, a).unwrap();
+        let lb = line_of(&doc, b).unwrap();
+        let rel = (line_angle_deg(&lb) - line_angle_deg(&la) - 45.0).rem_euclid(180.0);
+        assert!(
+            rel.min(180.0 - rel) < 1e-5,
+            "relative angle solved to {}°",
             line_angle_deg(&lb) - line_angle_deg(&la)
         );
     }
