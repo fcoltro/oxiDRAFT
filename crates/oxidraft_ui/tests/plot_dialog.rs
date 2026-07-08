@@ -42,3 +42,32 @@ fn setting_the_open_plot_flag_shows_the_plot_window() {
         "Plot dialog should be visible once the open_plot flag is set"
     );
 }
+
+/// A finished plot-window pick sets `reopen_plot`; the next frames must
+/// bring the dialog back in Window mode without any menu interaction.
+#[test]
+fn a_finished_window_pick_reopens_the_plot_dialog() {
+    let ctx = egui::Context::default();
+    let mut app = AppState::new(1200.0, 800.0);
+    let mut ui_state = UiState::default();
+
+    frame(&ctx, &mut app, &mut ui_state);
+    assert!(ctx.memory(|m| m.area_rect(egui::Id::new("Plot"))).is_none());
+
+    // What apply_tool_event leaves behind after the second corner click.
+    app.plot_window = Some((0.0, 0.0, 40.0, 30.0));
+    app.reopen_plot = true;
+    frame(&ctx, &mut app, &mut ui_state);
+    frame(&ctx, &mut app, &mut ui_state);
+
+    assert!(
+        ctx.memory(|m| m.area_rect(egui::Id::new("Plot"))).is_some(),
+        "the dialog must reopen after the canvas pick"
+    );
+    assert!(!app.reopen_plot, "the reopen flag is one-shot");
+    assert_eq!(
+        ctx.data(|d| d.get_temp::<usize>(egui::Id::new("plot_area_mode"))),
+        Some(1),
+        "the dialog reopens in Window mode"
+    );
+}

@@ -34,6 +34,13 @@ pub(super) fn tool_prompt(tool: &Tool) -> String {
                 "Specify opposite corner".into()
             }
         }
+        Tool::PlotWindow { first } => {
+            if first.is_none() {
+                "Specify first corner of plot window".into()
+            } else {
+                "Specify opposite corner of plot window".into()
+            }
+        }
         Tool::Arc3 { pts } => match pts.len() {
             0 => "Specify start point".into(),
             1 => "Specify second point".into(),

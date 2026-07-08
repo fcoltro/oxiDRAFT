@@ -8,7 +8,7 @@ pub use dxf::{export_dxf, import_dxf};
 pub use native::{
     from_string as from_o2d, load as load_native, save as save_native, to_string as to_o2d,
 };
-pub use pdf::{PAPER_PRESETS, PaperSize, export_pdf};
+pub use pdf::{PAPER_PRESETS, PaperSize, PlotWindow, export_pdf, export_pdf_window};
 pub use svg::{export_svg, import_svg};
 
 use oxidraft_geometry::{Curve, CurveSegment, Point2d, tessellate_curve};

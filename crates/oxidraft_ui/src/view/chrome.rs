@@ -297,8 +297,17 @@ const PLOT_PRESET_ID: &str = "plot_paper_preset";
 const PLOT_CUSTOM_W_ID: &str = "plot_custom_w_mm";
 const PLOT_CUSTOM_H_ID: &str = "plot_custom_h_mm";
 const PLOT_LANDSCAPE_ID: &str = "plot_landscape";
+/// Plot area mode: 0 = drawing extents, 1 = picked window.
+const PLOT_AREA_ID: &str = "plot_area_mode";
 
 pub(super) fn plot_dialog(ctx: &Context, app: &mut AppState) {
+    // A finished canvas pick reopens the dialog in Window mode.
+    if std::mem::take(&mut app.reopen_plot) {
+        ctx.data_mut(|d| {
+            d.insert_temp(egui::Id::new(PLOT_OPEN_ID), true);
+            d.insert_temp(egui::Id::new(PLOT_AREA_ID), 1usize);
+        });
+    }
     if !ctx.data(|d| {
         d.get_temp::<bool>(egui::Id::new(PLOT_OPEN_ID))
             .unwrap_or(false)
@@ -310,7 +319,9 @@ pub(super) fn plot_dialog(ctx: &Context, app: &mut AppState) {
     let custom_w_id = egui::Id::new(PLOT_CUSTOM_W_ID);
     let custom_h_id = egui::Id::new(PLOT_CUSTOM_H_ID);
     let landscape_id = egui::Id::new(PLOT_LANDSCAPE_ID);
+    let area_id = egui::Id::new(PLOT_AREA_ID);
 
+    let mut area = ctx.data(|d| d.get_temp::<usize>(area_id)).unwrap_or(0);
     let mut preset = ctx.data(|d| d.get_temp::<usize>(preset_id)).unwrap_or(0);
     let mut custom_w = ctx
         .data(|d| d.get_temp::<f64>(custom_w_id))
@@ -325,6 +336,7 @@ pub(super) fn plot_dialog(ctx: &Context, app: &mut AppState) {
 
     let mut open = true;
     let mut close_after_plot = false;
+    let mut start_pick = false;
     egui::Window::new("Plot")
         .collapsible(false)
         .resizable(false)
@@ -338,6 +350,39 @@ pub(super) fn plot_dialog(ctx: &Context, app: &mut AppState) {
                     .color(crate::theme::TEXT_DIM),
             );
             ui.add_space(8.0);
+
+            setting_row(ui, "Plot area", |ui| {
+                ui.selectable_value(&mut area, 0, "Extents");
+                ui.selectable_value(&mut area, 1, "Window");
+            });
+            if area == 1 {
+                setting_row(ui, "Window", |ui| {
+                    match app.plot_window {
+                        Some((x0, y0, x1, y1)) => {
+                            ui.label(
+                                egui::RichText::new(format!("{:.1} × {:.1}", x1 - x0, y1 - y0))
+                                    .size(11.5),
+                            );
+                        }
+                        None => {
+                            ui.label(
+                                egui::RichText::new("not set")
+                                    .size(11.5)
+                                    .color(crate::theme::TEXT_DIM),
+                            );
+                        }
+                    }
+                    if ui
+                        .button("Pick ⌖")
+                        .on_hover_text("Pick two corners on the canvas; the dialog reopens after")
+                        .clicked()
+                    {
+                        app.tool = crate::tools::Tool::PlotWindow { first: None };
+                        app.selection.clear();
+                        start_pick = true;
+                    }
+                });
+            }
 
             setting_row(ui, "Paper size", |ui| {
                 let selected_text = if is_custom {
@@ -384,7 +429,12 @@ pub(super) fn plot_dialog(ctx: &Context, app: &mut AppState) {
             });
 
             ui.add_space(10.0);
-            if ui.button("Plot to PDF…").clicked() {
+            let ready = area == 0 || app.plot_window.is_some();
+            let plot_clicked = ui
+                .add_enabled(ready, egui::Button::new("Plot to PDF…"))
+                .on_disabled_hover_text("Pick a plot window first")
+                .clicked();
+            if plot_clicked {
                 let paper = if is_custom {
                     oxidraft_io::PaperSize::new(custom_w, custom_h)
                 } else {
@@ -395,8 +445,14 @@ pub(super) fn plot_dialog(ctx: &Context, app: &mut AppState) {
                 } else {
                     paper.portrait()
                 };
+                let window = (area == 1)
+                    .then(|| {
+                        app.plot_window
+                            .map(|(x0, y0, x1, y1)| oxidraft_io::PlotWindow { x0, y0, x1, y1 })
+                    })
+                    .flatten();
                 if let Some(path) = FileDialog::new().add_filter("PDF", &["pdf"]).save_file() {
-                    match oxidraft_io::export_pdf(&app.document, paper) {
+                    match oxidraft_io::export_pdf_window(&app.document, paper, window) {
                         Ok(bytes) => {
                             if let Err(e) = oxidraft_io::write_atomic(&path, &bytes) {
                                 app.command_log.push(format!("Plot failed: {e}"));
@@ -416,8 +472,9 @@ pub(super) fn plot_dialog(ctx: &Context, app: &mut AppState) {
         d.insert_temp(custom_w_id, custom_w);
         d.insert_temp(custom_h_id, custom_h);
         d.insert_temp(landscape_id, landscape);
+        d.insert_temp(area_id, area);
     });
-    if !open || close_after_plot {
+    if !open || close_after_plot || start_pick {
         ctx.data_mut(|d| d.insert_temp(egui::Id::new(PLOT_OPEN_ID), false));
     }
 }
@@ -1527,6 +1584,7 @@ fn tool_hotkey(tool: &Tool) -> &'static str {
         | Tool::Dimension { .. }
         | Tool::DimAngularLines { .. }
         | Tool::DimRadial { .. }
+        | Tool::PlotWindow { .. }
         | Tool::Point => "",
     }
 }

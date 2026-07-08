@@ -61,6 +61,11 @@ pub enum Tool {
     Rectangle {
         first: Option<Point2d>,
     },
+    /// Two-corner pick of the area to plot — feeds the Plot dialog's
+    /// "Window" mode rather than creating geometry.
+    PlotWindow {
+        first: Option<Point2d>,
+    },
     Move {
         base: Option<Point2d>,
         ids: Vec<EntityId>,
@@ -143,8 +148,16 @@ pub enum TanAnchor {
 pub enum ToolEvent {
     Pending,
     Create(Vec<EntityKind>),
-    Transform { ids: Vec<EntityId>, t: Transform2d },
-    CopyOf { ids: Vec<EntityId>, t: Transform2d },
+    Transform {
+        ids: Vec<EntityId>,
+        t: Transform2d,
+    },
+    CopyOf {
+        ids: Vec<EntityId>,
+        t: Transform2d,
+    },
+    /// Both corners of the plot window were picked (raw, unsorted).
+    PlotWindow(Point2d, Point2d),
 }
 
 impl Tool {
@@ -168,6 +181,7 @@ impl Tool {
             Tool::DimRadial { .. } => "DIM RADIUS",
             Tool::Ellipse { .. } => "ELLIPSE",
             Tool::Rectangle { .. } => "RECTANGLE",
+            Tool::PlotWindow { .. } => "PLOT WINDOW",
             Tool::Move { .. } => "MOVE",
             Tool::Copy { .. } => "COPY",
             Tool::Spline { .. } => "SPLINE",
@@ -478,6 +492,18 @@ impl Tool {
                 }
             },
 
+            Tool::PlotWindow { first } => match first.take() {
+                None => {
+                    *first = Some(p);
+                    ToolEvent::Pending
+                }
+                Some(c0) => {
+                    // One-shot: the pick hands back to the Plot dialog.
+                    *self = Tool::Select;
+                    ToolEvent::PlotWindow(c0, p)
+                }
+            },
+
             Tool::Move { base, ids } => match base.take() {
                 None => {
                     *base = Some(p);
@@ -646,7 +672,7 @@ impl Tool {
                 *center = None;
                 *axis_end = None;
             }
-            Tool::Rectangle { first } => *first = None,
+            Tool::Rectangle { first } | Tool::PlotWindow { first } => *first = None,
             Tool::Move { base, .. } | Tool::Copy { base, .. } => *base = None,
             Tool::Spline { pts } => pts.clear(),
             Tool::Polyline { pts } => pts.clear(),
@@ -699,7 +725,7 @@ impl Tool {
             Tool::DimAngularLines { a, geom } => a.is_some() || geom.is_some(),
             Tool::DimRadial { center, .. } => center.is_some(),
             Tool::Ellipse { center, .. } => center.is_some(),
-            Tool::Rectangle { first } => first.is_some(),
+            Tool::Rectangle { first } | Tool::PlotWindow { first } => first.is_some(),
             Tool::Move { base, .. } | Tool::Copy { base, .. } => base.is_some(),
             Tool::Spline { pts } => !pts.is_empty(),
             Tool::Polyline { pts } => !pts.is_empty(),
@@ -734,7 +760,9 @@ impl Tool {
                     ))]
                 }
             }
-            Tool::Rectangle { first: Some(c0) } => rectangle_curves(c0, cursor),
+            Tool::Rectangle { first: Some(c0) } | Tool::PlotWindow { first: Some(c0) } => {
+                rectangle_curves(c0, cursor)
+            }
             Tool::Ellipse {
                 center: Some(c),
                 axis_end: None,
@@ -858,7 +886,7 @@ impl Tool {
         match self {
             Tool::Line { last } => *last,
             Tool::Circle { center } => *center,
-            Tool::Rectangle { first } => *first,
+            Tool::Rectangle { first } | Tool::PlotWindow { first } => *first,
             Tool::Arc3 { pts } => pts.last().cloned(),
             Tool::ArcStartCenterEnd { start, center } => (*center).or(*start),
             Tool::ArcCenterStartEnd { center, start } => (*start).or(*center),
@@ -900,7 +928,7 @@ impl Tool {
             Tool::Polyline { pts } | Tool::Spline { pts } => pts.clone(),
             Tool::Arc3 { pts } | Tool::CircleThreePoint { pts } => pts.clone(),
             Tool::Line { last: Some(p) } => vec![*p],
-            Tool::Rectangle { first: Some(p) } => vec![*p],
+            Tool::Rectangle { first: Some(p) } | Tool::PlotWindow { first: Some(p) } => vec![*p],
             Tool::Polygon {
                 center: Some(c), ..
             } => vec![*c],
@@ -1133,6 +1161,20 @@ mod tests {
                 axis_end: None
             }
         ));
+    }
+
+    #[test]
+    fn plot_window_tool_hands_both_corners_to_the_dialog() {
+        let mut t = Tool::PlotWindow { first: None };
+        assert!(matches!(t.on_point(pt(8, 6)), ToolEvent::Pending));
+        assert!(t.has_pending_input(), "rubber-band preview while picking");
+        match t.on_point(pt(2, 1)) {
+            ToolEvent::PlotWindow(a, b) => {
+                assert_eq!((a.x, a.y, b.x, b.y), (8.0, 6.0, 2.0, 1.0));
+            }
+            o => panic!("{o:?}"),
+        }
+        assert!(matches!(t, Tool::Select), "one-shot pick returns to Select");
     }
 
     #[test]

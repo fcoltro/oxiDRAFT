@@ -65,6 +65,12 @@ pub struct AppState {
     pub hint_tool: Option<Tool>,
     pub infer_constraints: bool,
     pub show_constraints: bool,
+    /// Last plot window picked on canvas (sorted world corners); used by
+    /// the Plot dialog's "Window" area mode until re-picked.
+    pub plot_window: Option<(f64, f64, f64, f64)>,
+    /// One-shot: the plot-window pick just finished, so the Plot dialog
+    /// should reopen on the next frame.
+    pub reopen_plot: bool,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -459,6 +465,8 @@ impl AppState {
             hint_tool: None,
             infer_constraints: false,
             show_constraints: true,
+            plot_window: None,
+            reopen_plot: false,
         }
     }
 
@@ -1314,6 +1322,24 @@ impl AppState {
     fn apply_tool_event(&mut self, ev: ToolEvent) {
         match ev {
             ToolEvent::Pending => {}
+            ToolEvent::PlotWindow(a, b) => {
+                // Doesn't touch the document — no history snapshot. The
+                // corners come from canvas picks, but keep the same guards
+                // as every other boundary: finite and with actual area.
+                let (x0, x1) = (a.x.min(b.x), a.x.max(b.x));
+                let (y0, y1) = (a.y.min(b.y), a.y.max(b.y));
+                if [x0, y0, x1, y1].iter().all(|v| v.is_finite())
+                    && x1 - x0 > 1e-9
+                    && y1 - y0 > 1e-9
+                {
+                    self.plot_window = Some((x0, y0, x1, y1));
+                    self.command_log.push("Plot window set".into());
+                } else {
+                    self.command_log
+                        .push("Plot window has no area — pick two different corners".into());
+                }
+                self.reopen_plot = true;
+            }
             ToolEvent::Create(kinds) => {
                 self.history.snapshot(&self.document);
                 for k in kinds {
@@ -3817,6 +3843,36 @@ mod tests {
             (s2.p0.x - 10.0).abs() < 1e-6 && (s2.p0.y - 1.0).abs() < 1e-6,
             "welded neighbour reattached: {s2:?}"
         );
+    }
+
+    #[test]
+    fn plot_window_pick_stores_the_rect_and_reopens_the_dialog() {
+        let mut a = AppState::new(800.0, 600.0);
+        a.snap_on = false;
+        a.grid_snap_on = false;
+        a.tool = Tool::PlotWindow { first: None };
+        // Screen (300,350) is world (−2,−1); (500,250) is world (2,1).
+        a.canvas_click(300.0, 350.0);
+        a.canvas_click(500.0, 250.0);
+        let (x0, y0, x1, y1) = a.plot_window.expect("window stored");
+        assert!(
+            (x0 + 2.0).abs() < 1e-9
+                && (y0 + 1.0).abs() < 1e-9
+                && (x1 - 2.0).abs() < 1e-9
+                && (y1 - 1.0).abs() < 1e-9,
+            "corners sorted: ({x0},{y0})..({x1},{y1})"
+        );
+        assert!(a.reopen_plot, "the dialog reopens after the pick");
+        assert!(matches!(a.tool, Tool::Select));
+
+        // A zero-area pick declines the window but still reopens.
+        a.reopen_plot = false;
+        a.plot_window = None;
+        a.tool = Tool::PlotWindow { first: None };
+        a.canvas_click(400.0, 300.0);
+        a.canvas_click(400.0, 300.0);
+        assert_eq!(a.plot_window, None, "no area, no window");
+        assert!(a.reopen_plot);
     }
 
     #[test]
