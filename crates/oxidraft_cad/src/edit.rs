@@ -198,6 +198,11 @@ pub fn mirror(
 }
 
 pub fn offset(doc: &mut Document, ids: &[EntityId], dist: f64) -> Vec<EntityId> {
+    // offset_curve survives a non-finite distance but its output is
+    // unspecified; there is no meaningful offset to add anyway.
+    if !dist.is_finite() {
+        return Vec::new();
+    }
     let mut new_ids = Vec::new();
     for &id in ids {
         if let Some(e) = doc.get(id)
@@ -211,6 +216,9 @@ pub fn offset(doc: &mut Document, ids: &[EntityId], dist: f64) -> Vec<EntityId> 
     new_ids
 }
 
+/// Upper bound on the elements a single array command may create.
+const MAX_ARRAY_ELEMENTS: u64 = 100_000;
+
 pub fn array_rect(
     doc: &mut Document,
     ids: &[EntityId],
@@ -219,6 +227,11 @@ pub fn array_rect(
     dx: f64,
     dy: f64,
 ) -> Vec<EntityId> {
+    // Mistyped counts must not freeze the app duplicating entities
+    // forever (matches AutoCAD's array element limit).
+    if rows as u64 * cols as u64 > MAX_ARRAY_ELEMENTS {
+        return Vec::new();
+    }
     let mut new_ids = Vec::new();
     for r in 0..rows {
         for c in 0..cols {
@@ -242,7 +255,7 @@ pub fn array_polar(
     total_angle: f64,
 ) -> Vec<EntityId> {
     let mut new_ids = Vec::new();
-    if count < 2 {
+    if count < 2 || count as u64 > MAX_ARRAY_ELEMENTS {
         return new_ids;
     }
     let step = total_angle / count as f64;
@@ -573,6 +586,10 @@ pub fn trim_preview(
 }
 
 pub fn break_at(doc: &mut Document, target: EntityId, t: f64) -> Vec<EntityId> {
+    // Breaking at an undefined parameter is a no-op, not two junk pieces.
+    if !t.is_finite() {
+        return vec![target];
+    }
     let (curve, layer) = match doc
         .get(target)
         .and_then(|e| e.as_curve().map(|c| (c.clone(), e.layer)))
@@ -807,7 +824,8 @@ pub fn fillet(
     px: f64,
     py: f64,
 ) -> Option<EntityId> {
-    if radius <= 0.0 || a == b {
+    // NaN slips past a plain `<= 0.0` check and would reach the solver.
+    if !radius.is_finite() || radius <= 0.0 || a == b {
         return None;
     }
     let layer = doc.get(a)?.layer;
@@ -852,7 +870,9 @@ pub fn blend_preview(
     continuity: Continuity,
     tension: f64,
 ) -> Option<Curve> {
-    if a == b {
+    // blend_curves survives a non-finite tension but may hand back a
+    // non-finite curve; decline before it can reach the document.
+    if !tension.is_finite() || a == b {
         return None;
     }
     let ca = doc.get(a)?.as_curve()?.clone();
@@ -893,7 +913,7 @@ pub fn chamfer(
     dist_a: f64,
     dist_b: f64,
 ) -> Option<EntityId> {
-    if a == b {
+    if !(dist_a.is_finite() && dist_b.is_finite()) || a == b {
         return None;
     }
     let layer = doc.get(a)?.layer;
@@ -1428,6 +1448,9 @@ pub fn stretch(
     dx: f64,
     dy: f64,
 ) {
+    if !(dx.is_finite() && dy.is_finite()) {
+        return;
+    }
     let (xmin, ymin, xmax, ymax) = window;
     let inside = |x: f64, y: f64| x >= xmin && x <= xmax && y >= ymin && y <= ymax;
     let nudge = |p: &Point2d| -> Point2d {
@@ -1713,6 +1736,12 @@ fn arc_between(center: (f64, f64), ta: (f64, f64), tb: (f64, f64), radius: f64) 
 }
 
 fn apply_to(doc: &mut Document, ids: &[EntityId], t: &Transform2d) {
+    // A non-finite transform (NaN drag delta, degenerate mirror axis)
+    // would poison every touched entity; declining keeps the document
+    // finite, the same contract the file loaders enforce on the way in.
+    if !t.is_finite() {
+        return;
+    }
     for &id in ids {
         if let Some(e) = doc.get_mut(id) {
             e.transform(t);
@@ -1721,6 +1750,10 @@ fn apply_to(doc: &mut Document, ids: &[EntityId], t: &Transform2d) {
 }
 
 fn duplicate_with(doc: &mut Document, ids: &[EntityId], t: &Transform2d) -> Vec<EntityId> {
+    // Same finiteness contract as `apply_to`.
+    if !t.is_finite() {
+        return Vec::new();
+    }
     let mut new_ids = Vec::new();
     for &id in ids {
         if let Some(e) = doc.get(id) {

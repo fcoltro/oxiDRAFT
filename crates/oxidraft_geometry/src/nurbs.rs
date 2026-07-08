@@ -163,9 +163,17 @@ impl RationalBezier {
         // tolerance never satisfies — even a straight segment then expands
         // the full 2^24-leaf recursion, a ~16M-point memory balloon. Floor
         // the tolerance relative to the segment's own extent (the arc path
-        // caps at 65,536 vertices in the same spirit); a non-finite extent
-        // means poisoned control points that no subdivision can rescue, so
-        // the segment flattens to its endpoints.
+        // caps at 65,536 vertices in the same spirit). Poisoned control
+        // points or weights defeat the flatness test the same way (`dev` is
+        // NaN at every depth), and the bounding box can't reveal them —
+        // f64 min/max silently drop NaN — so check them directly; no
+        // subdivision can rescue such a segment, it flattens to its
+        // endpoints.
+        if !self.points.iter().all(Point2d::is_finite)
+            || !self.weights.iter().all(|w| w.is_finite())
+        {
+            return vec![self.evaluate(0.0), self.evaluate(1.0)];
+        }
         let bb = self.bounding_box();
         let diag = (bb.max.x - bb.min.x).hypot(bb.max.y - bb.min.y);
         if !diag.is_finite() {

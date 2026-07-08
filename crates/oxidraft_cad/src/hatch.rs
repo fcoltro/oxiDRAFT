@@ -38,12 +38,22 @@ fn is_closed_poly(pc: &oxidraft_geometry::PolyCurve) -> bool {
 }
 
 pub fn region_contains(boundary: &[Curve], holes: &[Vec<Curve>], x: f64, y: f64) -> bool {
-    if !Region::new(boundary.to_vec()).contains_point(x, y) {
-        return false;
-    }
-    !holes
-        .iter()
-        .any(|h| Region::new(h.to_vec()).contains_point(x, y))
+    let (outer, hole_regions) = regions_of(boundary, holes);
+    regions_contain(&outer, &hole_regions, x, y)
+}
+
+/// Prebuilt `Region`s for repeated containment queries. `Region` caches its
+/// ring decomposition internally, so hot loops (pattern fills sample up to
+/// a million points) must build these once instead of per query.
+fn regions_of(boundary: &[Curve], holes: &[Vec<Curve>]) -> (Region, Vec<Region>) {
+    (
+        Region::new(boundary.to_vec()),
+        holes.iter().map(|h| Region::new(h.to_vec())).collect(),
+    )
+}
+
+fn regions_contain(outer: &Region, holes: &[Region], x: f64, y: f64) -> bool {
+    outer.contains_point(x, y) && !holes.iter().any(|h| h.contains_point(x, y))
 }
 
 fn region_edges(boundary: &[Curve], holes: &[Vec<Curve>]) -> Vec<(P, P)> {
@@ -104,8 +114,8 @@ fn clip_to_region(
     a: P,
     b: P,
     edges: &[(P, P)],
-    boundary: &[Curve],
-    holes: &[Vec<Curve>],
+    outer: &Region,
+    holes: &[Region],
 ) -> Vec<(Point2d, Point2d)> {
     let mut ts: Vec<f64> = vec![0.0, 1.0];
     for &(p, q) in edges {
@@ -121,7 +131,7 @@ fn clip_to_region(
             continue;
         }
         let (mx, my) = lerp((w[0] + w[1]) * 0.5);
-        if region_contains(boundary, holes, mx, my) {
+        if regions_contain(outer, holes, mx, my) {
             let s = lerp(w[0]);
             let e = lerp(w[1]);
             out.push((Point2d::from_f64(s.0, s.1), Point2d::from_f64(e.0, e.1)));
@@ -146,7 +156,16 @@ pub fn pattern_lines(
     let (minx, miny, maxx, maxy) = region_bbox(boundary);
     let (cx, cy) = ((minx + maxx) * 0.5, (miny + maxy) * 0.5);
     let diag = (maxx - minx).hypot(maxy - miny).max(1.0);
+    // Decline a fill that would take absurdly many strokes outright:
+    // trickling out a partial pattern after a multi-minute freeze helps
+    // nobody, and past ~1e6·spacing the `k += spacing` walk below can
+    // stall under f64 ulp and spin uselessly. diag bounds pmax−pmin for
+    // every angle.
+    if diag / spacing > 100_000.0 {
+        return Vec::new();
+    }
     let edges = region_edges(boundary, holes);
+    let (outer, hole_regions) = regions_of(boundary, holes);
     let mut out = Vec::new();
     for angle_deg in angles {
         let a = angle_deg.to_radians();
@@ -165,7 +184,7 @@ pub fn pattern_lines(
             let by = cy + (k - cp) * ny;
             let pa = (bx - dx * diag, by - dy * diag);
             let pb = (bx + dx * diag, by + dy * diag);
-            out.extend(clip_to_region(pa, pb, &edges, boundary, holes));
+            out.extend(clip_to_region(pa, pb, &edges, &outer, &hole_regions));
             k += spacing;
         }
     }
@@ -185,6 +204,13 @@ pub fn pattern_dots(
         return Vec::new();
     }
     let (minx, miny, maxx, maxy) = region_bbox(boundary);
+    // Same up-front bound as `pattern_lines`: decline instead of freezing
+    // on a grid the walk below could never finish.
+    let (nx, ny) = ((maxx - minx) / spacing, (maxy - miny) / spacing);
+    if !(nx.is_finite() && ny.is_finite()) || (nx + 1.0) * (ny + 1.0) > 1_000_000.0 {
+        return Vec::new();
+    }
+    let (outer, hole_regions) = regions_of(boundary, holes);
     let mut out = Vec::new();
     let mut y = (miny / spacing).floor() * spacing;
     let mut guard = 0;
@@ -192,7 +218,7 @@ pub fn pattern_dots(
         let mut x = (minx / spacing).floor() * spacing;
         while x <= maxx && guard < 1_000_000 {
             guard += 1;
-            if region_contains(boundary, holes, x, y) {
+            if regions_contain(&outer, &hole_regions, x, y) {
                 out.push(Point2d::from_f64(x, y));
             }
             x += spacing;

@@ -173,6 +173,30 @@ fn point_on_circle(arc: &CircularArc, a: f64) -> Point2d {
 }
 
 pub fn apply_grip(start: &EntityKind, grip: &Grip, to: Point2d) -> EntityKind {
+    // A non-finite drag target (bad unproject, corrupt event) must leave
+    // the entity untouched, not overwrite a coordinate with NaN — and a
+    // huge-but-finite drag can overflow derived quantities (a radius is
+    // squared before rooting), so the output is checked too.
+    if !to.is_finite() {
+        return start.clone();
+    }
+    let out = apply_grip_inner(start, grip, to);
+    if kind_is_finite(&out) {
+        out
+    } else {
+        start.clone()
+    }
+}
+
+fn kind_is_finite(kind: &EntityKind) -> bool {
+    match kind {
+        EntityKind::Curve(c) => c.is_finite(),
+        EntityKind::Point(p) => p.is_finite(),
+        _ => true,
+    }
+}
+
+fn apply_grip_inner(start: &EntityKind, grip: &Grip, to: Point2d) -> EntityKind {
     match (start, grip.role) {
         (EntityKind::Curve(Curve::Line(l)), GripRole::Endpoint(0)) => {
             EntityKind::Curve(Curve::Line(LineSeg::from_endpoints(to, l.p1)))
@@ -533,6 +557,25 @@ fn move_polyline_vertex(poly: &PolyCurve, k: usize, to: Point2d) -> Option<PolyC
 const MIN_RADIUS: f64 = 1e-6;
 
 pub fn apply_grip_value(
+    start: &EntityKind,
+    grip: &Grip,
+    value: f64,
+    cursor: Point2d,
+) -> EntityKind {
+    // Same contract as `apply_grip`: typed values and cursor positions
+    // come from the outside world and may be NaN or overflow-inducing.
+    if !value.is_finite() || !cursor.is_finite() {
+        return start.clone();
+    }
+    let out = apply_grip_value_inner(start, grip, value, cursor);
+    if kind_is_finite(&out) {
+        out
+    } else {
+        start.clone()
+    }
+}
+
+fn apply_grip_value_inner(
     start: &EntityKind,
     grip: &Grip,
     value: f64,

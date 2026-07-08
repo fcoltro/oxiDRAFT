@@ -62,7 +62,17 @@ pub fn polygon(
     inscribed: bool,
     start_angle: f64,
 ) -> Vec<EntityId> {
-    assert!(n >= 3, "polygon needs ≥3 sides");
+    // Side count and geometry come straight from user input: decline
+    // instead of panicking on n < 3 or adding a billion entities on a
+    // typo'd count, and don't let a non-finite center/radius/angle write
+    // NaN vertices into the document.
+    if !(3..=4096).contains(&n)
+        || !center.is_finite()
+        || !radius.is_finite()
+        || !start_angle.is_finite()
+    {
+        return Vec::new();
+    }
     let r = if inscribed {
         radius
     } else {
@@ -98,12 +108,20 @@ pub fn point(doc: &mut Document, p: Point2d) -> EntityId {
 
 pub fn divide(doc: &mut Document, curve: &Curve, n: u32) -> Vec<EntityId> {
     use oxidraft_geometry::CurveSegment;
+    // Matches AutoCAD's DIVIDE segment cap; a corrupt count would balloon
+    // the document with millions of point entities.
+    if n > 32_767 {
+        return Vec::new();
+    }
     let (t0, t1) = curve.domain();
     (1..n)
-        .map(|i| {
+        .filter_map(|i| {
             let t = t0 + (t1 - t0) * i as f64 / n as f64;
             let (x, y) = curve.evaluate_f64(t);
-            point(doc, Point2d::from_f64(x, y))
+            let p = Point2d::from_f64(x, y);
+            // A poisoned curve evaluates to NaN; drop those division
+            // points rather than storing them.
+            p.is_finite().then(|| point(doc, p))
         })
         .collect()
 }

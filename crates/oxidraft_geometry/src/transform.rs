@@ -63,11 +63,14 @@ impl Transform2d {
         Self::scale(1.0, -1.0)
     }
 
+    /// Reflection across the line through `p0` and `p1`. Coincident (or
+    /// non-finite) points define no axis; the result is then non-finite,
+    /// and callers gate application on [`Transform2d::is_finite`] — two
+    /// identical mirror picks are a click away, so this must not panic.
     pub fn mirror_line(p0: &Point2d, p1: &Point2d) -> Self {
         let dx = p1.x - p0.x;
         let dy = p1.y - p0.y;
         let len_sq = dx * dx + dy * dy;
-        assert!(len_sq != 0.0, "mirror line needs two distinct points");
         let r00 = (dx * dx - dy * dy) / len_sq;
         let r01 = (2.0 * dx * dy) / len_sq;
         let r11 = (dy * dy - dx * dx) / len_sq;

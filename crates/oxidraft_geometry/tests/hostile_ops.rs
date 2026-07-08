@@ -72,6 +72,17 @@ fn menagerie() -> Vec<Curve> {
             line(1.0, 0.0, 1.0, 1.0),
         ]))),
         Curve::Poly(Box::new(PolyCurve::new(Vec::new()))),
+        // Poisoned curves: a corrupt document can carry these, and a
+        // *partially* NaN control net is the treacherous case — bounding
+        // boxes built on f64 min/max silently drop the NaN and look sane.
+        line(f64::NAN, 0.0, 1.0, 1.0),
+        Curve::Bezier(CubicBezier::new(
+            p(0.0, 0.0),
+            p(f64::NAN, f64::NAN),
+            p(1.0, 1.0),
+            p(2.0, 0.0),
+        )),
+        arc(0.0, 0.0, f64::INFINITY, 0.0, 1.0),
     ]
 }
 

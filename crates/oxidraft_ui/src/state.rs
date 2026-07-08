@@ -1322,6 +1322,15 @@ impl AppState {
                 }
             }
             ToolEvent::Transform { ids, t } => {
+                // A degenerate gesture (mirror across a single point, NaN
+                // cursor) yields a non-finite transform that would poison
+                // every selected entity.
+                if !t.is_finite() {
+                    self.command_log
+                        .push("Transform undefined for those picks — nothing changed".into());
+                    self.tool = Tool::Select;
+                    return;
+                }
                 self.history.snapshot(&self.document);
                 let mut moved = Vec::new();
                 for id in ids {
@@ -1341,6 +1350,13 @@ impl AppState {
                 self.tool = Tool::Select;
             }
             ToolEvent::CopyOf { ids, t } => {
+                // Same contract as Transform above.
+                if !t.is_finite() {
+                    self.command_log
+                        .push("Transform undefined for those picks — nothing changed".into());
+                    self.tool = Tool::Select;
+                    return;
+                }
                 self.history.snapshot(&self.document);
                 let mut new_ids = Vec::new();
                 for id in ids {
