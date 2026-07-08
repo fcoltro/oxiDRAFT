@@ -120,12 +120,39 @@ impl Region {
         {
             return rings.clone();
         }
+        // A loop containing any non-finite curve has no defined boundary, and
+        // preparing it would poison every query built on these rings — most
+        // expensively the winding recursion, where NaN control points defeat
+        // the half-plane cutoff at every level and the depth cap becomes a
+        // 2^40-leaf tree. Such a loop contributes empty prepared forms
+        // instead: the same answers an absent loop would give.
+        let finite = |lp: &[Curve]| lp.iter().all(Curve::is_finite);
         let rings = Arc::new(Rings {
-            outer: boundary_ring(&self.outer),
-            holes: self.holes.iter().map(|h| boundary_ring(h)).collect(),
+            outer: if finite(&self.outer) {
+                boundary_ring(&self.outer)
+            } else {
+                Vec::new()
+            },
+            holes: self
+                .holes
+                .iter()
+                .map(|h| {
+                    if finite(h) {
+                        boundary_ring(h)
+                    } else {
+                        Vec::new()
+                    }
+                })
+                .collect(),
             rational: std::iter::once(&self.outer)
                 .chain(self.holes.iter())
-                .map(|lp| lp.iter().flat_map(lower).collect())
+                .map(|lp| {
+                    if finite(lp) {
+                        lp.iter().flat_map(lower).collect()
+                    } else {
+                        Vec::new()
+                    }
+                })
                 .collect(),
         });
         *self

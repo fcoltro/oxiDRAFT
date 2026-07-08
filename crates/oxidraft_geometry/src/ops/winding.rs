@@ -14,6 +14,17 @@ use crate::nurbs::RationalBezier;
 /// boundary with small gaps the sum is merely *near* an integer multiple,
 /// which is what makes callers that round robust to non-watertight input.
 pub fn rational_winding_angle(seg: &RationalBezier, qx: f64, qy: f64) -> f64 {
+    // A non-finite control point, weight, or query defeats the half-plane
+    // cutoff below on every level — and de Casteljau splitting spreads a NaN
+    // into both halves — so the depth cap would bound a full 2^40-leaf tree
+    // instead of a thin path near the query. A poisoned segment subtends no
+    // defined angle; contribute none.
+    if !(qx.is_finite() && qy.is_finite())
+        || seg.points.iter().any(|p| !p.is_finite())
+        || seg.weights.iter().any(|w| !w.is_finite())
+    {
+        return 0.0;
+    }
     // Bounded so a query exactly on the curve terminates; the work per query
     // grows linearly with depth (only the pieces nearest the query keep
     // splitting), so a generous cap costs little and classifies points down

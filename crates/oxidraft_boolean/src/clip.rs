@@ -23,15 +23,21 @@ struct Node {
 const NONE: usize = usize::MAX;
 
 pub fn clip(subject: &[Vec<Point2d>], clip_poly: &[Vec<Point2d>], op: BoolOp) -> Vec<Vec<Point2d>> {
+    // A ring with a non-finite vertex has no defined geometry, and NaN makes
+    // the entry-marking parity below inconsistent — the traversal in `trace`
+    // can then orbit between intersections forever. Drop such rings like the
+    // too-short ones.
+    let usable =
+        |r: &Vec<(f64, f64)>| r.len() >= 3 && r.iter().all(|p| p.0.is_finite() && p.1.is_finite());
     let subj: Vec<Vec<(f64, f64)>> = subject
         .iter()
         .map(|r| r.iter().map(|p| p.to_f64()).collect())
-        .filter(|r: &Vec<(f64, f64)>| r.len() >= 3)
+        .filter(usable)
         .collect();
     let mut clp: Vec<Vec<(f64, f64)>> = clip_poly
         .iter()
         .map(|r| r.iter().map(|p| p.to_f64()).collect())
-        .filter(|r: &Vec<(f64, f64)>| r.len() >= 3)
+        .filter(usable)
         .collect();
     if subj.is_empty() || clp.is_empty() {
         return Vec::new();
@@ -245,10 +251,18 @@ fn mark_entries(
 
 fn trace(nodes: &mut [Node]) -> Vec<Vec<Point2d>> {
     let mut result = Vec::new();
+    // A valid traced loop visits each node at most once, so this is far above
+    // any legitimate trace. Entry marking left inconsistent by a degenerate
+    // contact the nudge loop failed to clear can otherwise orbit between
+    // intersections without ever returning to `start`; a runaway loop is
+    // geometric garbage, so it is discarded, and the visited flags it set
+    // keep the outer scan making progress.
+    let budget = nodes.len().saturating_mul(4).max(16);
     while let Some(start) = (0..nodes.len()).find(|&i| nodes[i].intersection && !nodes[i].visited) {
         let mut loop_pts: Vec<Point2d> = Vec::new();
         let mut cur = start;
-        loop {
+        let mut steps = 0usize;
+        'one_loop: loop {
             nodes[cur].visited = true;
             let nb = nodes[cur].neighbour;
             if nb != NONE {
@@ -261,6 +275,11 @@ fn trace(nodes: &mut [Node]) -> Vec<Vec<Point2d>> {
                 } else {
                     nodes[cur].prev
                 };
+                steps += 1;
+                if steps > budget {
+                    loop_pts.clear();
+                    break 'one_loop;
+                }
                 loop_pts.push(Point2d::from_f64(nodes[cur].x, nodes[cur].y));
                 if nodes[cur].intersection {
                     break;

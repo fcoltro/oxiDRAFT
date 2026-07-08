@@ -14,16 +14,22 @@ use oxidraft_geometry::{Curve, CurveSegment, LineSeg, Point2d, tessellate_curve}
 // clipper, which resolves them by perturbation.
 
 pub fn union(a: &Region, b: &Region) -> Vec<Region> {
+    let (a, b) = (scrubbed(a), scrubbed(b));
+    let (a, b) = (&*a, &*b);
     crate::curved::clip_curved(a, b, BoolOp::Union)
         .unwrap_or_else(|| loops_to_regions(clip_regions(a, b, BoolOp::Union)))
 }
 
 pub fn intersection(a: &Region, b: &Region) -> Vec<Region> {
+    let (a, b) = (scrubbed(a), scrubbed(b));
+    let (a, b) = (&*a, &*b);
     crate::curved::clip_curved(a, b, BoolOp::Intersection)
         .unwrap_or_else(|| loops_to_regions(clip_regions(a, b, BoolOp::Intersection)))
 }
 
 pub fn difference(a: &Region, b: &Region) -> Vec<Region> {
+    let (a, b) = (scrubbed(a), scrubbed(b));
+    let (a, b) = (&*a, &*b);
     crate::curved::clip_curved(a, b, BoolOp::Difference)
         .unwrap_or_else(|| loops_to_regions(clip_regions(a, b, BoolOp::Difference)))
 }
@@ -32,6 +38,27 @@ pub fn xor(a: &Region, b: &Region) -> Vec<Region> {
     let mut out = difference(a, b);
     out.extend(difference(b, a));
     out
+}
+
+/// Boolean input with a non-finite coordinate anywhere in a loop has no
+/// defined geometry, and NaN poisons every predicate downstream (entry
+/// marking in the clipper most damagingly: its traversal can orbit forever).
+/// Scrub on entry: a poisoned hole is dropped, a poisoned outer empties the
+/// region — the ops then treat it exactly like the empty operand they
+/// already accept. Borrows when the input is clean, which is the ~always
+/// case, so the ops pay one finite-ness scan and nothing else.
+fn scrubbed(r: &Region) -> std::borrow::Cow<'_, Region> {
+    let clean = |l: &[Curve]| l.iter().all(Curve::is_finite);
+    if clean(&r.outer) && r.holes.iter().all(|h| clean(h)) {
+        return std::borrow::Cow::Borrowed(r);
+    }
+    let outer = if clean(&r.outer) {
+        r.outer.clone()
+    } else {
+        Vec::new()
+    };
+    let holes = r.holes.iter().filter(|h| clean(h)).cloned().collect();
+    std::borrow::Cow::Owned(Region::with_holes(outer, holes))
 }
 
 fn clip_regions(a: &Region, b: &Region, op: BoolOp) -> Vec<Vec<Point2d>> {
