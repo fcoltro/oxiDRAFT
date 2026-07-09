@@ -32,20 +32,27 @@ pub trait CurveSegment {
     /// override with their per-query closed forms.
     fn param_at_lengths(&self, distances: &[f64]) -> Vec<f64> {
         let (t0, t1) = self.domain();
-        let mut order: Vec<usize> = (0..distances.len()).collect();
-        order.sort_by(|&a, &b| distances[a].total_cmp(&distances[b]));
         // Past-the-end queries clamp to the end, like the singular form.
         let mut out = vec![t1; distances.len()];
-        let mut qi = 0;
-        // Non-positive and NaN distances clamp to the start (NaN sorts
-        // via total_cmp but fails `> 0.0`, so it is consumed here too).
-        while qi < order.len() && !(distances[order[qi]] > 0.0) {
-            out[order[qi]] = t0;
-            qi += 1;
-        }
+        // The singular form short-circuits non-finite and non-positive
+        // distances to the start; do the same here and keep only the
+        // positive-finite queries for the walk (so the ascending sort the
+        // cursor relies on never has to order a NaN).
+        let mut order: Vec<usize> = (0..distances.len())
+            .filter(|&i| {
+                let keep = distances[i].is_finite() && distances[i] > 0.0;
+                if !keep {
+                    out[i] = t0;
+                }
+                keep
+            })
+            .collect();
+        order.sort_by(|&a, &b| distances[a].total_cmp(&distances[b]));
+
         const N: usize = 256;
         let mut prev = self.evaluate_f64(t0);
         let mut acc = 0.0;
+        let mut qi = 0;
         for i in 1..=N {
             if qi >= order.len() {
                 break;

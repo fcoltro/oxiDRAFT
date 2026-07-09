@@ -162,7 +162,16 @@ fn arrays_cannot_balloon_memory() {
     // Would be ~1.8e19 duplications; must decline instantly.
     assert!(edit::array_rect(&mut doc, &ids, u32::MAX, u32::MAX, 1.0, 1.0).is_empty());
     assert!(edit::array_rect(&mut doc, &ids, 1, u32::MAX, 1.0, 1.0).is_empty());
-    assert!(edit::array_polar(&mut doc, &ids, &p(0.0, 0.0), u32::MAX, 6.28).is_empty());
+    assert!(
+        edit::array_polar(
+            &mut doc,
+            &ids,
+            &p(0.0, 0.0),
+            u32::MAX,
+            std::f64::consts::TAU
+        )
+        .is_empty()
+    );
     assert_eq!(doc.len(), count);
     // NaN spacing/angle must not clone poisoned copies.
     edit::array_rect(&mut doc, &ids, 2, 2, f64::NAN, 1.0);
@@ -367,7 +376,7 @@ fn hatch_survives_hostile_regions() {
         },
         HatchPattern::Dots { spacing: 0.0 },
     ] {
-        let _ = hatch::pattern_lines(&boundary, &holes, pat.clone());
+        let _ = hatch::pattern_lines(&boundary, &holes, pat);
         let _ = hatch::pattern_dots(&boundary, &holes, pat);
     }
 

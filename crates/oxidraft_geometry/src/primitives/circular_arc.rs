@@ -163,7 +163,10 @@ impl CurveSegment for CircularArc {
     fn param_at_length(&self, s: f64) -> f64 {
         let len = self.arc_length();
         let (t0, t1) = self.domain();
-        if !s.is_finite() || s <= 0.0 || !(len > 1e-12) {
+        // A zero/degenerate (or non-finite) arc length has no interior to
+        // map into; NaN len is caught explicitly since `len <= 1e-12` is
+        // false for NaN.
+        if !s.is_finite() || s <= 0.0 || len.is_nan() || len <= 1e-12 {
             return t0;
         }
         t0 + (t1 - t0) * (s / len).min(1.0)
