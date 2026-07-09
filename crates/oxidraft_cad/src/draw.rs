@@ -119,9 +119,11 @@ pub fn divide(doc: &mut Document, curve: &Curve, n: u32) -> Vec<EntityId> {
     if !(len > 0.0 && len.is_finite()) {
         return Vec::new();
     }
-    (1..n)
-        .filter_map(|i| {
-            let t = curve.param_at_length(len * i as f64 / n as f64);
+    let targets: Vec<f64> = (1..n).map(|i| len * i as f64 / n as f64).collect();
+    curve
+        .param_at_lengths(&targets)
+        .into_iter()
+        .filter_map(|t| {
             let (x, y) = curve.evaluate_f64(t);
             let p = Point2d::from_f64(x, y);
             // A poisoned curve evaluates to NaN; drop those division
@@ -144,18 +146,21 @@ pub fn measure(doc: &mut Document, curve: &Curve, interval: f64) -> Vec<EntityId
     if len / interval > 32_767.0 {
         return Vec::new();
     }
-    let mut out = Vec::new();
+    let mut targets = Vec::new();
     let mut s = interval;
     while s < len - 1e-12 {
-        let t = curve.param_at_length(s);
-        let (x, y) = curve.evaluate_f64(t);
-        let p = Point2d::from_f64(x, y);
-        if p.is_finite() {
-            out.push(point(doc, p));
-        }
+        targets.push(s);
         s += interval;
     }
-    out
+    curve
+        .param_at_lengths(&targets)
+        .into_iter()
+        .filter_map(|t| {
+            let (x, y) = curve.evaluate_f64(t);
+            let p = Point2d::from_f64(x, y);
+            p.is_finite().then(|| point(doc, p))
+        })
+        .collect()
 }
 
 fn order(a: f64, b: f64) -> (f64, f64) {

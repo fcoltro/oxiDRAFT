@@ -3,7 +3,7 @@ use oxidraft_cad::{
     grips_for, infer_axis, pick_at,
 };
 use oxidraft_document::{Document, Entity, EntityId, EntityKind, Layer, LineTypeRef, LineWeight};
-use oxidraft_geometry::{Curve, LineSeg, MinTracker, Point2d};
+use oxidraft_geometry::{Curve, LineSeg, MinTracker, Point2d, Transform2d};
 
 use crate::command::{Command, CoordInput, parse_command, parse_coordinate};
 use crate::history::History;
@@ -68,9 +68,13 @@ pub struct AppState {
     /// Last plot window picked on canvas (sorted world corners); used by
     /// the Plot dialog's "Window" area mode until re-picked.
     pub plot_window: Option<(f64, f64, f64, f64)>,
-    /// One-shot: the plot-window pick just finished, so the Plot dialog
-    /// should reopen on the next frame.
-    pub reopen_plot: bool,
+    /// Whether the Plot dialog is showing. Typed here (not egui temp-data)
+    /// so both the dialog and the canvas overlay read one source of truth,
+    /// and a finished window pick can reopen it directly.
+    pub plot_dialog_open: bool,
+    /// Plot area mode: `true` plots the picked [`Self::plot_window`],
+    /// `false` the full drawing extents.
+    pub plot_window_mode: bool,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -466,7 +470,8 @@ impl AppState {
             infer_constraints: false,
             show_constraints: true,
             plot_window: None,
-            reopen_plot: false,
+            plot_dialog_open: false,
+            plot_window_mode: false,
         }
     }
 
@@ -1319,26 +1324,46 @@ impl AppState {
         close
     }
 
+    /// True when `t` is non-finite: logs the reason and returns to Select
+    /// so the caller can bail before snapshotting. The geometry itself is
+    /// already protected by `Entity::transform`'s floor; this is the UX
+    /// layer (don't record a no-op undo step, tell the user why).
+    fn reject_nonfinite_transform(&mut self, t: &Transform2d) -> bool {
+        if t.is_finite() {
+            return false;
+        }
+        self.command_log
+            .push("Transform undefined for those picks — nothing changed".into());
+        self.tool = Tool::Select;
+        true
+    }
+
     fn apply_tool_event(&mut self, ev: ToolEvent) {
         match ev {
             ToolEvent::Pending => {}
             ToolEvent::PlotWindow(a, b) => {
-                // Doesn't touch the document — no history snapshot. The
-                // corners come from canvas picks, but keep the same guards
-                // as every other boundary: finite and with actual area.
-                let (x0, x1) = (a.x.min(b.x), a.x.max(b.x));
-                let (y0, y1) = (a.y.min(b.y), a.y.max(b.y));
-                if [x0, y0, x1, y1].iter().all(|v| v.is_finite())
-                    && x1 - x0 > 1e-9
-                    && y1 - y0 > 1e-9
-                {
-                    self.plot_window = Some((x0, y0, x1, y1));
-                    self.command_log.push("Plot window set".into());
-                } else {
-                    self.command_log
-                        .push("Plot window has no area — pick two different corners".into());
+                // Doesn't touch the document — no history snapshot. Validate
+                // through the same predicate the exporter uses, rather than
+                // re-deriving the sort/finite/area check here.
+                let win = oxidraft_io::PlotWindow {
+                    x0: a.x,
+                    y0: a.y,
+                    x1: b.x,
+                    y1: b.y,
+                };
+                match win.normalized() {
+                    Some(corners) => {
+                        self.plot_window = Some(corners);
+                        self.command_log.push("Plot window set".into());
+                    }
+                    None => self
+                        .command_log
+                        .push("Plot window has no area — pick two different corners".into()),
                 }
-                self.reopen_plot = true;
+                // Reopen the dialog in Window mode directly — no cross-frame
+                // flag to translate.
+                self.plot_dialog_open = true;
+                self.plot_window_mode = true;
             }
             ToolEvent::Create(kinds) => {
                 self.history.snapshot(&self.document);
@@ -1349,12 +1374,10 @@ impl AppState {
             }
             ToolEvent::Transform { ids, t } => {
                 // A degenerate gesture (mirror across a single point, NaN
-                // cursor) yields a non-finite transform that would poison
-                // every selected entity.
-                if !t.is_finite() {
-                    self.command_log
-                        .push("Transform undefined for those picks — nothing changed".into());
-                    self.tool = Tool::Select;
+                // cursor) yields a non-finite transform: skip the wasted
+                // history snapshot and tell the user, rather than record a
+                // no-op step. (Entity::transform floors the geometry.)
+                if self.reject_nonfinite_transform(&t) {
                     return;
                 }
                 self.history.snapshot(&self.document);
@@ -1377,10 +1400,7 @@ impl AppState {
             }
             ToolEvent::CopyOf { ids, t } => {
                 // Same contract as Transform above.
-                if !t.is_finite() {
-                    self.command_log
-                        .push("Transform undefined for those picks — nothing changed".into());
-                    self.tool = Tool::Select;
+                if self.reject_nonfinite_transform(&t) {
                     return;
                 }
                 self.history.snapshot(&self.document);
@@ -1809,28 +1829,11 @@ impl AppState {
                 .push("DIVIDE needs a segment count of 2 or more (DIVIDE 5)".into());
             return;
         };
-        let curves: Vec<oxidraft_geometry::Curve> = self
-            .selection
-            .iter()
-            .filter_map(|&id| self.document.get(id).and_then(|e| e.as_curve()).cloned())
-            .collect();
-        if curves.is_empty() {
-            self.command_log
-                .push("Select at least one curve to divide".into());
-            return;
-        }
-        self.history.snapshot(&self.document);
-        let mut placed = 0;
-        for c in &curves {
-            placed += oxidraft_cad::commands::divide(&mut self.document, c, n).len();
-        }
-        if placed == 0 {
-            self.history.discard_last();
-            self.command_log
-                .push("Nothing to divide on that selection".into());
-        } else {
-            self.command_log.push(format!("Placed {placed} point(s)"));
-        }
+        self.place_points_on_selection(
+            "Select at least one curve to divide",
+            "Nothing to divide on that selection",
+            |doc, c| oxidraft_cad::commands::divide(doc, c, n).len(),
+        );
     }
 
     /// Places points every `interval` of arc length on every selected
@@ -1841,25 +1844,40 @@ impl AppState {
                 .push("MEASURE needs a positive interval (MEASURE 2.5)".into());
             return;
         };
+        self.place_points_on_selection(
+            "Select at least one curve to measure",
+            "The interval doesn't fit on that selection",
+            |doc, c| oxidraft_cad::commands::measure(doc, c, interval).len(),
+        );
+    }
+
+    /// Shared body for DIVIDE/MEASURE: run `per_curve` over each selected
+    /// curve as one undo step, discarding the snapshot when it places
+    /// nothing. `empty_msg` is logged for an empty selection, `zero_msg`
+    /// when the operation places no points.
+    fn place_points_on_selection(
+        &mut self,
+        empty_msg: &str,
+        zero_msg: &str,
+        per_curve: impl Fn(&mut Document, &oxidraft_geometry::Curve) -> usize,
+    ) {
         let curves: Vec<oxidraft_geometry::Curve> = self
             .selection
             .iter()
             .filter_map(|&id| self.document.get(id).and_then(|e| e.as_curve()).cloned())
             .collect();
         if curves.is_empty() {
-            self.command_log
-                .push("Select at least one curve to measure".into());
+            self.command_log.push(empty_msg.into());
             return;
         }
         self.history.snapshot(&self.document);
-        let mut placed = 0;
-        for c in &curves {
-            placed += oxidraft_cad::commands::measure(&mut self.document, c, interval).len();
-        }
+        let placed: usize = curves
+            .iter()
+            .map(|c| per_curve(&mut self.document, c))
+            .sum();
         if placed == 0 {
             self.history.discard_last();
-            self.command_log
-                .push("The interval doesn't fit on that selection".into());
+            self.command_log.push(zero_msg.into());
         } else {
             self.command_log.push(format!("Placed {placed} point(s)"));
         }
@@ -3961,17 +3979,20 @@ mod tests {
                 && (y1 - 1.0).abs() < 1e-9,
             "corners sorted: ({x0},{y0})..({x1},{y1})"
         );
-        assert!(a.reopen_plot, "the dialog reopens after the pick");
+        assert!(
+            a.plot_dialog_open && a.plot_window_mode,
+            "the dialog reopens in Window mode after the pick"
+        );
         assert!(matches!(a.tool, Tool::Select));
 
         // A zero-area pick declines the window but still reopens.
-        a.reopen_plot = false;
+        a.plot_dialog_open = false;
         a.plot_window = None;
         a.tool = Tool::PlotWindow { first: None };
         a.canvas_click(400.0, 300.0);
         a.canvas_click(400.0, 300.0);
         assert_eq!(a.plot_window, None, "no area, no window");
-        assert!(a.reopen_plot);
+        assert!(a.plot_dialog_open && a.plot_window_mode);
     }
 
     #[test]

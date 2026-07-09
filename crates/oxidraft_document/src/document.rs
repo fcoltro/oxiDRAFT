@@ -1,4 +1,4 @@
-use crate::constraint::SketchConstraint;
+use crate::constraint::{ConstraintKind, SketchConstraint};
 use crate::entity::{Entity, EntityId, EntityKind};
 use crate::layer::LayerTable;
 use crate::properties::LineTypeDef;
@@ -187,7 +187,16 @@ impl Document {
     /// Records the constraint unless an equivalent one already exists.
     /// Re-adding an existing valued constraint (Radius) with a different
     /// value retargets it in place. Returns whether the document changed.
-    pub fn add_constraint(&mut self, c: SketchConstraint) -> bool {
+    pub fn add_constraint(&mut self, mut c: SketchConstraint) -> bool {
+        // The (0, 180] angle invariant is enforced here, the one gate every
+        // record passes through (interactive command, file load, retarget),
+        // so downstream readers — the solver lowering, the dimension badge —
+        // can trust it without re-folding.
+        if c.kind == ConstraintKind::Angle
+            && let Some(v) = c.val
+        {
+            c.val = Some(crate::constraint::normalize_angle_deg(v));
+        }
         if let Some(existing) = self.constraints.iter_mut().find(|e| e.same_relation(&c)) {
             if existing.val != c.val {
                 existing.val = c.val;

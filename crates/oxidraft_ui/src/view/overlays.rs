@@ -233,9 +233,12 @@ struct DimBadge {
 
 /// Deterministic label box shared by drawing and hit-testing — a galley
 /// needs a painter, which `badge_hit` doesn't have.
+fn dim_label_width(label: &str) -> f32 {
+    7.0 * label.chars().count() as f32 + 10.0
+}
+
 fn dim_label_rect(center: egui::Pos2, label: &str) -> egui::Rect {
-    let w = 7.0 * label.chars().count() as f32 + 10.0;
-    egui::Rect::from_center_size(center, vec2(w, 16.0))
+    egui::Rect::from_center_size(center, vec2(dim_label_width(label), 16.0))
 }
 
 /// Filled arrowhead with its tip at `tip`, fins spreading along `back`.
@@ -296,6 +299,7 @@ fn dim_badge_layout(app: &AppState, c: &SketchConstraint) -> Option<DimBadge> {
             // a label-only badge between the segment midpoints — the value
             // must stay visible and click-deletable even when there is no
             // corner to sweep an arc at.
+            let label = format!("{:.*}\u{00b0}", style.precision, val);
             let (r, s) = (a1 - a0, b1 - b0);
             let denom = r.x * s.y - r.y * s.x;
             let t = ((b0.x - a0.x) * s.y - (b0.y - a0.y) * s.x) / denom;
@@ -303,7 +307,6 @@ fn dim_badge_layout(app: &AppState, c: &SketchConstraint) -> Option<DimBadge> {
                 let mid_a = a0 + (a1 - a0) * 0.5;
                 let mid_b = b0 + (b1 - b0) * 0.5;
                 let center = mid_a + (mid_b - mid_a) * 0.5;
-                let label = format!("{:.*}\u{00b0}", style.precision, val);
                 return Some(DimBadge {
                     lines: vec![[center, mid_a], [center, mid_b]],
                     arrows: Vec::new(),
@@ -343,7 +346,6 @@ fn dim_badge_layout(app: &AppState, c: &SketchConstraint) -> Option<DimBadge> {
             let tangent = |ang: f32| vec2(-ang.sin(), ang.cos()) * sweep.signum();
             let ang_b = ang_a + sweep;
             let mid = ang_a + sweep * 0.5;
-            let label = format!("{:.*}\u{00b0}", style.precision, val);
             Some(DimBadge {
                 arrows: vec![
                     dim_arrow(at(ang_a), tangent(ang_a)),
@@ -372,7 +374,7 @@ fn dim_badge_layout(app: &AppState, c: &SketchConstraint) -> Option<DimBadge> {
             let out = (rim - center).normalized();
             let tail = rim + out * 14.0;
             let label = format!("R{}", units.format_measure(val, style.precision));
-            let half_w = 7.0 * label.chars().count() as f32 * 0.5 + 5.0;
+            let half_w = dim_label_width(&label) * 0.5;
             Some(DimBadge {
                 text_rect: dim_label_rect(tail + out * (half_w + 4.0), &label),
                 lines: vec![[center, rim], [rim, tail]],

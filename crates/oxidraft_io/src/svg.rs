@@ -7,22 +7,38 @@ use std::fmt::Write as _;
 
 const TAU: f64 = std::f64::consts::TAU;
 
+/// An exported drawing SVG together with the world→SVG mapping the
+/// exporter used. Callers that must place things in the SVG's coordinate
+/// frame (the PDF window plot) read the typed fields instead of scraping
+/// the `data-*` attributes back out of the string. `x_svg = x_world −
+/// x_shift`, `y_svg = h_flip − y_world`.
+pub(crate) struct SvgFrame {
+    pub svg: String,
+    pub view_w: f64,
+    pub view_h: f64,
+    pub x_shift: f64,
+    pub h_flip: f64,
+}
+
 pub fn export_svg(doc: &Document) -> String {
-    let (w, h, h_flip) = match doc.extents() {
+    export_svg_framed(doc).svg
+}
+
+pub(crate) fn export_svg_framed(doc: &Document) -> SvgFrame {
+    let (view_w, view_h, h_flip, x_shift) = match doc.extents() {
         Some(bb) => {
             let (x0, y0) = bb.min.to_f64();
             let (x1, y1) = bb.max.to_f64();
             let margin = 0.05 * ((x1 - x0).max(y1 - y0)).max(1.0);
-            let w = (x1 - x0) + 2.0 * margin;
-            let h = (y1 - y0) + 2.0 * margin;
-            (w, h, y1 + margin)
+            (
+                (x1 - x0) + 2.0 * margin,
+                (y1 - y0) + 2.0 * margin,
+                y1 + margin,
+                x0 - margin,
+            )
         }
-        None => (100.0, 100.0, 100.0),
+        None => (100.0, 100.0, 100.0, 0.0),
     };
-    let x_shift = doc
-        .extents()
-        .map(|bb| bb.min.x - 0.05 * ((bb.max.x - bb.min.x).max(bb.max.y - bb.min.y)).max(1.0))
-        .unwrap_or(0.0);
 
     let fy = |y: f64| h_flip - y;
     let fx = |x: f64| x - x_shift;
@@ -30,7 +46,7 @@ pub fn export_svg(doc: &Document) -> String {
     let mut s = String::new();
     let _ = writeln!(
         s,
-        "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 {w:.6} {h:.6}\" data-h-flip=\"{h_flip:.9}\" data-x-shift=\"{x_shift:.9}\">"
+        "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 {view_w:.6} {view_h:.6}\" data-h-flip=\"{h_flip:.9}\" data-x-shift=\"{x_shift:.9}\">"
     );
 
     for e in doc.iter() {
@@ -45,7 +61,13 @@ pub fn export_svg(doc: &Document) -> String {
         }
     }
     s.push_str("</svg>\n");
-    s
+    SvgFrame {
+        svg: s,
+        view_w,
+        view_h,
+        x_shift,
+        h_flip,
+    }
 }
 
 fn dimension_to_svg(

@@ -278,10 +278,8 @@ fn export_menu(ctx: &Context, app: &mut AppState) {
             }
             ui.separator();
             if ui.button("Plot…").clicked() {
-                ctx.data_mut(|d| {
-                    d.insert_temp(egui::Id::new("open_export"), false);
-                    d.insert_temp(egui::Id::new("open_plot"), true);
-                });
+                ctx.data_mut(|d| d.insert_temp(egui::Id::new("open_export"), false));
+                app.plot_dialog_open = true;
             }
         });
     if !open {
@@ -289,29 +287,18 @@ fn export_menu(ctx: &Context, app: &mut AppState) {
     }
 }
 
-/// Custom-paper-size ids for `plot_dialog`'s persisted (ctx temp-data) form
-/// state — no `UiState` field needed, same idiom as `unit_dropdown`/
-/// `snap_master`'s popup-open flags elsewhere in this file.
-pub(super) const PLOT_OPEN_ID: &str = "open_plot";
+/// Purely-local Plot dialog form state (paper preset, custom size,
+/// orientation) lives in ctx temp-data — no second reader, same idiom as
+/// `unit_dropdown`/`snap_master` elsewhere. The dialog's open flag and its
+/// area mode instead live on `AppState`, since the canvas overlay reads
+/// them too (see `view.rs`).
 const PLOT_PRESET_ID: &str = "plot_paper_preset";
 const PLOT_CUSTOM_W_ID: &str = "plot_custom_w_mm";
 const PLOT_CUSTOM_H_ID: &str = "plot_custom_h_mm";
 const PLOT_LANDSCAPE_ID: &str = "plot_landscape";
-/// Plot area mode: 0 = drawing extents, 1 = picked window.
-pub(super) const PLOT_AREA_ID: &str = "plot_area_mode";
 
 pub(super) fn plot_dialog(ctx: &Context, app: &mut AppState) {
-    // A finished canvas pick reopens the dialog in Window mode.
-    if std::mem::take(&mut app.reopen_plot) {
-        ctx.data_mut(|d| {
-            d.insert_temp(egui::Id::new(PLOT_OPEN_ID), true);
-            d.insert_temp(egui::Id::new(PLOT_AREA_ID), 1usize);
-        });
-    }
-    if !ctx.data(|d| {
-        d.get_temp::<bool>(egui::Id::new(PLOT_OPEN_ID))
-            .unwrap_or(false)
-    }) {
+    if !app.plot_dialog_open {
         return;
     }
 
@@ -319,9 +306,8 @@ pub(super) fn plot_dialog(ctx: &Context, app: &mut AppState) {
     let custom_w_id = egui::Id::new(PLOT_CUSTOM_W_ID);
     let custom_h_id = egui::Id::new(PLOT_CUSTOM_H_ID);
     let landscape_id = egui::Id::new(PLOT_LANDSCAPE_ID);
-    let area_id = egui::Id::new(PLOT_AREA_ID);
 
-    let mut area = ctx.data(|d| d.get_temp::<usize>(area_id)).unwrap_or(0);
+    let mut window_mode = app.plot_window_mode;
     let mut preset = ctx.data(|d| d.get_temp::<usize>(preset_id)).unwrap_or(0);
     let mut custom_w = ctx
         .data(|d| d.get_temp::<f64>(custom_w_id))
@@ -352,10 +338,10 @@ pub(super) fn plot_dialog(ctx: &Context, app: &mut AppState) {
             ui.add_space(8.0);
 
             setting_row(ui, "Plot area", |ui| {
-                ui.selectable_value(&mut area, 0, "Extents");
-                ui.selectable_value(&mut area, 1, "Window");
+                ui.selectable_value(&mut window_mode, false, "Extents");
+                ui.selectable_value(&mut window_mode, true, "Window");
             });
-            if area == 1 {
+            if window_mode {
                 setting_row(ui, "Window", |ui| {
                     match app.plot_window {
                         Some((x0, y0, x1, y1)) => {
@@ -429,7 +415,7 @@ pub(super) fn plot_dialog(ctx: &Context, app: &mut AppState) {
             });
 
             ui.add_space(10.0);
-            let ready = area == 0 || app.plot_window.is_some();
+            let ready = !window_mode || app.plot_window.is_some();
             let plot_clicked = ui
                 .add_enabled(ready, egui::Button::new("Plot to PDF…"))
                 .on_disabled_hover_text("Pick a plot window first")
@@ -445,7 +431,7 @@ pub(super) fn plot_dialog(ctx: &Context, app: &mut AppState) {
                 } else {
                     paper.portrait()
                 };
-                let window = (area == 1)
+                let window = window_mode
                     .then(|| {
                         app.plot_window
                             .map(|(x0, y0, x1, y1)| oxidraft_io::PlotWindow { x0, y0, x1, y1 })
@@ -472,10 +458,10 @@ pub(super) fn plot_dialog(ctx: &Context, app: &mut AppState) {
         d.insert_temp(custom_w_id, custom_w);
         d.insert_temp(custom_h_id, custom_h);
         d.insert_temp(landscape_id, landscape);
-        d.insert_temp(area_id, area);
     });
+    app.plot_window_mode = window_mode;
     if !open || close_after_plot || start_pick {
-        ctx.data_mut(|d| d.insert_temp(egui::Id::new(PLOT_OPEN_ID), false));
+        app.plot_dialog_open = false;
     }
 }
 
@@ -540,8 +526,7 @@ fn menu_items(ui: &mut egui::Ui, app: &mut AppState) {
         }
         ui.separator();
         if ui.button("Plot…").clicked() {
-            ui.ctx()
-                .data_mut(|d| d.insert_temp(egui::Id::new("open_plot"), true));
+            app.plot_dialog_open = true;
             ui.close();
         }
     });

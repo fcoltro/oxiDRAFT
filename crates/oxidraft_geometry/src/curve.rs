@@ -18,6 +18,53 @@ pub trait CurveSegment {
 
     fn arc_length(&self) -> f64;
 
+    /// The domain parameter `t` as a clamped 0..1 fraction, or `None` when
+    /// the domain has collapsed to a point.
+    fn normalized_param(&self, t: f64) -> Option<f64> {
+        let (t0, t1) = self.domain();
+        ((t1 - t0).abs() > 1e-12).then(|| ((t - t0) / (t1 - t0)).clamp(0.0, 1.0))
+    }
+
+    /// [`CurveSegment::param_at_length`] for many distances at once,
+    /// results in input order. The default serves every query from one
+    /// cumulative chord walk — per-query walks would cost N×256 curve
+    /// evaluations for a DIVIDE/MEASURE over a spline. Uniform-speed kinds
+    /// override with their per-query closed forms.
+    fn param_at_lengths(&self, distances: &[f64]) -> Vec<f64> {
+        let (t0, t1) = self.domain();
+        let mut order: Vec<usize> = (0..distances.len()).collect();
+        order.sort_by(|&a, &b| distances[a].total_cmp(&distances[b]));
+        // Past-the-end queries clamp to the end, like the singular form.
+        let mut out = vec![t1; distances.len()];
+        let mut qi = 0;
+        // Non-positive and NaN distances clamp to the start (NaN sorts
+        // via total_cmp but fails `> 0.0`, so it is consumed here too).
+        while qi < order.len() && !(distances[order[qi]] > 0.0) {
+            out[order[qi]] = t0;
+            qi += 1;
+        }
+        const N: usize = 256;
+        let mut prev = self.evaluate_f64(t0);
+        let mut acc = 0.0;
+        for i in 1..=N {
+            if qi >= order.len() {
+                break;
+            }
+            let t = t0 + (t1 - t0) * i as f64 / N as f64;
+            let p = self.evaluate_f64(t);
+            let d = (p.0 - prev.0).hypot(p.1 - prev.1);
+            while qi < order.len() && acc + d >= distances[order[qi]] {
+                let s = distances[order[qi]];
+                let f = if d > 1e-12 { (s - acc) / d } else { 1.0 };
+                out[order[qi]] = t0 + (t1 - t0) * ((i - 1) as f64 + f) / N as f64;
+                qi += 1;
+            }
+            acc += d;
+            prev = p;
+        }
+        out
+    }
+
     /// Parameter at which the arc length measured from the curve's start
     /// reaches `s`, clamped to the domain: `s ≤ 0` (or non-finite) gives
     /// the start, `s` past the total length gives the end. Uniform
@@ -143,5 +190,8 @@ impl CurveSegment for Curve {
     }
     fn param_at_length(&self, s: f64) -> f64 {
         dispatch!(self, v => v.param_at_length(s))
+    }
+    fn param_at_lengths(&self, distances: &[f64]) -> Vec<f64> {
+        dispatch!(self, v => v.param_at_lengths(distances))
     }
 }

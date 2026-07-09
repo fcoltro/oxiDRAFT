@@ -225,6 +225,15 @@ impl Entity {
     }
 
     pub fn transform(&mut self, t: &Transform2d) {
+        // The single geometry floor: a non-finite transform (NaN drag
+        // delta, a mirror axis of two identical points) would poison every
+        // coordinate it touched. Every transform application — the CAD
+        // edit helpers, the UI tool-event loops — passes through here, so
+        // one gate keeps the whole document finite. Callers keep only
+        // their own UX concerns (a message, skipping a history snapshot).
+        if !t.is_finite() {
+            return;
+        }
         self.tangents.clear();
         self.kind = match &self.kind {
             EntityKind::Curve(c) => EntityKind::Curve(t.apply_curve(c)),

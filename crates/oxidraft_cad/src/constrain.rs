@@ -8,7 +8,9 @@
 //! moves.
 
 use oxidraft_constraint::{Constraint, PointVar, ScalarVar, Sketch};
-use oxidraft_document::{ConstraintKind, Document, EntityId, EntityKind, SketchConstraint};
+use oxidraft_document::{
+    ConstraintKind, Document, EntityId, EntityKind, SketchConstraint, normalize_angle_deg,
+};
 use oxidraft_geometry::{CircularArc, Curve, LineSeg, Point2d};
 use std::collections::HashMap;
 use std::f64::consts::TAU;
@@ -462,14 +464,7 @@ pub fn constrain_radius(
                 .iter()
                 .position(|c| c.kind == ConstraintKind::Radius && c.a == id);
             let conflict = describe_conflict(doc, &diagnose_conflict(doc, &[id]), touched);
-            match prev {
-                Some(p) => {
-                    doc.add_constraint(p);
-                }
-                None => doc
-                    .constraints
-                    .retain(|c| !(c.kind == ConstraintKind::Radius && c.a == id)),
-            }
+            restore_or_remove(doc, prev, |c| c.kind == ConstraintKind::Radius && c.a == id);
             return Err(format!(
                 "Could not solve radius {target} against the existing constraints (residual {:.2e}){conflict}",
                 res.residual
@@ -529,14 +524,9 @@ pub fn constrain_distance(
                 .iter()
                 .position(|c| c.kind == ConstraintKind::Distance && c.a == id);
             let conflict = describe_conflict(doc, &diagnose_conflict(doc, &[id]), touched);
-            match prev {
-                Some(p) => {
-                    doc.add_constraint(p);
-                }
-                None => doc
-                    .constraints
-                    .retain(|c| !(c.kind == ConstraintKind::Distance && c.a == id)),
-            }
+            restore_or_remove(doc, prev, |c| {
+                c.kind == ConstraintKind::Distance && c.a == id
+            });
             return Err(format!(
                 "Could not solve length {target} against the existing constraints (residual {:.2e}){conflict}",
                 res.residual
@@ -613,12 +603,7 @@ pub fn constrain_angle(
                 .filter_map(|i| constraint_doc_idx.get(i).copied())
                 .collect();
             let conflict = describe_conflict(doc, &culprits, touched);
-            match prev {
-                Some(p) => {
-                    doc.add_constraint(p);
-                }
-                None => doc.constraints.retain(|c| !c.same_relation(&candidate)),
-            }
+            restore_or_remove(doc, prev, |c| c.same_relation(&candidate));
             return Err(format!(
                 "Could not hold the lines at {target}° against their existing constraints{conflict}"
             ));
@@ -655,12 +640,20 @@ pub fn constrain_angle(
     Ok(format!("Held the angle between the lines at {target}°"))
 }
 
-/// Folds a degree value into (0, 180]: lines are undirected, so θ and
-/// θ+180° name the same relation, and 0° is stored as 180° so the record
-/// keeps a positive driving value (the loader rejects non-positive ones).
-fn normalize_angle_deg(deg: f64) -> f64 {
-    let a = deg.rem_euclid(180.0);
-    if a == 0.0 { 180.0 } else { a }
+/// Rolls back a failed valued-constraint record: the previous record is
+/// restored when one existed, otherwise the freshly added one (matched by
+/// `added`) is removed. Shared by the radius/length/angle commands.
+fn restore_or_remove(
+    doc: &mut Document,
+    prev: Option<SketchConstraint>,
+    added: impl Fn(&SketchConstraint) -> bool,
+) {
+    match prev {
+        Some(p) => {
+            doc.add_constraint(p);
+        }
+        None => doc.constraints.retain(|c| !added(c)),
+    }
 }
 
 /// Solver variables for one entity: a line's two endpoints, or an arc's
@@ -898,10 +891,8 @@ fn component_sketch(doc: &Document, seeds: &[EntityId]) -> CompSketch {
                 else {
                     continue;
                 };
-                // constrain_angle records values already folded, but a
-                // hand-edited file can carry any positive degrees — 1e300°
-                // in radians would shred sin/cos precision in the residual.
-                let v = normalize_angle_deg(v);
+                // Document::add_constraint already folded this into (0, 180],
+                // so the value is safe to hand straight to the solver.
                 s.constrain(Constraint::Angle(a0, a1, b0, b1, v.to_radians()));
                 constraint_doc_idx.push(doc_idx);
             }

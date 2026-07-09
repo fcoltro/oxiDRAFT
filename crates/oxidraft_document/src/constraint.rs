@@ -98,6 +98,18 @@ impl ConstraintKind {
     }
 }
 
+/// Folds an angle in degrees into the canonical (0, 180]: lines are
+/// undirected, so θ and θ+180° name the same relation, and 0° stores as
+/// 180° so the record keeps a positive driving value (the loader rejects
+/// non-positive ones). Non-finite input is left for the caller to reject.
+pub fn normalize_angle_deg(deg: f64) -> f64 {
+    if !deg.is_finite() {
+        return deg;
+    }
+    let a = deg.rem_euclid(180.0);
+    if a == 0.0 { 180.0 } else { a }
+}
+
 /// A persistent geometric relation between line entities. Pair kinds keep
 /// `a` as the reference entity picked first; single kinds leave `b` empty.
 /// Point-level kinds (Coincident) carry the endpoint index (0 or 1) of each
@@ -163,7 +175,7 @@ impl SketchConstraint {
             a,
             b: Some(b),
             pts: None,
-            val: Some(degrees),
+            val: Some(normalize_angle_deg(degrees)),
         }
     }
 

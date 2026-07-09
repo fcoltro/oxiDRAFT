@@ -119,13 +119,8 @@ impl CurveSegment for PolyCurve {
         for (i, seg) in self.segments.iter().enumerate() {
             let len = seg.arc_length();
             if len > 1e-12 && acc + len >= s {
-                let (t0, t1) = seg.domain();
                 let tl = seg.param_at_length(s - acc);
-                let f = if (t1 - t0).abs() > 1e-12 {
-                    ((tl - t0) / (t1 - t0)).clamp(0.0, 1.0)
-                } else {
-                    0.0
-                };
+                let f = seg.normalized_param(tl).unwrap_or(0.0);
                 return (i as f64 + f) / n as f64;
             }
             // A poisoned segment length (NaN) fails the comparison above
@@ -135,6 +130,12 @@ impl CurveSegment for PolyCurve {
             }
         }
         1.0
+    }
+
+    /// The segment walk is already length-indexed; the batch chord walk
+    /// would flatten segment boundaries away.
+    fn param_at_lengths(&self, distances: &[f64]) -> Vec<f64> {
+        distances.iter().map(|&s| self.param_at_length(s)).collect()
     }
 }
 

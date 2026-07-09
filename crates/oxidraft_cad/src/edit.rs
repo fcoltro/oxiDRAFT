@@ -1012,11 +1012,7 @@ fn fillet_freeform(
 /// midpoint-distance heuristic would. Returns the whole curve when the
 /// tangency lands on an end.
 fn leg_away_from(c: &Curve, t: f64, other: (f64, f64)) -> Option<Curve> {
-    let (d0, d1) = c.domain();
-    if (d1 - d0).abs() < 1e-12 {
-        return None;
-    }
-    let tn = ((t - d0) / (d1 - d0)).clamp(0.0, 1.0);
+    let tn = c.normalized_param(t)?;
     if !(1e-6..=1.0 - 1e-6).contains(&tn) {
         return Some(c.clone());
     }
@@ -1051,40 +1047,9 @@ fn chamfer_freeform(
     // Without a pick there is nothing to disambiguate multiple crossings.
     let [hit] = hits.as_slice() else { return None };
 
-    let cut = |c: &Curve, t: f64, dist: f64| -> Option<(Curve, (f64, f64))> {
-        let (d0, d1) = c.domain();
-        if (d1 - d0).abs() < 1e-12 {
-            return None;
-        }
-        let tn = ((t - d0) / (d1 - d0)).clamp(0.0, 1.0);
-        let total = c.arc_length();
-        let s_corner = if tn <= 0.0 {
-            0.0
-        } else if tn >= 1.0 {
-            total
-        } else {
-            extract_piece(c, 0.0, tn).arc_length()
-        };
-        // Keep the longer side of the corner, cut `dist` into it.
-        let (s_cut, keep_low) = if total - s_corner >= s_corner {
-            (s_corner + dist, false)
-        } else {
-            (s_corner - dist, true)
-        };
-        if !(s_cut > 1e-9 && s_cut < total - 1e-9) {
-            return None; // the distance doesn't fit on the retained side
-        }
-        let tc = c.param_at_length(s_cut);
-        let tcn = ((tc - d0) / (d1 - d0)).clamp(0.0, 1.0);
-        let (left, right) = split_curve(c, tcn);
-        let keep = if keep_low { left } else { right };
-        let end = c.evaluate_f64(tc);
-        (keep.is_finite() && end.0.is_finite() && end.1.is_finite()).then_some((keep, end))
-    };
-
     // Both legs solve before the document is touched.
-    let (keep_a, end_a) = cut(&ca, hit.t1, dist_a)?;
-    let (keep_b, end_b) = cut(&cb, hit.t2, dist_b)?;
+    let (keep_a, end_a) = chamfer_cut(&ca, hit.t1, dist_a)?;
+    let (keep_b, end_b) = chamfer_cut(&cb, hit.t2, dist_b)?;
     doc.get_mut(a)?.kind = EntityKind::Curve(keep_a);
     doc.get_mut(b)?.kind = EntityKind::Curve(keep_b);
     prune_broken_welds(doc, &[a, b]);
@@ -1094,6 +1059,35 @@ fn chamfer_freeform(
         Point2d::from_f64(end_b.0, end_b.1),
     );
     Some(doc.add_on_layer(EntityKind::Curve(Curve::Line(conn)), layer))
+}
+
+/// One chamfer leg: from the corner at domain parameter `t`, keep the
+/// longer side of the curve and cut `dist` of arc length into it,
+/// returning the retained piece and the cut point.
+fn chamfer_cut(c: &Curve, t: f64, dist: f64) -> Option<(Curve, (f64, f64))> {
+    let tn = c.normalized_param(t)?;
+    let total = c.arc_length();
+    let s_corner = if tn <= 0.0 {
+        0.0
+    } else if tn >= 1.0 {
+        total
+    } else {
+        extract_piece(c, 0.0, tn).arc_length()
+    };
+    let (s_cut, keep_low) = if total - s_corner >= s_corner {
+        (s_corner + dist, false)
+    } else {
+        (s_corner - dist, true)
+    };
+    if !(s_cut > 1e-9 && s_cut < total - 1e-9) {
+        return None; // the distance doesn't fit on the retained side
+    }
+    let tc = c.param_at_length(s_cut);
+    let tcn = c.normalized_param(tc)?;
+    let (left, right) = split_curve(c, tcn);
+    let keep = if keep_low { left } else { right };
+    let end = c.evaluate_f64(tc);
+    (keep.is_finite() && end.0.is_finite() && end.1.is_finite()).then_some((keep, end))
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -1901,12 +1895,8 @@ fn arc_between(center: (f64, f64), ta: (f64, f64), tb: (f64, f64), radius: f64) 
 }
 
 fn apply_to(doc: &mut Document, ids: &[EntityId], t: &Transform2d) {
-    // A non-finite transform (NaN drag delta, degenerate mirror axis)
-    // would poison every touched entity; declining keeps the document
-    // finite, the same contract the file loaders enforce on the way in.
-    if !t.is_finite() {
-        return;
-    }
+    // A non-finite transform is floored inside `Entity::transform`, so
+    // this loop simply no-ops on one — no guard needed here.
     for &id in ids {
         if let Some(e) = doc.get_mut(id) {
             e.transform(t);
@@ -1915,7 +1905,9 @@ fn apply_to(doc: &mut Document, ids: &[EntityId], t: &Transform2d) {
 }
 
 fn duplicate_with(doc: &mut Document, ids: &[EntityId], t: &Transform2d) -> Vec<EntityId> {
-    // Same finiteness contract as `apply_to`.
+    // A non-finite transform makes `Entity::transform` a no-op, so the
+    // copies would land exactly on their sources — decline outright
+    // rather than stack invisible duplicates.
     if !t.is_finite() {
         return Vec::new();
     }
@@ -1930,8 +1922,7 @@ fn duplicate_with(doc: &mut Document, ids: &[EntityId], t: &Transform2d) -> Vec<
 
 fn normalized_pick_param(curve: &Curve, px: f64, py: f64) -> f64 {
     let pr = oxidraft_geometry::project_point_onto_curve(curve, px, py);
-    let (t0, t1) = curve.domain();
-    ((pr.t - t0) / (t1 - t0)).clamp(0.0, 1.0)
+    curve.normalized_param(pr.t).unwrap_or(0.0)
 }
 
 fn extract_piece(curve: &Curve, a: f64, b: f64) -> Curve {

@@ -18,7 +18,7 @@ fn frame(ctx: &egui::Context, app: &mut AppState, ui_state: &mut UiState) {
     });
 }
 
-/// Reproduces the File > Plot... menu action (sets the same ctx temp flag
+/// Reproduces the File > Plot... menu action (sets the same AppState flag
 /// `plot_dialog` reads) and confirms the dialog actually renders through the
 /// real pipeline, not just that `export_pdf` works in isolation.
 #[test]
@@ -33,18 +33,19 @@ fn setting_the_open_plot_flag_shows_the_plot_window() {
         "Plot dialog should be closed by default"
     );
 
-    ctx.data_mut(|d| d.insert_temp(egui::Id::new("open_plot"), true));
+    app.plot_dialog_open = true;
     frame(&ctx, &mut app, &mut ui_state);
     frame(&ctx, &mut app, &mut ui_state);
 
     assert!(
         ctx.memory(|m| m.area_rect(egui::Id::new("Plot"))).is_some(),
-        "Plot dialog should be visible once the open_plot flag is set"
+        "Plot dialog should be visible once plot_dialog_open is set"
     );
 }
 
-/// A finished plot-window pick sets `reopen_plot`; the next frames must
-/// bring the dialog back in Window mode without any menu interaction.
+/// A finished plot-window pick leaves `plot_dialog_open`/`plot_window_mode`
+/// set on AppState; the dialog must render in Window mode with no menu
+/// interaction.
 #[test]
 fn a_finished_window_pick_reopens_the_plot_dialog() {
     let ctx = egui::Context::default();
@@ -56,18 +57,16 @@ fn a_finished_window_pick_reopens_the_plot_dialog() {
 
     // What apply_tool_event leaves behind after the second corner click.
     app.plot_window = Some((0.0, 0.0, 40.0, 30.0));
-    app.reopen_plot = true;
-    frame(&ctx, &mut app, &mut ui_state);
+    app.plot_dialog_open = true;
+    app.plot_window_mode = true;
     frame(&ctx, &mut app, &mut ui_state);
 
     assert!(
         ctx.memory(|m| m.area_rect(egui::Id::new("Plot"))).is_some(),
         "the dialog must reopen after the canvas pick"
     );
-    assert!(!app.reopen_plot, "the reopen flag is one-shot");
-    assert_eq!(
-        ctx.data(|d| d.get_temp::<usize>(egui::Id::new("plot_area_mode"))),
-        Some(1),
-        "the dialog reopens in Window mode"
+    assert!(
+        app.plot_window_mode,
+        "the dialog stays in Window mode after the pick"
     );
 }

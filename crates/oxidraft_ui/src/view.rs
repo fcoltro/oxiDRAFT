@@ -1038,34 +1038,27 @@ fn canvas(root_ui: &mut egui::Ui, app: &mut AppState, ui_state: &mut UiState, pa
         // While the Plot dialog is open in Window mode, show the stored
         // plot window on canvas so "what will print" is never a guess.
         // (During the pick itself the tool's rubber-band preview covers it.)
-        if let Some((wx0, wy0, wx1, wy1)) = app.plot_window {
-            let dialog_open = ctx.data(|d| {
-                d.get_temp::<bool>(egui::Id::new(chrome::PLOT_OPEN_ID))
-                    .unwrap_or(false)
-            });
-            let window_mode = ctx.data(|d| {
-                d.get_temp::<usize>(egui::Id::new(chrome::PLOT_AREA_ID))
-                    .unwrap_or(0)
-            }) == 1;
-            if dialog_open && window_mode {
-                let stroke = Stroke::new(1.5, Color32::from_rgb(255, 200, 120));
-                let c = [
-                    to_screen(wx0, wy0),
-                    to_screen(wx1, wy0),
-                    to_screen(wx1, wy1),
-                    to_screen(wx0, wy1),
-                ];
-                for i in 0..4 {
-                    render::draw_dashed_line(&painter, c[i], c[(i + 1) % 4], stroke, 6.0, 4.0);
-                }
-                painter.text(
-                    ((c[0].to_vec2() + c[2].to_vec2()) * 0.5).to_pos2(),
-                    egui::Align2::CENTER_CENTER,
-                    "PLOT",
-                    egui::FontId::proportional(11.0),
-                    Color32::from_rgba_unmultiplied(255, 200, 120, 140),
-                );
+        if app.plot_dialog_open
+            && app.plot_window_mode
+            && let Some((wx0, wy0, wx1, wy1)) = app.plot_window
+        {
+            let stroke = Stroke::new(1.5, Color32::from_rgb(255, 200, 120));
+            let c = [
+                to_screen(wx0, wy0),
+                to_screen(wx1, wy0),
+                to_screen(wx1, wy1),
+                to_screen(wx0, wy1),
+            ];
+            for i in 0..4 {
+                render::draw_dashed_line(&painter, c[i], c[(i + 1) % 4], stroke, 6.0, 4.0);
             }
+            painter.text(
+                ((c[0].to_vec2() + c[2].to_vec2()) * 0.5).to_pos2(),
+                egui::Align2::CENTER_CENTER,
+                "PLOT",
+                egui::FontId::proportional(11.0),
+                Color32::from_rgba_unmultiplied(255, 200, 120, 140),
+            );
         }
         if matches!(app.tool, Tool::Select) && app.interaction.corner_action.is_none() {
             let guide = Stroke::new(1.0, crate::theme::CONTROL_LINE);

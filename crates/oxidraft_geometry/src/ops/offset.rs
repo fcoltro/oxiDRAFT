@@ -96,14 +96,7 @@ fn trim_offset_loops(
         return segs;
     }
 
-    let norm = |c: &Curve, t: f64| {
-        let (t0, t1) = c.domain();
-        if (t1 - t0).abs() < 1e-12 {
-            0.0
-        } else {
-            ((t - t0) / (t1 - t0)).clamp(0.0, 1.0)
-        }
-    };
+    let norm = |c: &Curve, t: f64| c.normalized_param(t).unwrap_or(0.0);
     let boxes: Vec<crate::point::BoundingBox> = segs.iter().map(|s| s.bounding_box()).collect();
     let mut cuts: Vec<Vec<f64>> = vec![Vec::new(); n];
     let mut crossings = 0usize;
@@ -168,7 +161,15 @@ fn trim_offset_loops(
 
     // Distance filter: 2% slack absorbs the spline-offset fit error the
     // way the freeform fillet does; real loops dive far below |dist|.
-    let src = Curve::Poly(Box::new(source.clone()));
+    // Borrowing the source segments directly avoids cloning the whole
+    // polycurve just to wrap it for the distance query.
+    let dist_to_source = |x: f64, y: f64| {
+        source
+            .segments
+            .iter()
+            .map(|s| point_to_curve_distance(s, x, y))
+            .fold(f64::INFINITY, f64::min)
+    };
     let tol = d * 0.02 + 1e-9;
     let mut kept: Vec<Curve> = Vec::new();
     for (piece, exempt) in pieces.into_iter().zip(piece_exempt) {
@@ -176,7 +177,7 @@ fn trim_offset_loops(
         let holds = exempt
             || [0.25, 0.5, 0.75].iter().all(|f| {
                 let (x, y) = piece.evaluate_f64(t0 + (t1 - t0) * f);
-                point_to_curve_distance(&src, x, y) >= d - tol
+                dist_to_source(x, y) >= d - tol
             });
         if holds {
             kept.push(piece);

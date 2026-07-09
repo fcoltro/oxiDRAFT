@@ -53,9 +53,11 @@ pub struct PlotWindow {
 }
 
 impl PlotWindow {
-    /// Sorted corners, or `None` when the window can't be mapped to a page
-    /// (non-finite, or no area to speak of).
-    fn normalized(self) -> Option<(f64, f64, f64, f64)> {
+    /// Sorted corners `(x0, y0, x1, y1)`, or `None` when the window can't be
+    /// mapped to a page (non-finite, or no area to speak of). The single
+    /// validity predicate — the UI pick handler uses it too, rather than
+    /// re-deriving the same sort/finite/area check.
+    pub fn normalized(self) -> Option<(f64, f64, f64, f64)> {
         let (x0, x1) = if self.x0 <= self.x1 {
             (self.x0, self.x1)
         } else {
@@ -125,29 +127,19 @@ pub fn export_pdf_window(
 /// written as bare numbers (no `mm`/`pt` unit suffix, which would otherwise
 /// get reinterpreted through usvg's CSS-pixel unit conversion).
 fn paged_svg(doc: &Document, paper: PaperSize, window: Option<PlotWindow>) -> String {
-    let inner = crate::svg::export_svg(doc);
-    let (draw_w, draw_h) = parse_viewbox_size(&inner).unwrap_or((100.0, 100.0));
+    let frame = crate::svg::export_svg_framed(doc);
+    let inner = &frame.svg;
     let body_start = inner.find('>').map(|i| i + 1).unwrap_or(inner.len());
     let body_end = inner.rfind("</svg>").unwrap_or(inner.len());
     let body = &inner[body_start..body_end];
 
     // The inner viewBox is what gets fitted to the page: the full drawing
     // by default, or the picked window converted into the inner SVG's
-    // coordinate frame (the exporter publishes its world→SVG mapping as
-    // data attributes for exactly this).
+    // coordinate frame using the mapping the exporter hands us. SVG y grows
+    // downward, so the window's top edge (y1) maps to the box's y origin.
     let (vx, vy, vw, vh) = match window.and_then(PlotWindow::normalized) {
-        Some((x0, y0, x1, y1)) => {
-            match (
-                parse_f64_attr(&inner, "data-x-shift"),
-                parse_f64_attr(&inner, "data-h-flip"),
-            ) {
-                // SVG y grows downward, so the window's top edge (y1) maps
-                // to the box's y origin.
-                (Some(xs), Some(hf)) => (x0 - xs, hf - y1, x1 - x0, y1 - y0),
-                _ => (0.0, 0.0, draw_w, draw_h),
-            }
-        }
-        None => (0.0, 0.0, draw_w, draw_h),
+        Some((x0, y0, x1, y1)) => (x0 - frame.x_shift, frame.h_flip - y1, x1 - x0, y1 - y0),
+        None => (0.0, 0.0, frame.view_w, frame.view_h),
     };
 
     let page_w = mm_to_pt(paper.width_mm.max(1.0));
@@ -168,14 +160,10 @@ fn paged_svg(doc: &Document, paper: PaperSize, window: Option<PlotWindow>) -> St
     )
 }
 
-/// Reads a numeric attribute like `data-h-flip="…"` off the inner SVG tag.
-fn parse_f64_attr(svg: &str, name: &str) -> Option<f64> {
-    let key = format!("{name}=\"");
-    let start = svg.find(&key)? + key.len();
-    let rest = &svg[start..];
-    rest[..rest.find('"')?].parse().ok()
-}
-
+/// Width/height from the first `viewBox` in `svg` — only the tests need to
+/// read a rendered page's size back out (the exporter now hands `paged_svg`
+/// its dimensions typed).
+#[cfg(test)]
 fn parse_viewbox_size(svg: &str) -> Option<(f64, f64)> {
     let key = "viewBox=\"";
     let start = svg.find(key)? + key.len();

@@ -168,6 +168,11 @@ impl CurveSegment for CircularArc {
         }
         t0 + (t1 - t0) * (s / len).min(1.0)
     }
+
+    /// Per-query is O(1); the batch chord walk would be slower here.
+    fn param_at_lengths(&self, distances: &[f64]) -> Vec<f64> {
+        distances.iter().map(|&s| self.param_at_length(s)).collect()
+    }
 }
 
 #[cfg(test)]
