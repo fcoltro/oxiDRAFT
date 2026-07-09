@@ -105,6 +105,37 @@ impl CurveSegment for PolyCurve {
     fn arc_length(&self) -> f64 {
         self.segments.iter().map(|s| s.arc_length()).sum()
     }
+
+    /// Walks the segments and recurses into the one containing `s` — the
+    /// poly parameter allots 1/n per segment regardless of segment length,
+    /// so the trait's uniform chord walk would misplace points badly on
+    /// mixed-length chains.
+    fn param_at_length(&self, s: f64) -> f64 {
+        let n = self.segments.len();
+        if n == 0 || !s.is_finite() || s <= 0.0 {
+            return 0.0;
+        }
+        let mut acc = 0.0;
+        for (i, seg) in self.segments.iter().enumerate() {
+            let len = seg.arc_length();
+            if len > 1e-12 && acc + len >= s {
+                let (t0, t1) = seg.domain();
+                let tl = seg.param_at_length(s - acc);
+                let f = if (t1 - t0).abs() > 1e-12 {
+                    ((tl - t0) / (t1 - t0)).clamp(0.0, 1.0)
+                } else {
+                    0.0
+                };
+                return (i as f64 + f) / n as f64;
+            }
+            // A poisoned segment length (NaN) fails the comparison above
+            // and must not poison the accumulator either.
+            if len.is_finite() {
+                acc += len;
+            }
+        }
+        1.0
+    }
 }
 
 #[cfg(test)]

@@ -116,6 +116,15 @@ impl CurveSegment for LineSeg {
     fn arc_length(&self) -> f64 {
         self.length_f64()
     }
+
+    /// Uniform speed: the parameter is linear in arc length.
+    fn param_at_length(&self, s: f64) -> f64 {
+        let len = self.length_f64();
+        if !s.is_finite() || s <= 0.0 || len <= 1e-12 {
+            return 0.0;
+        }
+        (s / len).min(1.0)
+    }
 }
 
 #[cfg(test)]

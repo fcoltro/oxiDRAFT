@@ -145,3 +145,65 @@ fn three_collinear_points_no_circle() {
         "collinear points must not yield a circle"
     );
 }
+
+#[test]
+fn param_at_length_is_linear_on_uniform_speed_curves() {
+    let line = Curve::Line(LineSeg::from_endpoints(pt(0, 0), pt(10, 0)));
+    let t = line.param_at_length(2.5);
+    assert!((t - 0.25).abs() < 1e-12, "line t={t}");
+
+    let arc = Curve::Arc(CircularArc::new(
+        Point2d::from_f64(0.0, 0.0),
+        2.0,
+        0.0,
+        std::f64::consts::FRAC_PI_2,
+    ));
+    // Quarter circle of length π; halfway along is the 45° angle.
+    let t = arc.param_at_length(std::f64::consts::PI / 2.0 / 2.0 * 2.0);
+    assert!((t - std::f64::consts::FRAC_PI_4).abs() < 1e-12, "arc t={t}");
+}
+
+#[test]
+fn param_at_length_undoes_uneven_bezier_parameterization() {
+    // Straight-line geometry with wildly uneven parameter speed: uniform
+    // parameter steps bunch points near the slow end, but uniform arc-length
+    // steps must land evenly spaced along the line.
+    let b = Curve::Bezier(CubicBezier::new(
+        Point2d::from_f64(0.0, 0.0),
+        Point2d::from_f64(0.1, 0.0),
+        Point2d::from_f64(0.2, 0.0),
+        Point2d::from_f64(4.0, 0.0),
+    ));
+    let len = b.arc_length();
+    assert!((len - 4.0).abs() < 1e-3, "straight bezier length {len}");
+    for i in 1..4 {
+        let s = len * i as f64 / 4.0;
+        let (x, _) = b.evaluate_f64(b.param_at_length(s));
+        assert!(
+            (x - i as f64).abs() < 0.05,
+            "quarter {i}: landed at x={x}, wanted {}",
+            i
+        );
+    }
+}
+
+#[test]
+fn param_at_length_walks_polycurve_segments_by_length() {
+    // Two segments of length 1 and 3: the poly parameter gives each half
+    // the domain, so arc length 2 is NOT at t=0.5 — it is one third into
+    // the second segment.
+    let p = Curve::Poly(Box::new(PolyCurve::new(vec![
+        Curve::Line(LineSeg::from_endpoints(pt(0, 0), pt(1, 0))),
+        Curve::Line(LineSeg::from_endpoints(pt(1, 0), pt(4, 0))),
+    ])));
+    let t = p.param_at_length(2.0);
+    let (x, y) = p.evaluate_f64(t);
+    assert!(
+        (x - 2.0).abs() < 1e-9 && y.abs() < 1e-9,
+        "landed at ({x},{y})"
+    );
+
+    // Clamping at both ends.
+    assert_eq!(p.param_at_length(-1.0), 0.0);
+    assert_eq!(p.param_at_length(100.0), 1.0);
+}

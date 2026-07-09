@@ -17,6 +17,39 @@ pub trait CurveSegment {
     }
 
     fn arc_length(&self) -> f64;
+
+    /// Parameter at which the arc length measured from the curve's start
+    /// reaches `s`, clamped to the domain: `s ≤ 0` (or non-finite) gives
+    /// the start, `s` past the total length gives the end. Uniform
+    /// *parameter* steps are not uniform *spacing* on beziers and NURBS;
+    /// this is the inverse mapping that DIVIDE/MEASURE-style operations
+    /// need to place points evenly along the curve itself.
+    fn param_at_length(&self, s: f64) -> f64 {
+        let (t0, t1) = self.domain();
+        if !s.is_finite() || s <= 0.0 {
+            return t0;
+        }
+        // Cumulative chord walk: kind-agnostic, and the returned parameter
+        // is exact on the curve — only the spacing carries the ~1/N chord
+        // error, in line with the tolerance-based style used elsewhere.
+        // Uniform-speed kinds (lines, circular arcs) and polycurves
+        // override with closed forms.
+        const N: usize = 256;
+        let mut prev = self.evaluate_f64(t0);
+        let mut acc = 0.0;
+        for i in 1..=N {
+            let t = t0 + (t1 - t0) * i as f64 / N as f64;
+            let p = self.evaluate_f64(t);
+            let d = (p.0 - prev.0).hypot(p.1 - prev.1);
+            if acc + d >= s {
+                let f = if d > 1e-12 { (s - acc) / d } else { 1.0 };
+                return t0 + (t1 - t0) * ((i - 1) as f64 + f) / N as f64;
+            }
+            acc += d;
+            prev = p;
+        }
+        t1
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -107,5 +140,8 @@ impl CurveSegment for Curve {
     }
     fn arc_length(&self) -> f64 {
         dispatch!(self, v => v.arc_length())
+    }
+    fn param_at_length(&self, s: f64) -> f64 {
+        dispatch!(self, v => v.param_at_length(s))
     }
 }

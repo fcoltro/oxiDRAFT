@@ -21,6 +21,12 @@ pub enum Command {
     /// Drives the angle between two selected lines (degrees); `None` locks
     /// the current angle.
     ConstrainAngle(Option<f64>),
+    /// Places n−1 points at equal arc-length divisions on each selected
+    /// curve; `None` means the count was missing/invalid.
+    Divide(Option<u32>),
+    /// Places points every given arc-length interval on each selected
+    /// curve; `None` means the interval was missing/invalid.
+    Measure(Option<f64>),
     Unconstrain,
     LayerSet(String),
     LayerNew(String),
@@ -259,6 +265,16 @@ pub fn parse_command(input: &str) -> Command {
         "ANGCON" | "GCANG" | "GCANGLE" => {
             Command::ConstrainAngle(rest.first().and_then(|v| parse_finite_f64(v)))
         }
+        "DIVIDE" | "DIV" => Command::Divide(
+            rest.first()
+                .and_then(|v| v.trim().parse::<u32>().ok())
+                .filter(|n| *n >= 2),
+        ),
+        "MEASURE" | "ME" => Command::Measure(
+            rest.first()
+                .and_then(|v| parse_finite_f64(v))
+                .filter(|d| *d > 0.0),
+        ),
         "UNCONSTRAIN" | "UNCON" => Command::Unconstrain,
         "ERASE" | "E" | "DELETE" => Command::Erase,
         "DISJOINT" | "EXPLODE" | "X" => Command::Explode,
@@ -478,6 +494,21 @@ mod tests {
         assert!(matches!(
             parse_command("angcon"),
             Command::ConstrainAngle(None)
+        ));
+        assert!(matches!(
+            parse_command("DIVIDE 5"),
+            Command::Divide(Some(5))
+        ));
+        assert!(matches!(parse_command("div 1"), Command::Divide(None)));
+        assert!(matches!(parse_command("divide"), Command::Divide(None)));
+        assert!(matches!(
+            parse_command("MEASURE 2.5"),
+            Command::Measure(Some(v)) if v == 2.5
+        ));
+        assert!(matches!(parse_command("me -3"), Command::Measure(None)));
+        assert!(matches!(
+            parse_command("measure nan"),
+            Command::Measure(None)
         ));
         assert!(matches!(
             parse_command("tancon"),

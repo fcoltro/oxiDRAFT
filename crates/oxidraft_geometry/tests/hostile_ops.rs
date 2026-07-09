@@ -6,8 +6,8 @@
 //! `None`, an empty vec, endpoints — never panic, hang, or balloon memory.
 
 use oxidraft_geometry::{
-    CircularArc, Continuity, CubicBezier, Curve, LineSeg, NurbsCurve, Point2d, PolyCurve,
-    blend_curves, circle_through_three_points, common_tangent_segments, curvature_at,
+    CircularArc, Continuity, CubicBezier, Curve, CurveSegment, LineSeg, NurbsCurve, Point2d,
+    PolyCurve, blend_curves, circle_through_three_points, common_tangent_segments, curvature_at,
     curve_to_curve_distance, intersect, normal_at, offset_curve, point_to_curve_distance,
     project_point_onto_curve, refit_nurbs_subcurve, reverse_curve, split_curve, tangent_at,
     tangent_circle_ttr, tangent_circle_ttt, tangent_points_from_point, tessellate_curve,
@@ -248,4 +248,18 @@ fn interpolate_nurbs_declines_bad_weights_instead_of_panicking() {
     assert!(interpolate_nurbs(&[p(f64::NAN, 0.0), p(1.0, 1.0), p(2.0, 0.0)], &[1.0; 3]).is_none());
     // Sane input still interpolates.
     assert!(interpolate_nurbs(&data, &[1.0, 1.0, 1.0]).is_some());
+}
+
+#[test]
+fn param_at_length_survives_hostile_distances_and_curves() {
+    for c in menagerie() {
+        let (t0, t1) = c.domain();
+        for s in [0.0, -1.0, 1e300, f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
+            let t = c.param_at_length(s);
+            assert!(
+                (t0.min(t1)..=t0.max(t1)).contains(&t) || !c.is_finite(),
+                "param {t} escaped the domain ({t0},{t1}) for s={s}"
+            );
+        }
+    }
 }

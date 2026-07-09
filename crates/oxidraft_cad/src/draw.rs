@@ -113,10 +113,15 @@ pub fn divide(doc: &mut Document, curve: &Curve, n: u32) -> Vec<EntityId> {
     if n > 32_767 {
         return Vec::new();
     }
-    let (t0, t1) = curve.domain();
+    // Equal divisions of the *arc length*, not the parameter — uniform
+    // parameter steps bunch points on unevenly parameterized splines.
+    let len = curve.arc_length();
+    if !(len > 0.0 && len.is_finite()) {
+        return Vec::new();
+    }
     (1..n)
         .filter_map(|i| {
-            let t = t0 + (t1 - t0) * i as f64 / n as f64;
+            let t = curve.param_at_length(len * i as f64 / n as f64);
             let (x, y) = curve.evaluate_f64(t);
             let p = Point2d::from_f64(x, y);
             // A poisoned curve evaluates to NaN; drop those division
@@ -124,6 +129,33 @@ pub fn divide(doc: &mut Document, curve: &Curve, n: u32) -> Vec<EntityId> {
             p.is_finite().then(|| point(doc, p))
         })
         .collect()
+}
+
+/// Places point entities every `interval` of arc length along the curve,
+/// starting from its start — AutoCAD's MEASURE to [`divide`]'s DIVIDE.
+pub fn measure(doc: &mut Document, curve: &Curve, interval: f64) -> Vec<EntityId> {
+    use oxidraft_geometry::CurveSegment;
+    let len = curve.arc_length();
+    if !(interval.is_finite() && interval > 0.0 && len > 0.0 && len.is_finite()) {
+        return Vec::new();
+    }
+    // Same cap as divide: a tiny interval on a long curve must not
+    // balloon the document.
+    if len / interval > 32_767.0 {
+        return Vec::new();
+    }
+    let mut out = Vec::new();
+    let mut s = interval;
+    while s < len - 1e-12 {
+        let t = curve.param_at_length(s);
+        let (x, y) = curve.evaluate_f64(t);
+        let p = Point2d::from_f64(x, y);
+        if p.is_finite() {
+            out.push(point(doc, p));
+        }
+        s += interval;
+    }
+    out
 }
 
 fn order(a: f64, b: f64) -> (f64, f64) {
@@ -187,6 +219,52 @@ mod tests {
         } else {
             panic!()
         }
+    }
+
+    #[test]
+    fn divide_spaces_by_arc_length_not_parameter() {
+        let mut doc = Document::new();
+        // Straight geometry, wildly uneven parameter speed: the old
+        // uniform-parameter division bunched all points near x≈0.3.
+        let c = Curve::Bezier(oxidraft_geometry::CubicBezier::new(
+            Point2d::from_f64(0.0, 0.0),
+            Point2d::from_f64(0.1, 0.0),
+            Point2d::from_f64(0.2, 0.0),
+            Point2d::from_f64(4.0, 0.0),
+        ));
+        let ids = divide(&mut doc, &c, 4);
+        assert_eq!(ids.len(), 3);
+        for (i, id) in ids.iter().enumerate() {
+            let EntityKind::Point(p) = &doc.get(*id).unwrap().kind else {
+                panic!("expected a point");
+            };
+            let want = (i + 1) as f64;
+            assert!(
+                (p.x - want).abs() < 0.05,
+                "division {i} at x={}, wanted {want}",
+                p.x
+            );
+        }
+    }
+
+    #[test]
+    fn measure_places_points_at_fixed_intervals() {
+        let mut doc = Document::new();
+        let c = Curve::Line(LineSeg::from_endpoints(pt(0, 0), pt(10, 0)));
+        let ids = measure(&mut doc, &c, 3.0);
+        assert_eq!(ids.len(), 3, "at 3, 6, 9 — not at the endpoint");
+        for (i, id) in ids.iter().enumerate() {
+            let EntityKind::Point(p) = &doc.get(*id).unwrap().kind else {
+                panic!("expected a point");
+            };
+            assert!((p.x - 3.0 * (i + 1) as f64).abs() < 1e-9);
+        }
+        // Hostile intervals decline instead of ballooning or spinning.
+        for bad in [0.0, -1.0, f64::NAN, f64::INFINITY, 1e-9] {
+            assert!(measure(&mut doc, &c, bad).is_empty(), "interval {bad}");
+        }
+        let zero = Curve::Line(LineSeg::from_endpoints(pt(1, 1), pt(1, 1)));
+        assert!(measure(&mut doc, &zero, 1.0).is_empty());
     }
 
     #[test]

@@ -1608,6 +1608,8 @@ impl AppState {
             Command::ConstrainRadius(value) => self.constrain_radius_selection(value),
             Command::ConstrainDistance(value) => self.constrain_distance_selection(value),
             Command::ConstrainAngle(value) => self.constrain_angle_selection(value),
+            Command::Divide(n) => self.divide_selection(n),
+            Command::Measure(interval) => self.measure_selection(interval),
             Command::Unconstrain => self.unconstrain_selection(),
             Command::Hatch => {
                 if self.selection.is_empty() {
@@ -1796,6 +1798,70 @@ impl AppState {
                 self.command_log.push(msg);
             }
             Err(e) => self.command_log.push(e),
+        }
+    }
+
+    /// Places n−1 division points at equal arc-length spacing on every
+    /// selected curve (DIVIDE).
+    pub fn divide_selection(&mut self, n: Option<u32>) {
+        let Some(n) = n else {
+            self.command_log
+                .push("DIVIDE needs a segment count of 2 or more (DIVIDE 5)".into());
+            return;
+        };
+        let curves: Vec<oxidraft_geometry::Curve> = self
+            .selection
+            .iter()
+            .filter_map(|&id| self.document.get(id).and_then(|e| e.as_curve()).cloned())
+            .collect();
+        if curves.is_empty() {
+            self.command_log
+                .push("Select at least one curve to divide".into());
+            return;
+        }
+        self.history.snapshot(&self.document);
+        let mut placed = 0;
+        for c in &curves {
+            placed += oxidraft_cad::commands::divide(&mut self.document, c, n).len();
+        }
+        if placed == 0 {
+            self.history.discard_last();
+            self.command_log
+                .push("Nothing to divide on that selection".into());
+        } else {
+            self.command_log.push(format!("Placed {placed} point(s)"));
+        }
+    }
+
+    /// Places points every `interval` of arc length on every selected
+    /// curve (MEASURE).
+    pub fn measure_selection(&mut self, interval: Option<f64>) {
+        let Some(interval) = interval else {
+            self.command_log
+                .push("MEASURE needs a positive interval (MEASURE 2.5)".into());
+            return;
+        };
+        let curves: Vec<oxidraft_geometry::Curve> = self
+            .selection
+            .iter()
+            .filter_map(|&id| self.document.get(id).and_then(|e| e.as_curve()).cloned())
+            .collect();
+        if curves.is_empty() {
+            self.command_log
+                .push("Select at least one curve to measure".into());
+            return;
+        }
+        self.history.snapshot(&self.document);
+        let mut placed = 0;
+        for c in &curves {
+            placed += oxidraft_cad::commands::measure(&mut self.document, c, interval).len();
+        }
+        if placed == 0 {
+            self.history.discard_last();
+            self.command_log
+                .push("The interval doesn't fit on that selection".into());
+        } else {
+            self.command_log.push(format!("Placed {placed} point(s)"));
         }
     }
 
@@ -3842,6 +3908,39 @@ mod tests {
         assert!(
             (s2.p0.x - 10.0).abs() < 1e-6 && (s2.p0.y - 1.0).abs() < 1e-6,
             "welded neighbour reattached: {s2:?}"
+        );
+    }
+
+    #[test]
+    fn divide_and_measure_place_points_on_the_selection() {
+        let mut a = app();
+        a.run_command("LINE");
+        a.canvas_click(400.0, 300.0); // world (0,0)
+        a.canvas_click(650.0, 300.0); // world (5,0) at zoom 50
+        a.run_command("");
+        let line_id = *a.document.order.last().unwrap();
+        a.selection = vec![line_id];
+
+        let before = a.document.len();
+        a.run_command("DIVIDE 5");
+        assert_eq!(a.document.len(), before + 4, "4 division points");
+        a.execute(Command::Undo);
+        assert_eq!(a.document.len(), before, "divide is one undo step");
+
+        a.selection = vec![line_id];
+        a.run_command("MEASURE 2");
+        assert_eq!(a.document.len(), before + 2, "points at 2 and 4");
+
+        // Bad forms log usage instead of touching the document or history.
+        let depth = a.history.undo_depth();
+        a.run_command("DIVIDE 1");
+        a.run_command("MEASURE 0");
+        a.selection.clear();
+        a.run_command("DIVIDE 4");
+        assert_eq!(
+            a.history.undo_depth(),
+            depth,
+            "declined commands snapshot nothing"
         );
     }
 

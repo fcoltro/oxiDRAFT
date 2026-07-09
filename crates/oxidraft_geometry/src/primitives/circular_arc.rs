@@ -158,6 +158,16 @@ impl CurveSegment for CircularArc {
     fn arc_length(&self) -> f64 {
         self.radius * self.included_angle()
     }
+
+    /// Uniform speed: the angle parameter is linear in arc length.
+    fn param_at_length(&self, s: f64) -> f64 {
+        let len = self.arc_length();
+        let (t0, t1) = self.domain();
+        if !s.is_finite() || s <= 0.0 || !(len > 1e-12) {
+            return t0;
+        }
+        t0 + (t1 - t0) * (s / len).min(1.0)
+    }
 }
 
 #[cfg(test)]
