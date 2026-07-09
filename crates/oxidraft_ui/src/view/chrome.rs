@@ -292,13 +292,13 @@ fn export_menu(ctx: &Context, app: &mut AppState) {
 /// Custom-paper-size ids for `plot_dialog`'s persisted (ctx temp-data) form
 /// state — no `UiState` field needed, same idiom as `unit_dropdown`/
 /// `snap_master`'s popup-open flags elsewhere in this file.
-const PLOT_OPEN_ID: &str = "open_plot";
+pub(super) const PLOT_OPEN_ID: &str = "open_plot";
 const PLOT_PRESET_ID: &str = "plot_paper_preset";
 const PLOT_CUSTOM_W_ID: &str = "plot_custom_w_mm";
 const PLOT_CUSTOM_H_ID: &str = "plot_custom_h_mm";
 const PLOT_LANDSCAPE_ID: &str = "plot_landscape";
 /// Plot area mode: 0 = drawing extents, 1 = picked window.
-const PLOT_AREA_ID: &str = "plot_area_mode";
+pub(super) const PLOT_AREA_ID: &str = "plot_area_mode";
 
 pub(super) fn plot_dialog(ctx: &Context, app: &mut AppState) {
     // A finished canvas pick reopens the dialog in Window mode.
