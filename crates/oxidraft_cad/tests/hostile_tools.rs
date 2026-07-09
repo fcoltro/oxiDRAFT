@@ -255,6 +255,24 @@ fn corner_tools_decline_degenerate_parameters() {
     }
     assert!(edit::chamfer(&mut doc, a, a, 1.0, 1.0).is_none());
 
+    // The freeform (spline/ellipse) corner path must survive degenerate
+    // operands and hostile parameters just like the exact one.
+    let (mut doc, ids) = menagerie_doc();
+    let normal_line = ids[0];
+    let point_bez = ids[5];
+    let wavy_bez = ids[6];
+    let ellipse = ids[8];
+    for r in [f64::NAN, f64::INFINITY, -1.0, 0.0, 1e-30, 0.5] {
+        let _ = edit::fillet(&mut doc, normal_line, wavy_bez, r, 2.0, 5.0);
+        let _ = edit::fillet(&mut doc, point_bez, wavy_bez, r, 2.0, 2.0);
+        let _ = edit::fillet(&mut doc, normal_line, ellipse, r, 40.0, 0.0);
+    }
+    for d in [f64::NAN, -1.0, 0.0, 0.5, 1e15] {
+        let _ = edit::chamfer(&mut doc, normal_line, wavy_bez, d, 0.5);
+        let _ = edit::chamfer(&mut doc, wavy_bez, ellipse, 0.5, d);
+    }
+    assert_doc_finite(&doc, "freeform corner tools");
+
     for cont in [Continuity::G0, Continuity::G1, Continuity::G2] {
         assert!(edit::blend(&mut doc, a, b, cont, f64::NAN).is_none());
         let _ = edit::blend(&mut doc, z, z, cont, 1.0);

@@ -834,8 +834,15 @@ pub fn fillet(
         return None;
     }
     let layer = doc.get(a)?.layer;
-    let ea = CornerEdge::from_curve(doc.get(a)?.as_curve()?)?;
-    let eb = CornerEdge::from_curve(doc.get(b)?.as_curve()?)?;
+    let (ea, eb) = match (
+        CornerEdge::from_curve(doc.get(a)?.as_curve()?),
+        CornerEdge::from_curve(doc.get(b)?.as_curve()?),
+    ) {
+        (Some(ea), Some(eb)) => (ea, eb),
+        // Splines, ellipses, and mixed pairs have no closed form — solve
+        // the tangency numerically instead of silently declining.
+        _ => return fillet_freeform(doc, a, b, radius, (px, py)),
+    };
     let sol = solve_fillet(ea, eb, radius, (px, py))?;
     let vtx = corner_vertex(ea, eb);
     trim_entity_for_corner(doc, a, ea, sol.ta, sol.a_angle, vtx);
@@ -922,8 +929,15 @@ pub fn chamfer(
         return None;
     }
     let layer = doc.get(a)?.layer;
-    let ea = CornerEdge::from_curve(doc.get(a)?.as_curve()?)?;
-    let eb = CornerEdge::from_curve(doc.get(b)?.as_curve()?)?;
+    let (ea, eb) = match (
+        CornerEdge::from_curve(doc.get(a)?.as_curve()?),
+        CornerEdge::from_curve(doc.get(b)?.as_curve()?),
+    ) {
+        (Some(ea), Some(eb)) => (ea, eb),
+        // Splines, ellipses, and mixed pairs: measure the distances along
+        // the curves from their crossing instead of silently declining.
+        _ => return chamfer_freeform(doc, a, b, dist_a, dist_b),
+    };
     let sol = solve_chamfer(ea, eb, dist_a, dist_b)?;
     let vtx = corner_vertex(ea, eb);
     trim_entity_for_corner(doc, a, ea, sol.pa, None, vtx);
@@ -932,6 +946,152 @@ pub fn chamfer(
     let conn = LineSeg::from_endpoints(
         Point2d::from_f64(sol.pa.0, sol.pa.1),
         Point2d::from_f64(sol.pb.0, sol.pb.1),
+    );
+    Some(doc.add_on_layer(EntityKind::Curve(Curve::Line(conn)), layer))
+}
+
+/// Numeric fillet for curve pairs the exact solver doesn't cover. The
+/// fillet arc's center sits at distance `radius` from both curves — i.e.
+/// on an intersection of their offset curves; the candidate nearest the
+/// pick wins, the tangent points come from projecting the center back
+/// onto the curves, and each leg keeps its piece on the far side of the
+/// tangency from the pick (the pick marks the corner being rounded away).
+fn fillet_freeform(
+    doc: &mut Document,
+    a: EntityId,
+    b: EntityId,
+    radius: f64,
+    pick: (f64, f64),
+) -> Option<EntityId> {
+    let ca = doc.get(a)?.as_curve()?.clone();
+    let cb = doc.get(b)?.as_curve()?.clone();
+    if !(ca.is_finite() && cb.is_finite()) {
+        return None;
+    }
+    let mut best = MinTracker::new();
+    for sa in [radius, -radius] {
+        let oa = offset_curve(&ca, sa);
+        for sb in [radius, -radius] {
+            for hit in intersect(&oa, &offset_curve(&cb, sb)) {
+                let d = (hit.point.0 - pick.0).hypot(hit.point.1 - pick.1);
+                if d.is_finite() {
+                    best.offer(d, hit.point);
+                }
+            }
+        }
+    }
+    let center = best.value()?;
+    // Spline offsets are approximations, so tolerate a small tangency
+    // error — but reject a center that isn't genuinely at ~radius from
+    // both curves (offsets can also cross far from any fillet).
+    let pa = oxidraft_geometry::project_point_onto_curve(&ca, center.0, center.1);
+    let pb = oxidraft_geometry::project_point_onto_curve(&cb, center.0, center.1);
+    let tol = (radius * 0.02).max(1e-6);
+    if (pa.distance - radius).abs() > tol || (pb.distance - radius).abs() > tol {
+        return None;
+    }
+    // Work out both retained legs before touching the document, so a
+    // decline on the second leg can't leave the first one half-trimmed.
+    let keep_a = leg_away_from(&ca, pa.t, pb.point)?;
+    let keep_b = leg_away_from(&cb, pb.t, pa.point)?;
+    doc.get_mut(a)?.kind = EntityKind::Curve(keep_a);
+    doc.get_mut(b)?.kind = EntityKind::Curve(keep_b);
+    prune_broken_welds(doc, &[a, b]);
+    let layer = doc.get(a)?.layer;
+    let r = 0.5 * (pa.distance + pb.distance);
+    let arc = arc_between(center, pa.point, pb.point, r);
+    Some(doc.add_on_layer(EntityKind::Curve(Curve::Arc(arc)), layer))
+}
+
+/// The piece of `c` cut at its tangency parameter `t` that leaves the cut
+/// heading *away* from `other` (the opposite leg's tangent point) — that
+/// is the leg the fillet arc connects to; the piece heading toward the
+/// corner is the one being rounded off. Local and exact: moving along the
+/// cut tangent `d` increases the distance to `other` iff d·(cut − other)
+/// is positive, so leg length never skews the decision the way a
+/// midpoint-distance heuristic would. Returns the whole curve when the
+/// tangency lands on an end.
+fn leg_away_from(c: &Curve, t: f64, other: (f64, f64)) -> Option<Curve> {
+    let (d0, d1) = c.domain();
+    if (d1 - d0).abs() < 1e-12 {
+        return None;
+    }
+    let tn = ((t - d0) / (d1 - d0)).clamp(0.0, 1.0);
+    if !(1e-6..=1.0 - 1e-6).contains(&tn) {
+        return Some(c.clone());
+    }
+    let (left, right) = split_curve(c, tn);
+    let (cx, cy) = c.evaluate_f64(t);
+    let (dx, dy) = c.tangent_f64(t);
+    let keep_right = dx * (cx - other.0) + dy * (cy - other.1) >= 0.0;
+    let keep = if keep_right { right } else { left };
+    keep.is_finite().then_some(keep)
+}
+
+/// Numeric chamfer for curve pairs the exact solver doesn't cover: the
+/// corner is the curves' (single, unambiguous) crossing, each distance is
+/// measured as arc length along its curve from that corner into the
+/// longer side, and the shorter side is cut away with the stub.
+fn chamfer_freeform(
+    doc: &mut Document,
+    a: EntityId,
+    b: EntityId,
+    dist_a: f64,
+    dist_b: f64,
+) -> Option<EntityId> {
+    if !(dist_a > 0.0 && dist_b > 0.0) {
+        return None;
+    }
+    let ca = doc.get(a)?.as_curve()?.clone();
+    let cb = doc.get(b)?.as_curve()?.clone();
+    if !(ca.is_finite() && cb.is_finite()) {
+        return None;
+    }
+    let hits = intersect(&ca, &cb);
+    // Without a pick there is nothing to disambiguate multiple crossings.
+    let [hit] = hits.as_slice() else { return None };
+
+    let cut = |c: &Curve, t: f64, dist: f64| -> Option<(Curve, (f64, f64))> {
+        let (d0, d1) = c.domain();
+        if (d1 - d0).abs() < 1e-12 {
+            return None;
+        }
+        let tn = ((t - d0) / (d1 - d0)).clamp(0.0, 1.0);
+        let total = c.arc_length();
+        let s_corner = if tn <= 0.0 {
+            0.0
+        } else if tn >= 1.0 {
+            total
+        } else {
+            extract_piece(c, 0.0, tn).arc_length()
+        };
+        // Keep the longer side of the corner, cut `dist` into it.
+        let (s_cut, keep_low) = if total - s_corner >= s_corner {
+            (s_corner + dist, false)
+        } else {
+            (s_corner - dist, true)
+        };
+        if !(s_cut > 1e-9 && s_cut < total - 1e-9) {
+            return None; // the distance doesn't fit on the retained side
+        }
+        let tc = c.param_at_length(s_cut);
+        let tcn = ((tc - d0) / (d1 - d0)).clamp(0.0, 1.0);
+        let (left, right) = split_curve(c, tcn);
+        let keep = if keep_low { left } else { right };
+        let end = c.evaluate_f64(tc);
+        (keep.is_finite() && end.0.is_finite() && end.1.is_finite()).then_some((keep, end))
+    };
+
+    // Both legs solve before the document is touched.
+    let (keep_a, end_a) = cut(&ca, hit.t1, dist_a)?;
+    let (keep_b, end_b) = cut(&cb, hit.t2, dist_b)?;
+    doc.get_mut(a)?.kind = EntityKind::Curve(keep_a);
+    doc.get_mut(b)?.kind = EntityKind::Curve(keep_b);
+    prune_broken_welds(doc, &[a, b]);
+    let layer = doc.get(a)?.layer;
+    let conn = LineSeg::from_endpoints(
+        Point2d::from_f64(end_a.0, end_a.1),
+        Point2d::from_f64(end_b.0, end_b.1),
     );
     Some(doc.add_on_layer(EntityKind::Curve(Curve::Line(conn)), layer))
 }
@@ -2629,6 +2789,93 @@ mod tests {
                 "preview and committed diverge at t={t}: preview={p:?} committed={c:?}"
             );
         }
+    }
+
+    #[test]
+    fn fillet_rounds_a_line_bezier_corner() {
+        use oxidraft_geometry::point_to_curve_distance;
+        let mut doc = Document::new();
+        let a = draw::line(&mut doc, pt(0, 0), pt(8, 0));
+        // Near-vertical bezier crossing the line around x = 4.
+        let b = draw::bezier(
+            &mut doc,
+            Point2d::from_f64(4.0, 4.0),
+            Point2d::from_f64(4.1, 1.5),
+            Point2d::from_f64(3.9, -1.5),
+            Point2d::from_f64(4.0, -4.0),
+        );
+        let arc_id = fillet(&mut doc, a, b, 0.5, 5.0, 1.0).expect("freeform fillet should succeed");
+        let Some(Curve::Arc(arc)) = doc.get(arc_id).unwrap().as_curve() else {
+            panic!("expected a fillet arc");
+        };
+        assert!(
+            (arc.radius - 0.5).abs() < 0.02,
+            "radius {} off target",
+            arc.radius
+        );
+        // The arc's endpoints must land on the retained legs.
+        let (t0, t1) = (arc.start_angle, arc.end_angle);
+        for th in [t0, t1] {
+            let p = (
+                arc.center.x + arc.radius * th.cos(),
+                arc.center.y + arc.radius * th.sin(),
+            );
+            let da = point_to_curve_distance(doc.get(a).unwrap().as_curve().unwrap(), p.0, p.1);
+            let db = point_to_curve_distance(doc.get(b).unwrap().as_curve().unwrap(), p.0, p.1);
+            assert!(
+                da.min(db) < 0.02,
+                "arc end ({},{}) floats off both legs: {da} / {db}",
+                p.0,
+                p.1
+            );
+        }
+        // The picked (+x, +y) corner is kept: the line keeps its right
+        // side, the bezier its top side.
+        let l = line_seg(&doc, a);
+        assert!(
+            l.p0.x.min(l.p1.x) > 3.0 && l.p0.x.max(l.p1.x) > 7.9,
+            "line kept its +x leg: {l:?}"
+        );
+        let bb = doc.get(b).unwrap().as_curve().unwrap().bounding_box();
+        assert!(
+            bb.min.y > -0.1 && bb.max.y > 3.5,
+            "bezier kept its top leg: {bb:?}"
+        );
+    }
+
+    #[test]
+    fn chamfer_cuts_across_a_line_bezier_crossing() {
+        let mut doc = Document::new();
+        let a = draw::line(&mut doc, pt(0, 0), pt(10, 0));
+        let b = draw::bezier(
+            &mut doc,
+            Point2d::from_f64(4.0, 6.0),
+            Point2d::from_f64(4.1, 2.0),
+            Point2d::from_f64(3.9, -2.0),
+            Point2d::from_f64(4.0, -4.0),
+        );
+        let conn = chamfer(&mut doc, a, b, 0.8, 0.6).expect("freeform chamfer should succeed");
+        let Some(Curve::Line(cl)) = doc.get(conn).unwrap().as_curve() else {
+            panic!("expected a chamfer line");
+        };
+        // Longer sides kept: the line's right side (cut ~0.8 past x=4),
+        // the bezier's top side (cut ~0.6 above y=0).
+        let (e0, e1) = (cl.p0.to_f64(), cl.p1.to_f64());
+        let on_line = if e0.1.abs() < e1.1.abs() { e0 } else { e1 };
+        let on_bez = if e0.1.abs() < e1.1.abs() { e1 } else { e0 };
+        assert!(
+            (on_line.0 - 4.8).abs() < 0.1 && on_line.1.abs() < 0.05,
+            "line cut at {on_line:?}"
+        );
+        assert!(
+            (on_bez.1 - 0.6).abs() < 0.1 && (on_bez.0 - 4.0).abs() < 0.2,
+            "bezier cut at {on_bez:?}"
+        );
+        let l = line_seg(&doc, a);
+        assert!(
+            l.p0.x.min(l.p1.x) > 4.5 && l.p0.x.max(l.p1.x) > 9.9,
+            "line kept its longer right side: {l:?}"
+        );
     }
 
     #[test]
