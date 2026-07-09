@@ -207,3 +207,82 @@ fn param_at_length_walks_polycurve_segments_by_length() {
     assert_eq!(p.param_at_length(-1.0), 0.0);
     assert_eq!(p.param_at_length(100.0), 1.0);
 }
+
+#[test]
+fn polycurve_offset_trims_self_intersection_loops() {
+    // A 10×6 outline with a deep notch (x∈[4,6], down to y=2). Offsetting
+    // inward by 1.5 makes the raw chain cross itself under the notch (the
+    // notch-bottom offset dips below the outer-bottom offset). The trimmed
+    // result must hold the offset distance everywhere and never cross
+    // itself; the outward offset must pass the same checks untouched.
+    let pts = [
+        (0.0, 0.0),
+        (10.0, 0.0),
+        (10.0, 6.0),
+        (6.0, 6.0),
+        (6.0, 2.0),
+        (4.0, 2.0),
+        (4.0, 6.0),
+        (0.0, 6.0),
+    ];
+    let segs: Vec<Curve> = (0..pts.len())
+        .map(|i| {
+            let a = pts[i];
+            let b = pts[(i + 1) % pts.len()];
+            Curve::Line(LineSeg::from_endpoints(
+                Point2d::from_f64(a.0, a.1),
+                Point2d::from_f64(b.0, b.1),
+            ))
+        })
+        .collect();
+    let source = Curve::Poly(Box::new(PolyCurve::new(segs)));
+    let d = 1.5;
+
+    for sign in [1.0, -1.0] {
+        let off = offset_curve(&source, sign * d);
+        let Curve::Poly(op) = &off else {
+            panic!("poly offset stays a poly");
+        };
+        assert!(!op.segments.is_empty(), "offset survived trimming");
+        // Every piece holds the offset distance (the raw inward chain
+        // fails this under the notch before trimming).
+        for (i, s) in op.segments.iter().enumerate() {
+            let (t0, t1) = s.domain();
+            for f in [0.25, 0.5, 0.75] {
+                let (x, y) = s.evaluate_f64(t0 + (t1 - t0) * f);
+                let dist = point_to_curve_distance(&source, x, y);
+                assert!(
+                    dist >= d - 0.05,
+                    "sign {sign}: segment {i} point ({x:.2},{y:.2}) sits at {dist:.3} < {d}"
+                );
+            }
+        }
+        // And the chain no longer crosses itself away from its joints.
+        let m = op.segments.len();
+        for i in 0..m {
+            for j in (i + 2)..m {
+                if i == 0 && j == m - 1 {
+                    continue; // closing joint
+                }
+                for hit in intersect(&op.segments[i], &op.segments[j]) {
+                    // Endpoint touches from the trim reassembly are fine.
+                    let (e0, e1) = {
+                        let (t0, t1) = op.segments[i].domain();
+                        (
+                            op.segments[i].evaluate_f64(t0),
+                            op.segments[i].evaluate_f64(t1),
+                        )
+                    };
+                    let at_end = [e0, e1]
+                        .iter()
+                        .any(|e| (e.0 - hit.point.0).hypot(e.1 - hit.point.1) < 1e-6);
+                    assert!(
+                        at_end,
+                        "sign {sign}: segments {i} and {j} still cross at {:?}",
+                        hit.point
+                    );
+                }
+            }
+        }
+    }
+}

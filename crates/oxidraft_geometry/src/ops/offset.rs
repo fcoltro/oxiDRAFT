@@ -57,13 +57,190 @@ fn offset_polycurve(pc: &crate::primitives::PolyCurve, dist: f64) -> Curve {
         }
     }
     let mut segs: Vec<Curve> = Vec::with_capacity(n);
+    let mut is_joint: Vec<bool> = Vec::with_capacity(n);
     for (i, c) in offs.into_iter().enumerate() {
         segs.push(c);
+        is_joint.push(false);
         if let Some(b) = bevels[i].take() {
             segs.push(b);
+            is_joint.push(true);
         }
     }
+    let segs = trim_offset_loops(segs, &is_joint, pc, dist);
     Curve::Poly(Box::new(PolyCurve::new(segs)))
+}
+
+/// Removes the invalid loops an offset grows once the distance exceeds the
+/// local feature size: opposite walls of a neck (or a notch narrower than
+/// 2·dist) make the raw offset chain cross itself, and by the classic
+/// offset-clipping argument every point of such a loop lies closer to the
+/// source than the offset distance — a true offset point sits at exactly
+/// |dist|. Split the chain at its self-crossings, drop the too-close
+/// pieces, and keep the longest reconnected chain. Joint bevels are
+/// deliberate corner approximations that sit slightly inside |dist|, so
+/// unsplit ones are exempt from the distance test (a bevel stranded inside
+/// a removed loop disconnects and falls to the longest-chain pass).
+fn trim_offset_loops(
+    segs: Vec<Curve>,
+    is_joint: &[bool],
+    source: &crate::primitives::PolyCurve,
+    dist: f64,
+) -> Vec<Curve> {
+    use crate::ops::distance::point_to_curve_distance;
+    use crate::ops::intersect::intersect;
+    use crate::ops::split_reverse::split_curve;
+
+    let d = dist.abs();
+    let n = segs.len();
+    if n < 2 || !(d.is_finite() && d > 1e-12) {
+        return segs;
+    }
+
+    let norm = |c: &Curve, t: f64| {
+        let (t0, t1) = c.domain();
+        if (t1 - t0).abs() < 1e-12 {
+            0.0
+        } else {
+            ((t - t0) / (t1 - t0)).clamp(0.0, 1.0)
+        }
+    };
+    let boxes: Vec<crate::point::BoundingBox> = segs.iter().map(|s| s.bounding_box()).collect();
+    let mut cuts: Vec<Vec<f64>> = vec![Vec::new(); n];
+    let mut crossings = 0usize;
+    for i in 0..n {
+        for j in (i + 1)..n {
+            if !boxes[i].intersects(&boxes[j]) {
+                continue;
+            }
+            for hit in intersect(&segs[i], &segs[j]) {
+                let (ti, tj) = (norm(&segs[i], hit.t1), norm(&segs[j], hit.t2));
+                // Adjacent pieces legitimately touch at their shared
+                // joint, including the closing joint of a loop.
+                let adjacent = j == i + 1 && ti > 1.0 - 1e-6 && tj < 1e-6;
+                let wrap = i == 0 && j == n - 1 && ti < 1e-6 && tj > 1.0 - 1e-6;
+                if adjacent || wrap {
+                    continue;
+                }
+                cuts[i].push(ti);
+                cuts[j].push(tj);
+                crossings += 1;
+                // A chain crossing itself everywhere is hostile input,
+                // not a drawing; O(n²) piece surgery isn't owed to it.
+                if crossings > 256 {
+                    return segs;
+                }
+            }
+        }
+    }
+    if crossings == 0 {
+        return segs;
+    }
+
+    // Split every segment at its crossings.
+    let mut pieces: Vec<Curve> = Vec::new();
+    let mut piece_exempt: Vec<bool> = Vec::new();
+    for (i, seg) in segs.iter().enumerate() {
+        let mut ts = std::mem::take(&mut cuts[i]);
+        let unsplit = ts.is_empty();
+        ts.push(0.0);
+        ts.push(1.0);
+        ts.sort_by(f64::total_cmp);
+        ts.dedup_by(|a, b| (*a - *b).abs() < 1e-6);
+        for w in ts.windows(2) {
+            let (a, b) = (w[0], w[1]);
+            if b - a < 1e-6 {
+                continue;
+            }
+            let right = if a <= 1e-9 {
+                seg.clone()
+            } else {
+                split_curve(seg, a).1
+            };
+            let piece = if b >= 1.0 - 1e-9 {
+                right
+            } else {
+                split_curve(&right, ((b - a) / (1.0 - a)).clamp(0.0, 1.0)).0
+            };
+            pieces.push(piece);
+            piece_exempt.push(is_joint.get(i).copied().unwrap_or(false) && unsplit);
+        }
+    }
+
+    // Distance filter: 2% slack absorbs the spline-offset fit error the
+    // way the freeform fillet does; real loops dive far below |dist|.
+    let src = Curve::Poly(Box::new(source.clone()));
+    let tol = d * 0.02 + 1e-9;
+    let mut kept: Vec<Curve> = Vec::new();
+    for (piece, exempt) in pieces.into_iter().zip(piece_exempt) {
+        let (t0, t1) = piece.domain();
+        let holds = exempt
+            || [0.25, 0.5, 0.75].iter().all(|f| {
+                let (x, y) = piece.evaluate_f64(t0 + (t1 - t0) * f);
+                point_to_curve_distance(&src, x, y) >= d - tol
+            });
+        if holds {
+            kept.push(piece);
+        }
+    }
+    longest_chain(kept)
+}
+
+/// Greedy end-to-end reassembly of `pieces`; the chain with the greatest
+/// total arc length wins. An offset that legitimately separates into
+/// several loops (a dumbbell offset inward past its neck) keeps only its
+/// dominant loop — an accepted simplification, still strictly better than
+/// returning a self-crossing outline.
+fn longest_chain(mut pieces: Vec<Curve>) -> Vec<Curve> {
+    use crate::ops::split_reverse::reverse_curve;
+    if pieces.len() < 2 {
+        return pieces;
+    }
+    let diag = pieces
+        .iter()
+        .map(|p| {
+            let bb = p.bounding_box();
+            (bb.max.x - bb.min.x).hypot(bb.max.y - bb.min.y)
+        })
+        .fold(0.0f64, f64::max);
+    let eps = diag * 1e-6 + 1e-9;
+    let near = |a: (f64, f64), b: (f64, f64)| (a.0 - b.0).hypot(a.1 - b.1) <= eps;
+
+    let mut best: Vec<Curve> = Vec::new();
+    let mut best_len = f64::NEG_INFINITY;
+    while let Some(seed) = pieces.pop() {
+        let mut chain = std::collections::VecDeque::new();
+        chain.push_back(seed);
+        loop {
+            let (chain_start, _) = seg_ends(chain.front().expect("chain is never empty"));
+            let (_, chain_end) = seg_ends(chain.back().expect("chain is never empty"));
+            let Some(pos) = pieces.iter().position(|p| {
+                let (s, e) = seg_ends(p);
+                near(s, chain_end)
+                    || near(e, chain_end)
+                    || near(e, chain_start)
+                    || near(s, chain_start)
+            }) else {
+                break;
+            };
+            let p = pieces.swap_remove(pos);
+            let (s, e) = seg_ends(&p);
+            if near(s, chain_end) {
+                chain.push_back(p);
+            } else if near(e, chain_end) {
+                chain.push_back(reverse_curve(&p));
+            } else if near(e, chain_start) {
+                chain.push_front(p);
+            } else {
+                chain.push_front(reverse_curve(&p));
+            }
+        }
+        let len: f64 = chain.iter().map(|c| c.arc_length()).sum();
+        if len > best_len {
+            best_len = len;
+            best = chain.into();
+        }
+    }
+    best
 }
 
 /// Extends two adjacent offset lines to their intersection. Returns false when
