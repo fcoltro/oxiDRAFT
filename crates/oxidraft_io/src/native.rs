@@ -1,6 +1,6 @@
 use oxidraft_document::{
-    Color, ConstraintKind, Document, Entity, EntityId, EntityKind, HatchPattern, Layer,
-    LineTypeDef, LineTypeRef, LineWeight, SketchConstraint, Units,
+    ANCHOR_DERIVED, Color, ConstraintKind, Document, Entity, EntityId, EntityKind, HatchPattern,
+    Layer, LineTypeDef, LineTypeRef, LineWeight, SketchConstraint, Units,
 };
 use oxidraft_geometry::{
     CircularArc, CubicBezier, Curve, EllipticalArc, LineSeg, NurbsCurve, Point2d, PolyCurve,
@@ -432,9 +432,11 @@ pub fn from_string(text: &str) -> Result<Document, String> {
                         let ea: Option<u8> = tok.next().and_then(|v| v.parse().ok());
                         let ib: Option<usize> = tok.next().and_then(|v| v.parse().ok());
                         let eb: Option<u8> = tok.next().and_then(|v| v.parse().ok());
+                        // 0/1 are endpoints; ANCHOR_DERIVED (2) is a line's
+                        // midpoint or an arc's center.
                         if let (Some(ea), Some(ib), Some(eb)) = (ea, ib, eb)
-                            && ea <= 1
-                            && eb <= 1
+                            && ea <= ANCHOR_DERIVED
+                            && eb <= ANCHOR_DERIVED
                         {
                             pending_constraints.push((
                                 kind,
@@ -1251,6 +1253,32 @@ mod tests {
         let ids: Vec<_> = doc2.iter().map(|e| e.id).collect();
         assert_eq!(c.a, ids[0]);
         assert_eq!(c.b, Some(ids[1]));
+    }
+
+    #[test]
+    fn roundtrip_coincident_keeps_a_derived_anchor() {
+        // A midpoint weld: the origin point welded to the middle of a line
+        // (anchor index 2). The index must survive the trip; 3+ is corrupt.
+        let mut doc = Document::new();
+        let p = doc.add(EntityKind::Point(pt_i(0, 0)));
+        let l = doc.add(EntityKind::Curve(Curve::Line(LineSeg::from_endpoints(
+            pt_i(-2, 3),
+            pt_i(2, 3),
+        ))));
+        doc.add_constraint(SketchConstraint::coincident(p, 0, l, ANCHOR_DERIVED));
+
+        let doc2 = from_string(&to_string(&doc)).unwrap();
+        assert_eq!(doc2.constraints.len(), 1);
+        assert_eq!(doc2.constraints[0].pts, Some((0, ANCHOR_DERIVED)));
+
+        let text = to_string(&doc);
+        let bad = text.replace(&format!("C COI 0 0 1 {ANCHOR_DERIVED}"), "C COI 0 0 1 3");
+        assert_ne!(text, bad, "the record was found and rewritten");
+        let doc3 = from_string(&bad).unwrap();
+        assert!(
+            doc3.constraints.is_empty(),
+            "anchor index 3 does not exist and must be dropped"
+        );
     }
 
     #[test]

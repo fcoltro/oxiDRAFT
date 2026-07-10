@@ -120,13 +120,19 @@ pub fn normalize_angle_deg(deg: f64) -> f64 {
     if a == 0.0 { 180.0 } else { a }
 }
 
+/// Anchor index in [`SketchConstraint::pts`] naming an entity's derived
+/// point rather than an endpoint: a line's midpoint, an arc's center.
+pub const ANCHOR_DERIVED: u8 = 2;
+
 /// A persistent geometric relation between line entities. Pair kinds keep
 /// `a` as the reference entity picked first; single kinds leave `b` empty.
-/// Point-level kinds (Coincident) carry the endpoint index (0 or 1) of each
-/// entity in `pts`. Valued kinds (Radius, Distance) carry their driving
-/// value in `val`, which identifies the constraint's target, not its
-/// relation: two Radius constraints on one arc are the same relation with
-/// different values.
+/// Point-level kinds (Coincident) carry an anchor index for each entity in
+/// `pts`: 0/1 name the entity's endpoints, and the special index
+/// [`ANCHOR_DERIVED`] (2) names its derived point — a line's midpoint or an
+/// arc/circle's center. Point entities use 0. Valued kinds (Radius,
+/// Distance) carry their driving value in `val`, which identifies the
+/// constraint's target, not its relation: two Radius constraints on one arc
+/// are the same relation with different values.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct SketchConstraint {
     pub kind: ConstraintKind,

@@ -1,4 +1,6 @@
-use oxidraft_document::{ConstraintKind, Document, EntityId, EntityKind, SketchConstraint};
+use oxidraft_document::{
+    ANCHOR_DERIVED, ConstraintKind, Document, EntityId, EntityKind, SketchConstraint,
+};
 use oxidraft_geometry::{
     CircularArc, Continuity, Curve, CurveSegment, EllipticalArc, LineSeg, MinTracker, Point2d,
     PolyCurve, Transform2d, blend_curves, intersect, offset_curve, point_to_curve_distance,
@@ -15,6 +17,23 @@ fn end_positions(doc: &Document, id: EntityId) -> Option<[(f64, f64); 2]> {
             let at = |th: f64| (cx + a.radius * th.cos(), cy + a.radius * th.sin());
             Some([at(a.start_angle), at(a.end_angle)])
         }
+        _ => None,
+    }
+}
+
+/// World position of one coincident anchor: 0/1 an endpoint, ANCHOR_DERIVED
+/// a line's midpoint or an arc's center. A point entity is its own anchor
+/// at any index.
+fn anchor_position(doc: &Document, id: EntityId, idx: u8) -> Option<(f64, f64)> {
+    match &doc.get(id)?.kind {
+        EntityKind::Point(p) => Some(p.to_f64()),
+        EntityKind::Curve(Curve::Line(l)) if idx == ANCHOR_DERIVED => {
+            let (x0, y0) = l.p0.to_f64();
+            let (x1, y1) = l.p1.to_f64();
+            Some(((x0 + x1) * 0.5, (y0 + y1) * 0.5))
+        }
+        EntityKind::Curve(Curve::Arc(a)) if idx == ANCHOR_DERIVED => Some(a.center.to_f64()),
+        _ if idx <= 1 => end_positions(doc, id).map(|e| e[idx as usize]),
         _ => None,
     }
 }
@@ -38,11 +57,10 @@ fn prune_broken_welds(doc: &mut Document, ids: &[EntityId]) {
             let (Some(b), Some((ea, eb))) = (c.b, c.pts) else {
                 return true;
             };
-            let (Some(pa), Some(pb)) = (end_positions(doc, c.a), end_positions(doc, b)) else {
+            let (Some(p), Some(q)) = (anchor_position(doc, c.a, ea), anchor_position(doc, b, eb))
+            else {
                 return false;
             };
-            let p = pa[ea as usize];
-            let q = pb[eb as usize];
             (p.0 - q.0).hypot(p.1 - q.1) <= 1e-6
         })
         .collect();
@@ -77,6 +95,12 @@ fn remap_constraints_to_pieces(
                     let Some((ea, eb)) = c.pts else { continue };
                     (c.a, ea, eb)
                 };
+                // A weld on the removed entity's derived point (midpoint)
+                // names a spot no piece still has — drop it like the
+                // length-based kinds.
+                if my_end > 1 {
+                    continue;
+                }
                 let Some(p) = old_ends.map(|e| e[my_end as usize]) else {
                     continue;
                 };

@@ -1570,6 +1570,7 @@ fn tool_hotkey(tool: &Tool) -> &'static str {
         | Tool::DimAngularLines { .. }
         | Tool::DimRadial { .. }
         | Tool::DimConstraint { .. }
+        | Tool::Weld { .. }
         | Tool::PlotWindow { .. }
         | Tool::Point => "",
     }
@@ -2702,7 +2703,9 @@ pub(super) fn constraint_bar(ctx: &Context, app: &mut AppState, canvas_rect: egu
                         );
                         if con_glyph_button(
                             ui,
-                            "Coincident (COI) — weld the nearest endpoints of two lines",
+                            "Coincident (COI/WELD) — with two lines selected, weld their \
+                             nearest endpoints; otherwise pick any two points (endpoint, \
+                             midpoint, center, the origin) to weld",
                             Icon::ConCoincident,
                         ) {
                             cmd = Some(Command::Constrain(K::Coincident));

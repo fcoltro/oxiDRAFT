@@ -3,7 +3,9 @@ use super::render::corner_glass_frame;
 use crate::state::AppState;
 use crate::tools::Tool;
 use egui::{Color32, Stroke, pos2, vec2};
-use oxidraft_document::{ConstraintKind, Document, EntityId, EntityKind, SketchConstraint};
+use oxidraft_document::{
+    ANCHOR_DERIVED, ConstraintKind, Document, EntityId, EntityKind, SketchConstraint,
+};
 use oxidraft_geometry::{Continuity, Curve, CurveSegment, Point2d, curvature_at, normal_at};
 
 pub(super) fn curvature_comb(
@@ -115,6 +117,26 @@ fn badge_line_ends(doc: &Document, id: EntityId) -> Option<((f64, f64), (f64, f6
                 )
             };
             Some((end(a.start_angle), end(a.end_angle)))
+        }
+        _ => None,
+    }
+}
+
+/// World position of one coincident anchor for badge placement: 0/1 an
+/// endpoint, ANCHOR_DERIVED a line's midpoint or an arc's center; a point
+/// entity is its own anchor.
+fn badge_anchor_pos(doc: &Document, id: EntityId, idx: u8) -> Option<(f64, f64)> {
+    match &doc.get(id)?.kind {
+        EntityKind::Point(p) => Some(p.to_f64()),
+        EntityKind::Curve(Curve::Line(l)) if idx == ANCHOR_DERIVED => {
+            let (x0, y0) = l.p0.to_f64();
+            let (x1, y1) = l.p1.to_f64();
+            Some(((x0 + x1) * 0.5, (y0 + y1) * 0.5))
+        }
+        EntityKind::Curve(Curve::Arc(a)) if idx == ANCHOR_DERIVED => Some(a.center.to_f64()),
+        _ if idx <= 1 => {
+            let (p0, p1) = badge_line_ends(doc, id)?;
+            Some(if idx == 0 { p0 } else { p1 })
         }
         _ => None,
     }
@@ -263,10 +285,15 @@ pub(super) fn badge_model(doc: &Document) -> BadgeModel {
             ConstraintKind::EqualLength => BadgeGlyph::Equal,
             ConstraintKind::Tangent => BadgeGlyph::Tangent,
             ConstraintKind::Coincident => {
-                let (Some((ea, _)), Some((p0, p1))) = (c.pts, badge_line_ends(doc, c.a)) else {
+                // Resolve the weld position from either side — welds to a
+                // point entity (the origin) or a midpoint/center anchor
+                // still get their dot at the shared spot.
+                let Some(p) = c.pts.and_then(|(ea, eb)| {
+                    badge_anchor_pos(doc, c.a, ea)
+                        .or_else(|| c.b.and_then(|b| badge_anchor_pos(doc, b, eb)))
+                }) else {
                     continue;
                 };
-                let p = if ea == 0 { p0 } else { p1 };
                 match corner_dots
                     .iter_mut()
                     .find(|(q, _)| (q.0 - p.0).hypot(q.1 - p.1) < 1e-9)

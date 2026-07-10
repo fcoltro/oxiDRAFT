@@ -64,6 +64,14 @@ pub enum Tool {
         first: Option<EntityId>,
         pending: Option<(EntityId, Option<EntityId>)>,
     },
+    /// Pick-based coincident weld: click two points — a line endpoint or
+    /// midpoint, an arc/circle center, or a point entity like the origin —
+    /// and they are welded coincident. `first` holds the first pick as
+    /// (entity, anchor index, anchor position) so the second pick can rubber-
+    /// band from it.
+    Weld {
+        first: Option<(EntityId, u8, Point2d)>,
+    },
     Ellipse {
         center: Option<Point2d>,
         axis_end: Option<Point2d>,
@@ -190,6 +198,7 @@ impl Tool {
             Tool::DimRadial { diameter: true, .. } => "DIM DIAMETER",
             Tool::DimRadial { .. } => "DIM RADIUS",
             Tool::DimConstraint { .. } => "SMART DIMENSION",
+            Tool::Weld { .. } => "WELD",
             Tool::Ellipse { .. } => "ELLIPSE",
             Tool::Rectangle { .. } => "RECTANGLE",
             Tool::PlotWindow { .. } => "PLOT WINDOW",
@@ -232,6 +241,7 @@ impl Tool {
                 | Tool::DimRadial { center: None, .. }
                 | Tool::DimAngularLines { geom: None, .. }
                 | Tool::DimConstraint { .. }
+                | Tool::Weld { .. }
         )
     }
 
@@ -663,6 +673,7 @@ impl Tool {
             | Tool::CircleTtr { .. }
             | Tool::CircleTtt { .. }
             | Tool::DimConstraint { .. }
+            | Tool::Weld { .. }
             | Tool::TangentLine { .. } => ToolEvent::Pending,
         }
     }
@@ -701,6 +712,7 @@ impl Tool {
                 *first = None;
                 *pending = None;
             }
+            Tool::Weld { first } => *first = None,
             Tool::Ellipse { center, axis_end } => {
                 *center = None;
                 *axis_end = None;
@@ -758,6 +770,7 @@ impl Tool {
             Tool::DimAngularLines { a, geom } => a.is_some() || geom.is_some(),
             Tool::DimRadial { center, .. } => center.is_some(),
             Tool::DimConstraint { first, pending } => first.is_some() || pending.is_some(),
+            Tool::Weld { first } => first.is_some(),
             Tool::Ellipse { center, .. } => center.is_some(),
             Tool::Rectangle { first } | Tool::PlotWindow { first } => first.is_some(),
             Tool::Move { base, .. } | Tool::Copy { base, .. } => base.is_some(),
@@ -947,6 +960,7 @@ impl Tool {
             | Tool::CircleTtr { .. }
             | Tool::CircleTtt { .. }
             | Tool::DimConstraint { .. } => None,
+            Tool::Weld { first } => first.map(|(_, _, p)| p),
             Tool::TangentLine { first } => match first {
                 Some(TanAnchor::Point(p)) => Some(*p),
                 _ => None,

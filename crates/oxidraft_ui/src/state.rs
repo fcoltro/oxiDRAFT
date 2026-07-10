@@ -139,7 +139,7 @@ impl Default for UiPrefs {
             grid_minor_rgb: (24, 28, 36),
             grid_major_rgb: (33, 39, 49),
             text_font: None,
-            infer_constraints: false,
+            infer_constraints: true,
             show_constraints: true,
         }
     }
@@ -499,7 +499,7 @@ impl AppState {
             grid_major_rgb: (33, 39, 49),
             clipboard: Vec::new(),
             hint_tool: None,
-            infer_constraints: false,
+            infer_constraints: true,
             show_constraints: true,
             pending_dim_edit: None,
             plot_window: None,
@@ -1922,8 +1922,46 @@ impl AppState {
     /// Solving happens on a scratch copy so a failed solve leaves the
     /// document (and the undo stack) untouched.
     pub fn constrain_selection(&mut self, kind: oxidraft_cad::ConstraintKind) {
+        // Coincident without two selected lines switches to the pick-based
+        // WELD tool: click any two points — endpoint, midpoint, center, or
+        // the origin — instead of pre-selecting geometry.
+        if kind == oxidraft_cad::ConstraintKind::Coincident {
+            let lines = self
+                .selection
+                .iter()
+                .filter(|&&id| {
+                    matches!(
+                        self.document.get(id).and_then(|e| e.as_curve()),
+                        Some(oxidraft_geometry::Curve::Line(_))
+                    )
+                })
+                .count();
+            if lines != 2 {
+                self.tool = Tool::Weld { first: None };
+                self.command_log
+                    .push("WELD: pick two points to make them coincident".into());
+                return;
+            }
+        }
         let mut doc = self.document.clone();
         match oxidraft_cad::constrain_lines(&mut doc, &self.selection, kind) {
+            Ok(msg) => {
+                self.history.snapshot(&self.document);
+                self.document = doc;
+                self.command_log.push(msg);
+            }
+            Err(e) => self.command_log.push(e),
+        }
+    }
+
+    /// Welds two picked anchors coincident — an endpoint, a line midpoint,
+    /// an arc/circle center, or a point entity like the origin — re-solving
+    /// so they actually meet. Backs the pick-based WELD tool; solving
+    /// happens on a scratch copy so a failed weld leaves the document
+    /// untouched.
+    pub fn weld_points(&mut self, a: (EntityId, u8), b: (EntityId, u8)) {
+        let mut doc = self.document.clone();
+        match oxidraft_cad::constrain_coincident_points(&mut doc, a, b) {
             Ok(msg) => {
                 self.history.snapshot(&self.document);
                 self.document = doc;
@@ -3319,6 +3357,54 @@ mod tests {
             .expect("a dimension entity");
         let layer = a.document.layers.get(dim.layer).expect("its layer");
         assert_eq!(layer.name, oxidraft_document::DIMENSION_LAYER);
+    }
+
+    #[test]
+    fn weld_tool_welds_origin_to_a_line_midpoint() {
+        let mut a = app();
+        a.snap_on = false;
+        let l = a
+            .document
+            .add(EntityKind::Curve(Curve::Line(LineSeg::from_endpoints(
+                Point2d::from_f64(2.0, 3.0),
+                Point2d::from_f64(6.0, 5.0),
+            ))));
+        a.tool = crate::tools::Tool::Weld { first: None };
+        // First pick: the origin point entity at (0,0).
+        let (ox, oy) = a.view.world_to_screen(0.0, 0.0);
+        a.canvas_click(ox, oy);
+        assert!(
+            matches!(a.tool, crate::tools::Tool::Weld { first: Some((id, 0, _)) } if id == a.origin_id),
+            "origin picked as the first anchor: {:?}",
+            a.tool
+        );
+        // Second pick: the line's midpoint at (4,4).
+        let (mx, my) = a.view.world_to_screen(4.0, 4.0);
+        a.canvas_click(mx, my);
+        let c = a
+            .document
+            .constraints
+            .iter()
+            .find(|c| c.kind == oxidraft_document::ConstraintKind::Coincident)
+            .expect("the weld was recorded");
+        assert_eq!(
+            c.pts,
+            Some((0, oxidraft_document::ANCHOR_DERIVED)),
+            "origin anchor 0 welded to the line's midpoint anchor"
+        );
+        let ls = match a.document.get(l).and_then(|e| e.as_curve()) {
+            Some(Curve::Line(ls)) => ls.clone(),
+            other => panic!("expected the line, got {other:?}"),
+        };
+        let mid = ((ls.p0.x + ls.p1.x) * 0.5, (ls.p0.y + ls.p1.y) * 0.5);
+        assert!(
+            mid.0.abs() < 1e-6 && mid.1.abs() < 1e-6,
+            "the line slid so its midpoint sits on the origin: {mid:?}"
+        );
+        assert!(
+            matches!(a.tool, crate::tools::Tool::Weld { first: None }),
+            "the tool reset for the next weld"
+        );
     }
 
     #[test]

@@ -34,6 +34,11 @@ pub struct ScalarVar(usize);
 pub enum Constraint {
     /// The two points coincide.
     Coincident(PointVar, PointVar),
+    /// The midpoint of segment a0→a1 coincides with the midpoint of segment
+    /// b0→b1. Passing the same variable twice on a side degenerates that
+    /// side's "midpoint" to the point itself, so one variant covers welding
+    /// a point to a midpoint, an endpoint to a midpoint, and two midpoints.
+    MidpointsCoincident(PointVar, PointVar, PointVar, PointVar),
     /// The segment a→b is horizontal.
     Horizontal(PointVar, PointVar),
     /// The segment a→b is vertical.
@@ -86,7 +91,7 @@ pub struct SolveResult {
     pub iterations: u32,
 }
 
-#[derive(Default)]
+#[derive(Clone, Default)]
 pub struct Sketch {
     vars: Vec<f64>,
     constraints: Vec<Constraint>,
@@ -180,6 +185,14 @@ impl Sketch {
                     let (bx, by) = p(b);
                     out.push(ax - bx);
                     out.push(ay - by);
+                }
+                Constraint::MidpointsCoincident(a0, a1, b0, b1) => {
+                    let (ax0, ay0) = p(a0);
+                    let (ax1, ay1) = p(a1);
+                    let (bx0, by0) = p(b0);
+                    let (bx1, by1) = p(b1);
+                    out.push((ax0 + ax1 - bx0 - bx1) * 0.5);
+                    out.push((ay0 + ay1 - by0 - by1) * 0.5);
                 }
                 Constraint::Horizontal(a, b) => {
                     let (_, ay) = p(a);
@@ -336,6 +349,15 @@ impl Sketch {
                     let (bx, by) = p(b);
                     push(ci, &ax - &bx);
                     push(ci, &ay - &by);
+                }
+                Constraint::MidpointsCoincident(a0, a1, b0, b1) => {
+                    let (ax0, ay0) = p(a0);
+                    let (ax1, ay1) = p(a1);
+                    let (bx0, by0) = p(b0);
+                    let (bx1, by1) = p(b1);
+                    let half = Dual::constant(0.5, nv);
+                    push(ci, &(&(&(&ax0 + &ax1) - &bx0) - &bx1) * &half);
+                    push(ci, &(&(&(&ay0 + &ay1) - &by0) - &by1) * &half);
                 }
                 Constraint::Horizontal(a, b) => {
                     let (_, ay) = p(a);
@@ -925,6 +947,57 @@ mod tests {
     }
 
     #[test]
+    fn midpoints_coincident_drags_a_line_by_its_midpoint() {
+        // The origin scenario: a fixed point at (0,0), a line floating
+        // nearby. Welding the line's midpoint to the point (same-var
+        // degenerate side) must translate the line so its middle lands
+        // exactly on the point.
+        let mut s = Sketch::new();
+        let o = s.add_point(0.0, 0.0);
+        let a = s.add_point(3.0, 1.0);
+        let b = s.add_point(7.0, 3.0);
+        s.constrain(Constraint::Fixed(o, 0.0, 0.0));
+        s.constrain(Constraint::Distance(a, b, 20.0f64.sqrt()));
+        s.constrain(Constraint::MidpointsCoincident(o, o, a, b));
+        let res = s.solve();
+        assert!(res.converged, "residual {}", res.residual);
+        let (ax, ay) = s.point(a);
+        let (bx, by) = s.point(b);
+        assert!(
+            ((ax + bx) * 0.5).abs() < 1e-6 && ((ay + by) * 0.5).abs() < 1e-6,
+            "midpoint landed on the origin: mid=({}, {})",
+            (ax + bx) * 0.5,
+            (ay + by) * 0.5
+        );
+        assert!(
+            ((bx - ax).hypot(by - ay) - 20.0f64.sqrt()).abs() < 1e-6,
+            "the line kept its length"
+        );
+    }
+
+    #[test]
+    fn midpoints_coincident_joins_two_line_middles() {
+        let mut s = Sketch::new();
+        let a0 = s.add_point(0.0, 0.0);
+        let a1 = s.add_point(4.0, 0.0);
+        let b0 = s.add_point(10.0, 5.0);
+        let b1 = s.add_point(14.0, 7.0);
+        s.constrain(Constraint::Fixed(a0, 0.0, 0.0));
+        s.constrain(Constraint::Fixed(a1, 4.0, 0.0));
+        s.constrain(Constraint::MidpointsCoincident(a0, a1, b0, b1));
+        let res = s.solve();
+        assert!(res.converged, "residual {}", res.residual);
+        let (bx0, by0) = s.point(b0);
+        let (bx1, by1) = s.point(b1);
+        assert!(
+            ((bx0 + bx1) * 0.5 - 2.0).abs() < 1e-6 && ((by0 + by1) * 0.5).abs() < 1e-6,
+            "b's midpoint landed on a's midpoint (2, 0): ({}, {})",
+            (bx0 + bx1) * 0.5,
+            (by0 + by1) * 0.5
+        );
+    }
+
+    #[test]
     fn point_on_circle_pulls_point_to_rim() {
         let mut s = Sketch::new();
         let c = s.add_point(0.0, 0.0);
@@ -1119,6 +1192,8 @@ mod tests {
         let r2 = s.add_scalar(0.9);
 
         s.constrain(Constraint::Coincident(a, b));
+        s.constrain(Constraint::MidpointsCoincident(a, b, c, d));
+        s.constrain(Constraint::MidpointsCoincident(q, q, a, b));
         s.constrain(Constraint::Horizontal(a, b));
         s.constrain(Constraint::Vertical(c, d));
         s.constrain(Constraint::Distance(a, b, 2.5));

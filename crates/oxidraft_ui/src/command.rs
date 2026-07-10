@@ -243,7 +243,9 @@ pub fn parse_command(input: &str) -> Command {
         "PARALLEL" | "PAR" => Command::Constrain(ConstraintKind::Parallel),
         "PERPENDICULAR" | "PERP" => Command::Constrain(ConstraintKind::Perpendicular),
         "EQUALLENGTH" | "EQL" => Command::Constrain(ConstraintKind::EqualLength),
-        "COINCIDENT" | "COI" => Command::Constrain(ConstraintKind::Coincident),
+        // With two lines selected this welds their nearest endpoints
+        // directly; otherwise it activates the pick-based WELD tool.
+        "COINCIDENT" | "COI" | "WELD" => Command::Constrain(ConstraintKind::Coincident),
         // TAN is the tangent-line drawing tool, so the constraint follows
         // AutoCAD's GC* naming.
         "TANCON" | "GCTAN" | "GCTANGENT" => Command::Constrain(ConstraintKind::Tangent),

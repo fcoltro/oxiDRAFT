@@ -119,6 +119,13 @@ pub(super) fn tool_prompt(tool: &Tool) -> String {
                 "Pick a line (length), a circle/arc (radius), or a first line for an angle".into()
             }
         },
+        Tool::Weld { first } => {
+            if first.is_none() {
+                "Pick the first point to weld (endpoint, midpoint, center, or point)".into()
+            } else {
+                "Pick the point to weld it to".into()
+            }
+        }
         Tool::Ellipse { center, axis_end } => match (center, axis_end) {
             (None, _) => "Specify center of ellipse".into(),
             (Some(_), None) => "Specify end of first axis".into(),
