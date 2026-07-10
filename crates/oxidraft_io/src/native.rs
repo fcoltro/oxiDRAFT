@@ -68,24 +68,33 @@ pub fn to_string(doc: &Document) -> String {
             }
             (Some(b), None) => {
                 let Some(&ib) = index.get(&b) else { continue };
-                // Valued pair kinds (Angle) append their value; the loader
-                // reads the pair token first, then an optional value.
-                match c.val {
-                    Some(v) => {
+                // Valued pair kinds (Angle, LineDistance) append their value
+                // and, when the user placed the annotation, its world point;
+                // the loader reads the pair token first, then the optionals.
+                match (c.val, c.place) {
+                    (Some(v), Some((px, py))) => {
+                        let _ =
+                            writeln!(s, "C {} {} {} {} {} {}", c.kind.code(), ia, ib, v, px, py);
+                    }
+                    (Some(v), None) => {
                         let _ = writeln!(s, "C {} {} {} {}", c.kind.code(), ia, ib, v);
                     }
-                    None => {
+                    (None, _) => {
                         let _ = writeln!(s, "C {} {} {}", c.kind.code(), ia, ib);
                     }
                 }
             }
             (None, _) => {
-                // Valued single kinds (Radius, Distance) append their value.
-                match c.val {
-                    Some(v) => {
+                // Valued single kinds (Radius, Distance) append their value
+                // and optional placement.
+                match (c.val, c.place) {
+                    (Some(v), Some((px, py))) => {
+                        let _ = writeln!(s, "C {} {} {} {} {}", c.kind.code(), ia, v, px, py);
+                    }
+                    (Some(v), None) => {
                         let _ = writeln!(s, "C {} {} {}", c.kind.code(), ia, v);
                     }
-                    None => {
+                    (None, _) => {
                         let _ = writeln!(s, "C {} {}", c.kind.code(), ia);
                     }
                 }
@@ -377,6 +386,7 @@ pub fn from_string(text: &str) -> Result<Document, String> {
         Option<usize>,
         Option<(u8, u8)>,
         Option<f64>,
+        Option<(f64, f64)>,
     );
     let mut pending_constraints: Vec<PendingConstraint> = Vec::new();
     // Constraints reference entities by ordinal in the file's write order.
@@ -426,7 +436,14 @@ pub fn from_string(text: &str) -> Result<Document, String> {
                             && ea <= 1
                             && eb <= 1
                         {
-                            pending_constraints.push((kind, ia, Some(ib), Some((ea, eb)), None));
+                            pending_constraints.push((
+                                kind,
+                                ia,
+                                Some(ib),
+                                Some((ea, eb)),
+                                None,
+                                None,
+                            ));
                         }
                     } else {
                         let ib = if kind.is_pair() {
@@ -435,11 +452,20 @@ pub fn from_string(text: &str) -> Result<Document, String> {
                             None
                         };
                         let val: Option<f64> = tok.next().and_then(|v| v.parse().ok());
+                        // Optional annotation placement follows the value;
+                        // both coordinates must parse finite or it's dropped
+                        // (the record itself stays valid without one).
+                        let px: Option<f64> = tok.next().and_then(|v| v.parse().ok());
+                        let py: Option<f64> = tok.next().and_then(|v| v.parse().ok());
+                        let place = match (px, py) {
+                            (Some(x), Some(y)) if x.is_finite() && y.is_finite() => Some((x, y)),
+                            _ => None,
+                        };
                         // A valued kind without a sane value is corrupt.
                         let val_ok =
                             !kind.is_valued() || val.is_some_and(|v| v.is_finite() && v > 0.0);
                         if (!kind.is_pair() || ib.is_some()) && val_ok {
-                            pending_constraints.push((kind, ia, ib, None, val));
+                            pending_constraints.push((kind, ia, ib, None, val, place));
                         }
                     }
                 }
@@ -450,7 +476,7 @@ pub fn from_string(text: &str) -> Result<Document, String> {
 
     // Out-of-range references (truncated or hand-edited files) and references
     // to dropped records are discarded rather than mis-attached.
-    for (kind, ia, ib, pts, val) in pending_constraints {
+    for (kind, ia, ib, pts, val, place) in pending_constraints {
         let Some(&Some(a)) = entity_ids.get(ia) else {
             continue;
         };
@@ -467,6 +493,7 @@ pub fn from_string(text: &str) -> Result<Document, String> {
             b,
             pts,
             val,
+            place,
         });
     }
 
@@ -1082,6 +1109,108 @@ mod tests {
             (c.kind, c.a, c.b, c.val),
             (ConstraintKind::Angle, ids[0], Some(ids[1]), Some(72.5))
         );
+    }
+
+    #[test]
+    fn roundtrip_line_distance_keeps_value_placement_and_both_lines() {
+        let mut doc = Document::new();
+        let a = doc.add(EntityKind::Curve(Curve::Line(LineSeg::from_endpoints(
+            pt_i(0, 0),
+            pt_i(4, 0),
+        ))));
+        let b = doc.add(EntityKind::Curve(Curve::Line(LineSeg::from_endpoints(
+            pt_i(0, 3),
+            pt_i(4, 3),
+        ))));
+        let mut c = SketchConstraint::line_distance(a, b, 3.0);
+        c.place = Some((2.0, 1.5));
+        doc.add_constraint(c);
+
+        let doc2 = from_string(&to_string(&doc)).unwrap();
+        assert_eq!(doc2.constraints.len(), 1);
+        let c = doc2.constraints[0];
+        let ids: Vec<_> = doc2.iter().map(|e| e.id).collect();
+        assert_eq!(
+            (c.kind, c.a, c.b, c.val),
+            (
+                ConstraintKind::LineDistance,
+                ids[0],
+                Some(ids[1]),
+                Some(3.0)
+            )
+        );
+        assert_eq!(c.place, Some((2.0, 1.5)));
+    }
+
+    #[test]
+    fn roundtrip_single_kind_placement_survives_and_absence_stays_none() {
+        let mut doc = Document::new();
+        let a = doc.add(EntityKind::Curve(Curve::Line(LineSeg::from_endpoints(
+            pt_i(0, 0),
+            pt_i(4, 0),
+        ))));
+        let mut placed = SketchConstraint::distance(a, 4.0);
+        placed.place = Some((1.0, -2.5));
+        doc.add_constraint(placed);
+
+        let doc2 = from_string(&to_string(&doc)).unwrap();
+        assert_eq!(doc2.constraints.len(), 1);
+        assert_eq!(doc2.constraints[0].place, Some((1.0, -2.5)));
+
+        // Un-placed records must round-trip with `place` still None so the
+        // automatic layout keeps handling them.
+        let mut doc = Document::new();
+        let a = doc.add(EntityKind::Curve(Curve::Line(LineSeg::from_endpoints(
+            pt_i(0, 0),
+            pt_i(4, 0),
+        ))));
+        doc.add_constraint(SketchConstraint::distance(a, 4.0));
+        let doc2 = from_string(&to_string(&doc)).unwrap();
+        assert_eq!(doc2.constraints[0].place, None);
+    }
+
+    #[test]
+    fn bad_placement_tokens_are_dropped_but_the_record_survives() {
+        let mut doc = Document::new();
+        doc.add(EntityKind::Curve(Curve::Line(LineSeg::from_endpoints(
+            pt_i(0, 0),
+            pt_i(4, 0),
+        ))));
+        let base = to_string(&doc);
+        // A lone x, a non-numeric y, and a non-finite coordinate all fail to
+        // form a placement; the constraint itself must still load.
+        for bad in ["C LEN 0 4 1.0", "C LEN 0 4 1.0 nope", "C LEN 0 4 inf 2.0"] {
+            let doc2 = from_string(&format!("{base}{bad}\n")).unwrap();
+            assert_eq!(
+                doc2.constraints.len(),
+                1,
+                "record {bad:?} must survive without a placement"
+            );
+            assert_eq!(doc2.constraints[0].val, Some(4.0));
+            assert_eq!(doc2.constraints[0].place, None, "for {bad:?}");
+        }
+    }
+
+    #[test]
+    fn line_distance_records_without_a_sane_value_are_dropped() {
+        let mut doc = Document::new();
+        doc.add(EntityKind::Curve(Curve::Line(LineSeg::from_endpoints(
+            pt_i(0, 0),
+            pt_i(4, 0),
+        ))));
+        doc.add(EntityKind::Curve(Curve::Line(LineSeg::from_endpoints(
+            pt_i(0, 3),
+            pt_i(4, 3),
+        ))));
+        let base = to_string(&doc);
+        for bad in ["C LDIST 0 1", "C LDIST 0 1 -3", "C LDIST 0 1 nope"] {
+            let doc2 = from_string(&format!("{base}{bad}\n")).unwrap();
+            assert_eq!(doc2.len(), 2, "both lines still load");
+            assert!(
+                doc2.constraints.is_empty(),
+                "corrupt line-distance record {bad:?} must be dropped"
+            );
+        }
     }
 
     #[test]

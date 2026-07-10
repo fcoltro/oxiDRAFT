@@ -1,6 +1,6 @@
 use egui::{CentralPanel, Color32, Sense, Stroke, pos2, vec2};
 use oxidraft_cad::GripRole;
-use oxidraft_document::{EntityId, EntityKind};
+use oxidraft_document::{EntityId, EntityKind, SketchConstraint};
 use oxidraft_geometry::Point2d;
 
 use crate::command::Command;
@@ -70,6 +70,11 @@ pub struct UiState {
     pub text_edit_active: bool,
     pub text_edit_font: Option<String>,
     pub text_edit_size: f64,
+    /// The driving-dimension constraint whose value is being edited inline,
+    /// with the field buffer and a first-show flag (mirrors `editing_text`).
+    pub editing_dim: Option<oxidraft_document::SketchConstraint>,
+    pub dim_edit_buf: String,
+    pub dim_edit_active: bool,
     pub palette_index: usize,
     pub palette_nav: bool,
     pub last_title: String,
@@ -230,7 +235,7 @@ fn canvas(root_ui: &mut egui::Ui, app: &mut AppState, ui_state: &mut UiState, pa
                 app.selection = vec![id];
             }
         }
-        if ui_state.editing_text.is_some() {
+        if ui_state.editing_text.is_some() || ui_state.editing_dim.is_some() {
             press_consumed = true;
         }
         if let Some(p) = response.hover_pos() {
@@ -556,6 +561,25 @@ fn canvas(root_ui: &mut egui::Ui, app: &mut AppState, ui_state: &mut UiState, pa
                 ctx.data_mut(|d| d.insert_temp(egui::Id::new("marquee_on"), false));
             }
         }
+        // A click on a driving-dimension badge opens its inline value editor
+        // instead of selecting or placing — weld dots and glyph chips keep
+        // their delete-on-click. Consumes the click so nothing else acts on it.
+        if !press_consumed
+            && !palette_open
+            && matches!(app.tool, Tool::Select)
+            && press_in_select
+            && ui_state.editing_dim.is_none()
+            && response.clicked()
+            && let Some(p) = response.interact_pointer_pos()
+            && let Some(c) =
+                overlays::dim_badge_hit(app, (p.x - origin.x) as f64, (p.y - origin.y) as f64)
+        {
+            let prec = app.document.settings.dim_style.precision;
+            ui_state.dim_edit_buf = format_dim_value(&c, prec);
+            ui_state.editing_dim = Some(c);
+            ui_state.dim_edit_active = false;
+            press_consumed = true;
+        }
         let place_point = !press_consumed
             && !palette_open
             && if matches!(app.tool, Tool::Select) {
@@ -572,6 +596,7 @@ fn canvas(root_ui: &mut egui::Ui, app: &mut AppState, ui_state: &mut UiState, pa
         }
         if !palette_open
             && ui_state.editing_text.is_none()
+            && ui_state.editing_dim.is_none()
             && ui.input(|i| i.key_pressed(egui::Key::Escape))
         {
             if app.grip_editing() {
@@ -582,7 +607,8 @@ fn canvas(root_ui: &mut egui::Ui, app: &mut AppState, ui_state: &mut UiState, pa
         }
         let in_text_field = {
             let f = ctx.memory(|mem| mem.focused());
-            f == Some(egui::Id::new("command_line_input"))
+            f == Some(egui::Id::new("dim_edit_field"))
+                || f == Some(egui::Id::new("command_line_input"))
                 || f == Some(egui::Id::new("dyn_len"))
                 || f == Some(egui::Id::new("dyn_ang"))
                 || f == Some(egui::Id::new("dyn_radius"))
@@ -1225,6 +1251,92 @@ fn canvas(root_ui: &mut egui::Ui, app: &mut AppState, ui_state: &mut UiState, pa
                 }
             }
         }
+        // The smart-dimension tool creates a driving dimension and asks the
+        // view to open its editor so the value can be typed straight away.
+        // `app` is immutably borrowed here (via `to_screen`), so the queue is
+        // cleared later in the frame's mutable tail.
+        if ui_state.editing_dim.is_none()
+            && let Some(c) = app.pending_dim_edit
+        {
+            let prec = app.document.settings.dim_style.precision;
+            ui_state.dim_edit_buf = format_dim_value(&c, prec);
+            ui_state.editing_dim = Some(c);
+            ui_state.dim_edit_active = false;
+        }
+        // Inline editor for a driving-dimension value, opened by clicking its
+        // badge. Enter or a click away commits the typed value; Esc cancels;
+        // the ✕ removes the constraint outright.
+        let mut dim_commit: Option<(SketchConstraint, f64)> = None;
+        let mut dim_delete: Option<SketchConstraint> = None;
+        if let Some(c) = ui_state.editing_dim {
+            match overlays::dim_badge_anchor(app, &c) {
+                None => {
+                    ui_state.editing_dim = None;
+                    ui_state.dim_edit_active = false;
+                }
+                Some(local) => {
+                    let sp = pos2(origin.x + local.x, origin.y + local.y);
+                    let first_show = !ui_state.dim_edit_active;
+                    let mut commit = false;
+                    let mut cancel = false;
+                    let suffix = dim_unit_suffix(&c, app.document.settings.units);
+                    let area = egui::Area::new(egui::Id::new("dim_edit_inline"))
+                        .fixed_pos(pos2(sp.x - 52.0, sp.y - 44.0))
+                        .order(egui::Order::Foreground)
+                        .show(ctx, |ui| {
+                            egui::Frame::popup(ui.style()).show(ui, |ui| {
+                                ui.horizontal(|ui| {
+                                    let te = ui.add(
+                                        egui::TextEdit::singleline(&mut ui_state.dim_edit_buf)
+                                            .id(egui::Id::new("dim_edit_field"))
+                                            .desired_width(74.0),
+                                    );
+                                    if first_show {
+                                        te.request_focus();
+                                    }
+                                    if !suffix.is_empty() {
+                                        ui.label(
+                                            egui::RichText::new(suffix)
+                                                .color(crate::theme::TEXT_DIM),
+                                        );
+                                    }
+                                    if ui
+                                        .button("✕")
+                                        .on_hover_text("Remove this constraint")
+                                        .clicked()
+                                    {
+                                        dim_delete = Some(c);
+                                    }
+                                });
+                                let enter = ui.input(|i| i.key_pressed(egui::Key::Enter));
+                                let esc = ui.input(|i| i.key_pressed(egui::Key::Escape));
+                                if esc {
+                                    cancel = true;
+                                } else if enter {
+                                    commit = true;
+                                }
+                            });
+                        });
+                    // Skip the opening frame: the very click that opened the
+                    // editor would otherwise read as "clicked elsewhere" and
+                    // commit instantly.
+                    if !first_show && area.response.clicked_elsewhere() {
+                        commit = true;
+                    }
+                    ui_state.dim_edit_active = true;
+                    if dim_delete.is_some() || cancel {
+                        ui_state.editing_dim = None;
+                        ui_state.dim_edit_active = false;
+                    } else if commit {
+                        if let Ok(v) = ui_state.dim_edit_buf.trim().parse::<f64>() {
+                            dim_commit = Some((c, v));
+                        }
+                        ui_state.editing_dim = None;
+                        ui_state.dim_edit_active = false;
+                    }
+                }
+            }
+        }
         if let Some(ca) = app.interaction.corner_action {
             draw_corner_preview(&painter, app, &ca, &to_screen);
         } else {
@@ -1457,6 +1569,7 @@ fn canvas(root_ui: &mut egui::Ui, app: &mut AppState, ui_state: &mut UiState, pa
         draw_transform_ghost(&painter, app, &to_screen);
         draw_blend_preview(&painter, app, &to_screen, hovered_id);
         draw_trim_extend_preview(&painter, app, &to_screen);
+        overlays::smart_dim_preview(&painter, app, origin);
         let cc = to_screen(app.cursor_world.0, app.cursor_world.1);
         let over_canvas = response.contains_pointer()
             && ctx
@@ -1817,8 +1930,35 @@ fn canvas(root_ui: &mut egui::Ui, app: &mut AppState, ui_state: &mut UiState, pa
         if let Some((id, content, font, size)) = text_commit {
             app.commit_text_edit(id, content, font, size);
         }
+        if let Some((c, v)) = dim_commit {
+            app.set_constraint_value(c, v);
+        }
+        if let Some(c) = dim_delete {
+            app.remove_constraint(c);
+        }
+        // The smart-dimension hand-off (read immutably above) is a one-shot;
+        // clear it now that we hold `app` mutably again.
+        app.pending_dim_edit = None;
     });
 }
+
+/// The numeric text shown in the dimension editor field: the driving value
+/// alone, without its unit suffix (the unit is a separate label).
+fn format_dim_value(c: &SketchConstraint, precision: usize) -> String {
+    c.val
+        .map(|v| format!("{v:.*}", precision))
+        .unwrap_or_default()
+}
+
+/// The unit shown beside the dimension editor field: degrees for an angle,
+/// otherwise the document's length unit (possibly empty when unitless).
+fn dim_unit_suffix(c: &SketchConstraint, units: oxidraft_document::Units) -> &'static str {
+    match c.kind {
+        oxidraft_document::ConstraintKind::Angle => "\u{00b0}",
+        _ => units.short_name(),
+    }
+}
+
 #[cfg(test)]
 mod tess_tests {
     use super::tessellate::{flatten_curve, point_seg_dist_sq};

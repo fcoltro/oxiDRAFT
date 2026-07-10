@@ -1569,6 +1569,7 @@ fn tool_hotkey(tool: &Tool) -> &'static str {
         | Tool::Dimension { .. }
         | Tool::DimAngularLines { .. }
         | Tool::DimRadial { .. }
+        | Tool::DimConstraint { .. }
         | Tool::PlotWindow { .. }
         | Tool::Point => "",
     }
@@ -2635,10 +2636,26 @@ pub(super) fn constraint_bar(ctx: &Context, app: &mut AppState, canvas_rect: egu
                 .show(ui, |ui| {
                     use crate::icons::Icon;
                     use oxidraft_cad::ConstraintKind as K;
+                    // Pin to the glyph-button width; otherwise `bar_divider`'s
+                    // `available_width()` rule stretches to the Area's full max
+                    // width and blows the whole bar out sideways.
+                    ui.set_width(30.0);
+                    ui.spacing_mut().item_spacing.y = 3.0;
+                    // Smart Dimension is a pick tool — it needs no pre-selection,
+                    // so it sits above the selection-gated group, always live.
+                    if con_glyph_button(
+                        ui,
+                        "Smart Dimension (DIMCON) — click a line for length, \
+                         a circle/arc for radius, or two lines for angle",
+                        Icon::ConLengthLock,
+                    ) {
+                        app.execute(Command::Activate(Tool::DimConstraint {
+                            first: None,
+                            pending: None,
+                        }));
+                    }
+                    bar_divider(ui);
                     ui.add_enabled_ui(has_sel, |ui| {
-                        // Pin to the glyph-button width; otherwise `bar_divider`'s
-                        // `available_width()` rule stretches to the Area's full max
-                        // width and blows the whole bar out sideways.
                         ui.set_width(30.0);
                         ui.spacing_mut().item_spacing.y = 3.0;
                         let mut cmd: Option<Command> = None;
@@ -2691,28 +2708,15 @@ pub(super) fn constraint_bar(ctx: &Context, app: &mut AppState, canvas_rect: egu
                             cmd = Some(Command::Constrain(K::Coincident));
                         }
                         bar_divider(ui);
+                        // Length/radius/angle dimensions all live in the Smart
+                        // Dimension pick tool above — no separate lock buttons.
                         if con_glyph_button(
                             ui,
-                            "Lock Radius (RADCON) — hold a circle/arc's current radius",
-                            Icon::ConRadiusLock,
+                            "Fix (GCFIX) — pin the selected geometry in place",
+                            Icon::ConFix,
                         ) {
-                            cmd = Some(Command::ConstrainRadius(None));
+                            cmd = Some(Command::Fix);
                         }
-                        if con_glyph_button(
-                            ui,
-                            "Lock Length (LENCON) — hold a line's current length",
-                            Icon::ConLengthLock,
-                        ) {
-                            cmd = Some(Command::ConstrainDistance(None));
-                        }
-                        if con_glyph_button(
-                            ui,
-                            "Angle (ANGCON) — hold the angle between two lines",
-                            Icon::ConAngle,
-                        ) {
-                            cmd = Some(Command::ConstrainAngle(None));
-                        }
-                        bar_divider(ui);
                         if con_glyph_button(
                             ui,
                             "Remove (UNCON) — drop every constraint on the selection",
@@ -2740,20 +2744,22 @@ pub(super) fn constraint_bar(ctx: &Context, app: &mut AppState, canvas_rect: egu
             ui.vertical(|ui| {
                 ui.set_width(28.0);
                 ui.spacing_mut().item_spacing.y = 4.0;
-                if bar_toggle(
+                if bar_toggle_onoff(
                     ui,
                     app.infer_constraints,
                     "Auto-constrain — infer coincident, horizontal / vertical \
                      and tangent constraints as you draw",
                     crate::icons::Icon::ConstAuto,
+                    crate::icons::Icon::ConstAutoOff,
                 ) {
                     app.infer_constraints = !app.infer_constraints;
                 }
-                if bar_toggle(
+                if bar_toggle_onoff(
                     ui,
                     app.show_constraints,
                     "Show / hide constraint badges",
                     crate::icons::Icon::ConstShowHide,
+                    crate::icons::Icon::ConstShowHideOff,
                 ) {
                     app.show_constraints = !app.show_constraints;
                 }
@@ -2810,6 +2816,40 @@ fn bar_toggle(ui: &mut egui::Ui, on: bool, tooltip: &str, icon: crate::icons::Ic
         140
     };
     let tint = egui::Color32::from_white_alpha(alpha);
+    crate::icons::paint_icon(&painter, ui.ctx(), icon, rect.shrink(5.0), tint);
+    if hovered {
+        resp = resp.on_hover_ui(|ui| crate::icons::rich_tooltip(ui, tooltip));
+    }
+    resp.clicked()
+}
+
+/// Like [`bar_toggle`], but the on/off state is carried by the icon art
+/// itself (`on_icon` vs a slashed `off_icon`) instead of by opacity alone.
+/// The glyph stays at full strength in both states so the slash reads
+/// clearly; hover only adds the soft background wash. Returns whether it
+/// was clicked.
+fn bar_toggle_onoff(
+    ui: &mut egui::Ui,
+    on: bool,
+    tooltip: &str,
+    on_icon: crate::icons::Icon,
+    off_icon: crate::icons::Icon,
+) -> bool {
+    let (rect, mut resp) = ui.allocate_exact_size(egui::Vec2::splat(28.0), egui::Sense::click());
+    let hovered = resp.hovered();
+    let anim = ui.ctx().animate_bool(resp.id, hovered);
+    let painter = ui.painter_at(rect);
+    if anim > 0.001 {
+        painter.rect_filled(
+            rect,
+            7.0,
+            crate::theme::WIDGET_HOVER.gamma_multiply(anim * 0.8),
+        );
+    }
+    let icon = if on { on_icon } else { off_icon };
+    // The art conveys the state; keep the glyph readable in both, dimming
+    // the "off" side only slightly.
+    let tint = egui::Color32::from_white_alpha(if on || hovered { 255 } else { 210 });
     crate::icons::paint_icon(&painter, ui.ctx(), icon, rect.shrink(5.0), tint);
     if hovered {
         resp = resp.on_hover_ui(|ui| crate::icons::rich_tooltip(ui, tooltip));

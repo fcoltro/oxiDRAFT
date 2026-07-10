@@ -14,6 +14,9 @@ pub enum ConstraintKind {
     Radius,
     /// A line entity holding a driving length, stored in `val`.
     Distance,
+    /// Two parallel line entities held at a driving perpendicular distance
+    /// (a width), stored in `val`. `a` is the reference line; `b` slides.
+    LineDistance,
     /// Two line entities held at a driving angle. `val` is in degrees,
     /// normalized to (0, 180] — lines are undirected, so θ and θ+180° are
     /// the same relation, and 0° is recorded as 180° to survive the
@@ -37,6 +40,7 @@ impl ConstraintKind {
             ConstraintKind::Tangent => "tangent",
             ConstraintKind::Radius => "radius",
             ConstraintKind::Distance => "length",
+            ConstraintKind::LineDistance => "distance",
             ConstraintKind::Angle => "angle",
             ConstraintKind::Fixed => "fixed",
         }
@@ -52,15 +56,19 @@ impl ConstraintKind {
                 | ConstraintKind::Coincident
                 | ConstraintKind::Tangent
                 | ConstraintKind::Angle
+                | ConstraintKind::LineDistance
         )
     }
 
     /// Valued kinds carry a driving number in `val` (a radius, a length,
-    /// an angle); their record is corrupt without a positive value.
+    /// a width, an angle); their record is corrupt without a positive value.
     pub fn is_valued(&self) -> bool {
         matches!(
             self,
-            ConstraintKind::Radius | ConstraintKind::Distance | ConstraintKind::Angle
+            ConstraintKind::Radius
+                | ConstraintKind::Distance
+                | ConstraintKind::LineDistance
+                | ConstraintKind::Angle
         )
     }
 
@@ -75,6 +83,7 @@ impl ConstraintKind {
             ConstraintKind::Tangent => "TAN",
             ConstraintKind::Radius => "RAD",
             ConstraintKind::Distance => "LEN",
+            ConstraintKind::LineDistance => "LDIST",
             ConstraintKind::Angle => "ANG",
             ConstraintKind::Fixed => "FIX",
         }
@@ -92,6 +101,7 @@ impl ConstraintKind {
             "TAN" => ConstraintKind::Tangent,
             "RAD" => ConstraintKind::Radius,
             "LEN" => ConstraintKind::Distance,
+            "LDIST" => ConstraintKind::LineDistance,
             "ANG" => ConstraintKind::Angle,
             _ => return None,
         })
@@ -124,6 +134,10 @@ pub struct SketchConstraint {
     pub b: Option<EntityId>,
     pub pts: Option<(u8, u8)>,
     pub val: Option<f64>,
+    /// Where the user placed the dimension annotation (world coordinates),
+    /// for valued kinds dimensioned interactively. `None` falls back to the
+    /// automatic layout. Not part of the relation's identity.
+    pub place: Option<(f64, f64)>,
 }
 
 impl SketchConstraint {
@@ -134,6 +148,7 @@ impl SketchConstraint {
             b: None,
             pts: None,
             val: None,
+            place: None,
         }
     }
 
@@ -144,6 +159,7 @@ impl SketchConstraint {
             b: Some(b),
             pts: None,
             val: None,
+            place: None,
         }
     }
 
@@ -154,6 +170,7 @@ impl SketchConstraint {
             b: Some(b),
             pts: Some((ea, eb)),
             val: None,
+            place: None,
         }
     }
 
@@ -164,6 +181,7 @@ impl SketchConstraint {
             b: None,
             pts: None,
             val: Some(value),
+            place: None,
         }
     }
 
@@ -176,6 +194,7 @@ impl SketchConstraint {
             b: Some(b),
             pts: None,
             val: Some(normalize_angle_deg(degrees)),
+            place: None,
         }
     }
 
@@ -187,6 +206,20 @@ impl SketchConstraint {
             b: None,
             pts: None,
             val: Some(value),
+            place: None,
+        }
+    }
+
+    /// A driving perpendicular distance (width) between two parallel line
+    /// entities; `a` is the reference, `b` slides to meet the value.
+    pub fn line_distance(a: EntityId, b: EntityId, value: f64) -> Self {
+        SketchConstraint {
+            kind: ConstraintKind::LineDistance,
+            a,
+            b: Some(b),
+            pts: None,
+            val: Some(value),
+            place: None,
         }
     }
 

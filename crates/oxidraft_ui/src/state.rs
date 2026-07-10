@@ -2,7 +2,10 @@ use oxidraft_cad::{
     Grip, Guide, SnapPoint, SnapSettings, apply_grip, best_snap, edit, find_snaps_excluding,
     grips_for, infer_axis, pick_at,
 };
-use oxidraft_document::{Document, Entity, EntityId, EntityKind, Layer, LineTypeRef, LineWeight};
+use oxidraft_document::{
+    ConstraintKind, Document, Entity, EntityId, EntityKind, Layer, LineTypeRef, LineWeight,
+    SketchConstraint,
+};
 use oxidraft_geometry::{Curve, LineSeg, MinTracker, Point2d, Transform2d};
 
 use crate::command::{Command, CoordInput, parse_command, parse_coordinate};
@@ -65,6 +68,10 @@ pub struct AppState {
     pub hint_tool: Option<Tool>,
     pub infer_constraints: bool,
     pub show_constraints: bool,
+    /// A driving dimension the smart-dimension tool just created and wants
+    /// the view layer to open its inline value editor on. The view moves it
+    /// into `UiState::editing_dim` on the next frame and clears it here.
+    pub pending_dim_edit: Option<SketchConstraint>,
     /// Last plot window picked on canvas (sorted world corners); used by
     /// the Plot dialog's "Window" area mode until re-picked.
     pub plot_window: Option<(f64, f64, f64, f64)>,
@@ -392,6 +399,31 @@ fn add_origin_point(doc: &mut oxidraft_document::Document) -> EntityId {
     origin_id
 }
 
+/// Whether the entity is a circular arc or full circle — the geometry the
+/// smart-dimension tool drives with a radius rather than a length.
+fn arc_or_circle(doc: &Document, id: EntityId) -> bool {
+    matches!(doc.get(id).and_then(|e| e.as_curve()), Some(Curve::Arc(_)))
+}
+
+/// Whether both entities are lines pointing the same (or opposite) way —
+/// the pair the smart-dimension tool reads as "the width between them"
+/// rather than an angle. The tolerance is deliberately snug: lines made
+/// parallel by a constraint or drawn axis-aligned pass, hand-drawn
+/// almost-parallel lines still read as an angle pick.
+pub(crate) fn lines_parallel(doc: &Document, a: EntityId, b: EntityId) -> bool {
+    let line = |id| match doc.get(id).and_then(|e| e.as_curve()) {
+        Some(Curve::Line(l)) => Some(l.clone()),
+        _ => None,
+    };
+    let (Some(la), Some(lb)) = (line(a), line(b)) else {
+        return false;
+    };
+    let (ux, uy) = (la.p1.x - la.p0.x, la.p1.y - la.p0.y);
+    let (vx, vy) = (lb.p1.x - lb.p0.x, lb.p1.y - lb.p0.y);
+    let n = (ux.hypot(uy) * vx.hypot(vy)).max(1e-12);
+    ((ux * vy - uy * vx) / n).abs() < 1e-7
+}
+
 fn line_endpoints(kind: &EntityKind) -> Option<((f64, f64), (f64, f64))> {
     match kind {
         EntityKind::Curve(Curve::Line(l)) => Some((l.p0.to_f64(), l.p1.to_f64())),
@@ -469,6 +501,7 @@ impl AppState {
             hint_tool: None,
             infer_constraints: false,
             show_constraints: true,
+            pending_dim_edit: None,
             plot_window: None,
             plot_dialog_open: false,
             plot_window_mode: false,
@@ -714,16 +747,22 @@ impl AppState {
 
         if matches!(self.tool, Tool::Select) {
             // Constraint badges sit on top of the drawing: a click on a
-            // chip or weld dot deletes what it shows, undoably.
+            // chip or weld dot deletes what it shows, undoably. Driving
+            // dimensions are exempt — a click there opens their value
+            // editor (handled in the view layer), never a silent delete.
             if let Some(hits) = crate::view::overlays::badge_hit(self, sx, sy) {
-                self.history.snapshot(&self.document);
-                self.document.constraints.retain(|c| !hits.contains(c));
-                self.command_log.push(if hits.len() == 1 {
-                    "Removed constraint via its badge".into()
-                } else {
-                    format!("Removed {} constraints via their badge", hits.len())
-                });
-                return;
+                let hits: Vec<SketchConstraint> =
+                    hits.into_iter().filter(|c| !c.kind.is_valued()).collect();
+                if !hits.is_empty() {
+                    self.history.snapshot(&self.document);
+                    self.document.constraints.retain(|c| !hits.contains(c));
+                    self.command_log.push(if hits.len() == 1 {
+                        "Removed constraint via its badge".into()
+                    } else {
+                        format!("Removed {} constraints via their badge", hits.len())
+                    });
+                    return;
+                }
             }
             if let Some(id) = pick_at(&self.document, p.x, p.y, self.view.pixel_world_size() * 6.0)
             {
@@ -882,6 +921,56 @@ impl AppState {
                 .push("Chain closed: corner welded coincident".into());
         }
         true
+    }
+
+    /// Welds a freshly created batch of chained segments (a Rectangle,
+    /// Polygon, or Polyline outline emitted as individual lines): each
+    /// consecutive pair sharing an endpoint gets a coincident weld, plus the
+    /// closing weld when the chain loops back to its start. The welds are
+    /// unconditional — the user drew one connected shape. With
+    /// auto-constrain on, the tool's implied shape constraints are added
+    /// too: Horizontal/Vertical on a Rectangle's axis-aligned sides, and
+    /// EqualLength across a Polygon's sides (so dimensioning one side of a
+    /// hexagon drives all six).
+    fn weld_created_loop(&mut self, ids: &[EntityId]) {
+        self.weld_adjacent_segments(ids);
+        if !self.infer_constraints {
+            return;
+        }
+        match self.tool {
+            Tool::Rectangle { .. } => {
+                // Sides are axis-aligned by construction; still check each
+                // one so a degenerate batch can't record a false H/V.
+                for &id in ids {
+                    let Some([p0, p1]) = self
+                        .document
+                        .get(id)
+                        .and_then(|e| segment_endpoints(&e.kind))
+                    else {
+                        continue;
+                    };
+                    let kind = if (p0.1 - p1.1).abs() < 1e-9 {
+                        ConstraintKind::Horizontal
+                    } else if (p0.0 - p1.0).abs() < 1e-9 {
+                        ConstraintKind::Vertical
+                    } else {
+                        continue;
+                    };
+                    self.document
+                        .add_constraint(SketchConstraint::single(kind, id));
+                }
+            }
+            Tool::Polygon { .. } => {
+                for &id in &ids[1..] {
+                    self.document.add_constraint(SketchConstraint::pair(
+                        ConstraintKind::EqualLength,
+                        ids[0],
+                        id,
+                    ));
+                }
+            }
+            _ => {}
+        }
     }
 
     /// Records the constraints a fillet/chamfer corner implies: the new
@@ -1367,9 +1456,25 @@ impl AppState {
             }
             ToolEvent::Create(kinds) => {
                 self.history.snapshot(&self.document);
+                let mut created = Vec::with_capacity(kinds.len());
                 for k in kinds {
                     let id = self.document.add(k);
                     self.apply_new_entity_defaults(id);
+                    created.push(id);
+                }
+                // A shape tool that emits its outline as a batch of lines
+                // (Rectangle, Polygon, Polyline) drew one connected figure:
+                // weld its corners so it behaves as joined geometry. The
+                // welds are structural facts of the drawn shape — recorded
+                // regardless of the auto-constrain toggle, which only gates
+                // the *inferred* extras added inside `weld_created_loop`.
+                if created.len() >= 2
+                    && matches!(
+                        self.tool,
+                        Tool::Rectangle { .. } | Tool::Polygon { .. } | Tool::Polyline { .. }
+                    )
+                {
+                    self.weld_created_loop(&created);
                 }
             }
             ToolEvent::Transform { ids, t } => {
@@ -1631,6 +1736,7 @@ impl AppState {
             Command::Divide(n) => self.divide_selection(n),
             Command::Measure(interval) => self.measure_selection(interval),
             Command::Unconstrain => self.unconstrain_selection(),
+            Command::Fix => self.fix_selection(),
             Command::Hatch => {
                 if self.selection.is_empty() {
                     self.tool = Tool::Hatch;
@@ -1696,12 +1802,63 @@ impl AppState {
             .into_iter()
             .filter(|&id| id != self.origin_id)
             .collect();
-        let new_ids = edit::explode(&mut self.document, &ids);
+        // Explode one source at a time so each polycurve's own segments can
+        // be welded as a group: with auto-constrain on, EXPLODE is the
+        // migration path that turns an existing polyline/hexagon into
+        // constraint-ready lines without letting the shape fall apart.
+        let mut new_ids = Vec::new();
+        for &id in &ids {
+            let group = edit::explode(&mut self.document, &[id]);
+            if self.infer_constraints && group.len() >= 2 {
+                self.weld_adjacent_segments(&group);
+            }
+            new_ids.extend(group);
+        }
         let survived: Vec<_> = ids
             .into_iter()
             .filter(|&id| self.document.get(id).is_some())
             .collect();
         self.selection = survived.into_iter().chain(new_ids).collect();
+    }
+
+    /// Coincident-welds consecutive segments of one exploded polycurve where
+    /// their endpoints actually touch, closing the loop when it loops.
+    /// Handles lines and partial arcs alike (`segment_endpoints`).
+    fn weld_adjacent_segments(&mut self, ids: &[EntityId]) {
+        let ends: Vec<Option<[(f64, f64); 2]>> = ids
+            .iter()
+            .map(|&id| {
+                self.document
+                    .get(id)
+                    .and_then(|e| segment_endpoints(&e.kind))
+            })
+            .collect();
+        let touch = |a: (f64, f64), b: (f64, f64)| (a.0 - b.0).hypot(a.1 - b.1) < 1e-9;
+        for i in 0..ids.len() - 1 {
+            if let (Some(pa), Some(pb)) = (ends[i], ends[i + 1])
+                && touch(pa[1], pb[0])
+            {
+                self.document
+                    .add_constraint(oxidraft_document::SketchConstraint::coincident(
+                        ids[i],
+                        1,
+                        ids[i + 1],
+                        0,
+                    ));
+            }
+        }
+        if ids.len() >= 3
+            && let (Some(first), Some(last)) = (ends[0], ends[ids.len() - 1])
+            && touch(first[0], last[1])
+        {
+            self.document
+                .add_constraint(oxidraft_document::SketchConstraint::coincident(
+                    ids[0],
+                    0,
+                    ids[ids.len() - 1],
+                    1,
+                ));
+        }
     }
 
     pub fn hatch_selection(&mut self) {
@@ -1818,6 +1975,142 @@ impl AppState {
                 self.command_log.push(msg);
             }
             Err(e) => self.command_log.push(e),
+        }
+    }
+
+    /// Retargets an existing driving dimension (length, radius, or angle) to
+    /// `value`, re-solving its constraint component on a scratch copy so a
+    /// failed solve leaves the document untouched. `value` is in the
+    /// constraint's own unit — world length for length/radius, degrees for
+    /// angle. Non-driving kinds are ignored. Backs the inline dimension
+    /// editor opened by clicking a dimension badge.
+    pub fn set_constraint_value(&mut self, target: SketchConstraint, value: f64) {
+        let mut doc = self.document.clone();
+        let res = match target.kind {
+            ConstraintKind::Radius => {
+                oxidraft_cad::constrain_radius(&mut doc, &[target.a], Some(value))
+            }
+            ConstraintKind::Distance => {
+                oxidraft_cad::constrain_distance(&mut doc, &[target.a], Some(value))
+            }
+            ConstraintKind::LineDistance => match target.b {
+                Some(b) => {
+                    oxidraft_cad::constrain_line_distance(&mut doc, &[target.a, b], Some(value))
+                }
+                None => return,
+            },
+            ConstraintKind::Angle => match target.b {
+                Some(b) => oxidraft_cad::constrain_angle(&mut doc, &[target.a, b], Some(value)),
+                None => return,
+            },
+            _ => return,
+        };
+        match res {
+            Ok(msg) => {
+                self.history.snapshot(&self.document);
+                self.document = doc;
+                self.command_log.push(msg);
+            }
+            Err(e) => self.command_log.push(e),
+        }
+    }
+
+    /// Pins the selected geometry in place with a driving Fix constraint.
+    pub fn fix_selection(&mut self) {
+        let sel: Vec<EntityId> = self
+            .selection
+            .iter()
+            .copied()
+            .filter(|&id| id != self.origin_id)
+            .collect();
+        let mut doc = self.document.clone();
+        match oxidraft_cad::constrain_fixed(&mut doc, &sel) {
+            Ok(msg) => {
+                self.history.snapshot(&self.document);
+                self.document = doc;
+                self.command_log.push(msg);
+            }
+            Err(e) => self.command_log.push(e),
+        }
+    }
+
+    /// Smart-dimension entry point: adds a driving dimension to the picked
+    /// geometry — a length on a line, a radius on a circle/arc, or (with a
+    /// second line) an angle — then queues its inline value editor. `b` is
+    /// the optional second line for an angle. `place` is where the user
+    /// dropped the annotation (world coordinates); `None` leaves it to the
+    /// automatic layout. Returns whether a constraint was added.
+    pub fn smart_dimension(
+        &mut self,
+        a: EntityId,
+        b: Option<EntityId>,
+        place: Option<(f64, f64)>,
+    ) -> bool {
+        let mut doc = self.document.clone();
+        let (res, kind): (Result<String, String>, ConstraintKind) = match b {
+            // Two parallel lines mean the width *between* them — the angle
+            // between parallels is a meaningless 180°. Crossing lines mean
+            // the angle, exactly like the big CAD sketchers.
+            Some(b) if lines_parallel(&self.document, a, b) => (
+                oxidraft_cad::constrain_line_distance(&mut doc, &[a, b], None),
+                ConstraintKind::LineDistance,
+            ),
+            Some(b) => (
+                oxidraft_cad::constrain_angle(&mut doc, &[a, b], None),
+                ConstraintKind::Angle,
+            ),
+            None if arc_or_circle(&self.document, a) => (
+                oxidraft_cad::constrain_radius(&mut doc, &[a], None),
+                ConstraintKind::Radius,
+            ),
+            None => (
+                oxidraft_cad::constrain_distance(&mut doc, &[a], None),
+                ConstraintKind::Distance,
+            ),
+        };
+        match res {
+            Ok(msg) => {
+                // Pin the annotation where the user dropped it before the
+                // document swap, so undo/redo carry the placement too.
+                if place.is_some()
+                    && let Some(c) = doc
+                        .constraints
+                        .iter_mut()
+                        .rev()
+                        .find(|c| c.kind == kind && c.a == a && c.b == b && c.val.is_some())
+                {
+                    c.place = place;
+                }
+                self.history.snapshot(&self.document);
+                self.document = doc;
+                self.command_log.push(msg);
+                // Surface the new dimension and open its editor so the user
+                // can type the value straight away.
+                self.show_constraints = true;
+                self.pending_dim_edit = self
+                    .document
+                    .constraints
+                    .iter()
+                    .rev()
+                    .find(|c| c.kind == kind && c.a == a && c.b == b && c.val.is_some())
+                    .copied();
+                true
+            }
+            Err(e) => {
+                self.command_log.push(e);
+                false
+            }
+        }
+    }
+
+    /// Removes one specific constraint (by exact match), undoably. Backs the
+    /// ✕ button in the inline dimension editor.
+    pub fn remove_constraint(&mut self, target: SketchConstraint) {
+        if self.document.constraints.contains(&target) {
+            self.history.snapshot(&self.document);
+            self.document.constraints.retain(|c| c != &target);
+            self.command_log
+                .push(format!("Removed {} constraint", target.kind.label()));
         }
     }
 
@@ -2687,22 +2980,196 @@ mod tests {
         a.place_tool_point(pt(5, 8));
         a.place_tool_point(pt(0, 0));
 
-        let poly = a
+        // The closed chain commits as three individual welded lines, not
+        // one PolyCurve — that's what lets each segment take constraints.
+        let lines: Vec<_> = a
             .document
             .iter()
-            .find_map(|e| match &e.kind {
-                EntityKind::Curve(Curve::Poly(p)) => Some(p.clone()),
+            .filter_map(|e| match &e.kind {
+                EntityKind::Curve(Curve::Line(l)) => Some(l.clone()),
                 _ => None,
             })
-            .expect("a closed polycurve should have been created");
-        assert_eq!(poly.segments.len(), 3);
-        let first = poly.segments.first().unwrap().as_line().unwrap();
-        let last = poly.segments.last().unwrap().as_line().unwrap();
+            .collect();
+        assert_eq!(lines.len(), 3, "closed triangle = three line entities");
         assert!(
-            first.p0.dist_f64(&last.p1) < 1e-9,
-            "ends must coincide (welded)"
+            lines[0].p0.dist_f64(&lines[2].p1) < 1e-9,
+            "ends must coincide (closed)"
         );
+        let welds = a
+            .document
+            .constraints
+            .iter()
+            .filter(|c| c.kind == oxidraft_document::ConstraintKind::Coincident)
+            .count();
+        assert_eq!(welds, 3, "every corner of the closed chain is welded");
         assert!(matches!(a.tool, Tool::Polyline { ref pts } if pts.is_empty()));
+    }
+
+    #[test]
+    fn rectangle_creates_welded_lines_with_axis_constraints() {
+        let mut a = app();
+        a.infer_constraints = true;
+        a.tool = Tool::Rectangle { first: None };
+        a.place_tool_point(pt(0, 0));
+        a.place_tool_point(pt(8, 5));
+
+        let lines = a
+            .document
+            .iter()
+            .filter(|e| matches!(e.kind, EntityKind::Curve(Curve::Line(_))))
+            .count();
+        assert_eq!(lines, 4, "four individual sides");
+        let count = |k: oxidraft_document::ConstraintKind| {
+            a.document
+                .constraints
+                .iter()
+                .filter(|c| c.kind == k)
+                .count()
+        };
+        assert_eq!(
+            count(oxidraft_document::ConstraintKind::Coincident),
+            4,
+            "all four corners welded"
+        );
+        assert_eq!(count(oxidraft_document::ConstraintKind::Horizontal), 2);
+        assert_eq!(count(oxidraft_document::ConstraintKind::Vertical), 2);
+    }
+
+    #[test]
+    fn rectangle_welds_corners_even_without_auto_constrain() {
+        let mut a = app();
+        a.infer_constraints = false;
+        a.tool = Tool::Rectangle { first: None };
+        a.place_tool_point(pt(0, 0));
+        a.place_tool_point(pt(8, 5));
+
+        let count = |k: oxidraft_document::ConstraintKind| {
+            a.document
+                .constraints
+                .iter()
+                .filter(|c| c.kind == k)
+                .count()
+        };
+        assert_eq!(
+            count(oxidraft_document::ConstraintKind::Coincident),
+            4,
+            "the welds are structural, not inferred — always recorded"
+        );
+        assert_eq!(
+            count(oxidraft_document::ConstraintKind::Horizontal)
+                + count(oxidraft_document::ConstraintKind::Vertical),
+            0,
+            "the axis constraints are inferred extras, gated on the toggle"
+        );
+    }
+
+    #[test]
+    fn hexagon_side_dimension_drives_all_sides() {
+        let mut a = app();
+        a.infer_constraints = true;
+        a.snap_on = false;
+        a.tool = Tool::Polygon {
+            center: None,
+            radius_point: None,
+            sides: Some(6),
+        };
+        a.place_tool_point(pt(0, 0));
+        a.place_tool_point(pt(10, 0));
+        a.confirm_pending_polygon();
+
+        let sides: Vec<EntityId> = a
+            .document
+            .iter()
+            .filter(|e| matches!(e.kind, EntityKind::Curve(Curve::Line(_))))
+            .map(|e| e.id)
+            .collect();
+        assert_eq!(sides.len(), 6, "six individual sides");
+        let count = |k: oxidraft_document::ConstraintKind| {
+            a.document
+                .constraints
+                .iter()
+                .filter(|c| c.kind == k)
+                .count()
+        };
+        assert_eq!(count(oxidraft_document::ConstraintKind::Coincident), 6);
+        assert_eq!(
+            count(oxidraft_document::ConstraintKind::EqualLength),
+            5,
+            "every side equal to the first"
+        );
+
+        // The scenario that motivated all of this: smart-dimension one side
+        // of the hexagon, type a value, and the equal-length chain resizes
+        // every side.
+        assert!(a.smart_dimension(sides[0], None, None));
+        let dim = a
+            .document
+            .constraints
+            .iter()
+            .find(|c| c.kind == oxidraft_document::ConstraintKind::Distance && c.a == sides[0])
+            .copied()
+            .expect("a driving length landed on the picked side");
+        a.set_constraint_value(dim, 5.0);
+        for &id in &sides {
+            let Some(EntityKind::Curve(Curve::Line(l))) = a.document.get(id).map(|e| &e.kind)
+            else {
+                panic!("side is still a line");
+            };
+            let len = (l.p1.x - l.p0.x).hypot(l.p1.y - l.p0.y);
+            assert!(
+                (len - 5.0).abs() < 1e-4,
+                "every side follows the dimension: got {len}"
+            );
+        }
+    }
+
+    #[test]
+    fn exploding_a_polycurve_welds_segments_when_auto_constrain_is_on() {
+        let mut a = app();
+        a.infer_constraints = true;
+        let tri = oxidraft_geometry::PolyCurve::new(vec![
+            Curve::Line(LineSeg::from_endpoints(pt(0, 0), pt(4, 0))),
+            Curve::Line(LineSeg::from_endpoints(pt(4, 0), pt(4, 3))),
+            Curve::Line(LineSeg::from_endpoints(pt(4, 3), pt(0, 0))),
+        ]);
+        let id = a.add_entity(EntityKind::Curve(Curve::Poly(Box::new(tri))));
+        a.selection = vec![id];
+        a.explode_selection();
+
+        assert!(a.document.get(id).is_none(), "the polycurve is gone");
+        let lines = a
+            .document
+            .iter()
+            .filter(|e| matches!(e.kind, EntityKind::Curve(Curve::Line(_))))
+            .count();
+        assert_eq!(lines, 3);
+        let welds = a
+            .document
+            .constraints
+            .iter()
+            .filter(|c| c.kind == oxidraft_document::ConstraintKind::Coincident)
+            .count();
+        assert_eq!(welds, 3, "explode weds the closed loop's corners");
+    }
+
+    #[test]
+    fn exploding_stays_loose_with_auto_constrain_off() {
+        let mut a = app();
+        a.infer_constraints = false;
+        let chain = oxidraft_geometry::PolyCurve::new(vec![
+            Curve::Line(LineSeg::from_endpoints(pt(0, 0), pt(4, 0))),
+            Curve::Line(LineSeg::from_endpoints(pt(4, 0), pt(4, 3))),
+        ]);
+        let id = a.add_entity(EntityKind::Curve(Curve::Poly(Box::new(chain))));
+        a.selection = vec![id];
+        a.explode_selection();
+        let welds = a
+            .document
+            .constraints
+            .iter()
+            .filter(|c| c.kind == oxidraft_document::ConstraintKind::Coincident)
+            .count();
+        assert_eq!(welds, 0, "DISJOINT keeps its word when inference is off");
     }
 
     #[test]
@@ -4159,7 +4626,15 @@ mod tests {
         ));
 
         a.confirm_pending_polygon();
-        assert_eq!(a.document.len(), 2);
+        // Origin + six individual welded side lines.
+        assert_eq!(a.document.len(), 7);
+        let welds = a
+            .document
+            .constraints
+            .iter()
+            .filter(|c| c.kind == oxidraft_document::ConstraintKind::Coincident)
+            .count();
+        assert_eq!(welds, 6, "every hexagon corner is welded");
         assert!(matches!(
             a.tool,
             Tool::Polygon {
@@ -4207,7 +4682,15 @@ mod tests {
 
         a.run_command("");
         assert!(matches!(a.tool, Tool::Select));
-        assert_eq!(a.document.len(), 2);
+        // Origin + two individual welded lines.
+        assert_eq!(a.document.len(), 3);
+        let welds = a
+            .document
+            .constraints
+            .iter()
+            .filter(|c| c.kind == oxidraft_document::ConstraintKind::Coincident)
+            .count();
+        assert_eq!(welds, 1, "the open chain's shared corner is welded");
     }
 
     #[test]
@@ -4284,14 +4767,22 @@ mod tests {
 
         a.run_command("c");
         assert!(matches!(a.tool, Tool::Select));
-        assert_eq!(a.document.len(), 2);
-
-        let entity = a.document.iter().find(|e| e.id != a.origin_id).unwrap();
-        if let EntityKind::Curve(Curve::Poly(poly)) = &entity.kind {
-            assert_eq!(poly.segments.len(), 3);
-        } else {
-            panic!("expected PolyCurve");
-        }
+        // Origin + three individual lines (two drawn + the closer), with
+        // every corner of the closed chain welded.
+        assert_eq!(a.document.len(), 4);
+        let lines = a
+            .document
+            .iter()
+            .filter(|e| matches!(e.kind, EntityKind::Curve(Curve::Line(_))))
+            .count();
+        assert_eq!(lines, 3);
+        let welds = a
+            .document
+            .constraints
+            .iter()
+            .filter(|c| c.kind == oxidraft_document::ConstraintKind::Coincident)
+            .count();
+        assert_eq!(welds, 3, "closed chain welds all three corners");
     }
 
     #[test]

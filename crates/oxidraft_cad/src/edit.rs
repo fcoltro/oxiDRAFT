@@ -106,9 +106,13 @@ fn remap_constraints_to_pieces(
                     }
                 }
             }
+            // LineDistance rides along here: trimming doesn't move the
+            // carrier's infinite line, so the driving width still describes
+            // every piece (and, like Angle, it keeps its value).
             ConstraintKind::Parallel
             | ConstraintKind::Perpendicular
             | ConstraintKind::Tangent
+            | ConstraintKind::LineDistance
             | ConstraintKind::Angle => {
                 let Some(other) = (if c.a == old { c.b } else { Some(c.a) }) else {
                     continue;

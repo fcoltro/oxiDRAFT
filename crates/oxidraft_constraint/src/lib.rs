@@ -52,6 +52,11 @@ pub enum Constraint {
     Fixed(PointVar, f64, f64),
     /// Point p lies on the infinite line through a and b.
     PointOnLine(PointVar, PointVar, PointVar),
+    /// The perpendicular distance from point p to the infinite line through
+    /// a and b equals the given value (unsigned — the point may sit on
+    /// either side). Two of these on a segment's endpoints hold two lines
+    /// parallel at a driving width.
+    PointLineDistance(PointVar, PointVar, PointVar, f64),
     /// |ab| equals |cd|.
     EqualLength(PointVar, PointVar, PointVar, PointVar),
     /// The scalar is pinned to a fixed value.
@@ -155,6 +160,13 @@ impl Sketch {
         self.constraints.push(c);
     }
 
+    /// Number of constraints added so far. Lets callers that lower one
+    /// document constraint into several solver constraints (e.g. pinning
+    /// every degree of freedom of an entity) count how many rows they added.
+    pub fn constraint_count(&self) -> usize {
+        self.constraints.len()
+    }
+
     /// Residuals of every constraint at the given variable assignment. Each
     /// residual is scaled to *length* units so mixed constraint types weigh
     /// comparably in the least-squares objective.
@@ -232,6 +244,15 @@ impl Sketch {
                     let (ux, uy) = (bx - ax, by - ay);
                     let n = ux.hypot(uy).max(1e-12);
                     out.push((ux * (qy - ay) - uy * (qx - ax)) / n);
+                }
+                Constraint::PointLineDistance(q, a, b, dist) => {
+                    let (qx, qy) = p(q);
+                    let (ax, ay) = p(a);
+                    let (bx, by) = p(b);
+                    let (ux, uy) = (bx - ax, by - ay);
+                    let n = ux.hypot(uy).max(1e-12);
+                    let d = (ux * (qy - ay) - uy * (qx - ax)) / n;
+                    out.push(d.abs() - dist);
                 }
                 Constraint::EqualLength(a, b, c2, d) => {
                     let (ax, ay) = p(a);
@@ -386,6 +407,17 @@ impl Sketch {
                     let n = floor(&n);
                     let cross = &(&ux * &(&qy - &ay)) - &(&uy * &(&qx - &ax));
                     push(ci, &cross / &n);
+                }
+                Constraint::PointLineDistance(q, a, b, dist) => {
+                    let (qx, qy) = p(q);
+                    let (ax, ay) = p(a);
+                    let (bx, by) = p(b);
+                    let (ux, uy) = (&bx - &ax, &by - &ay);
+                    let n = dual::hypot(&ux, &uy);
+                    let n = floor(&n);
+                    let cross = &(&ux * &(&qy - &ay)) - &(&uy * &(&qx - &ax));
+                    let d = &cross / &n;
+                    push(ci, &d.abs() - &Dual::constant(dist, nv));
                 }
                 Constraint::EqualLength(a, b, c2, d) => {
                     let (ax, ay) = p(a);
@@ -871,6 +903,28 @@ mod tests {
     }
 
     #[test]
+    fn point_line_distance_holds_two_lines_at_a_width() {
+        // Line a is pinned; line c→d starts roughly parallel 1.5 above it.
+        // Driving both of its endpoints to distance 4 from line a must slide
+        // it out to a clean parallel at the target width.
+        let mut s = Sketch::new();
+        let a = s.add_point(0.0, 0.0);
+        let b = s.add_point(6.0, 0.0);
+        let c = s.add_point(0.2, 1.4);
+        let d = s.add_point(5.8, 1.6);
+        s.constrain(Constraint::Fixed(a, 0.0, 0.0));
+        s.constrain(Constraint::Fixed(b, 6.0, 0.0));
+        s.constrain(Constraint::PointLineDistance(c, a, b, 4.0));
+        s.constrain(Constraint::PointLineDistance(d, a, b, 4.0));
+        let res = s.solve();
+        assert!(res.converged, "residual {}", res.residual);
+        let (_, cy) = s.point(c);
+        let (_, dy) = s.point(d);
+        assert!((cy - 4.0).abs() < 1e-6, "c settled at the width: {cy}");
+        assert!((dy - 4.0).abs() < 1e-6, "d settled at the width: {dy}");
+    }
+
+    #[test]
     fn point_on_circle_pulls_point_to_rim() {
         let mut s = Sketch::new();
         let c = s.add_point(0.0, 0.0);
@@ -1073,6 +1127,7 @@ mod tests {
         s.constrain(Constraint::Angle(a, b, c, d, 0.6));
         s.constrain(Constraint::Fixed(a, 0.3, 0.2));
         s.constrain(Constraint::PointOnLine(q, a, b));
+        s.constrain(Constraint::PointLineDistance(q, a, b, 0.8));
         s.constrain(Constraint::EqualLength(a, b, c, d));
         s.constrain(Constraint::FixedScalar(r, 1.7));
         s.constrain(Constraint::PointOnCircle(q, center, r));

@@ -80,6 +80,21 @@ fn perturb_line(s: &mut Sketch, b0: PointVar, b1: PointVar, l: &LineSeg) {
     s.set_point(b1, x1, y1);
 }
 
+/// An actionable suffix for "nothing eligible in the selection" errors:
+/// when the selection holds a polyline (a multi-segment PolyCurve entity),
+/// the fix is to EXPLODE it — its segments then become individual welded
+/// lines the constraint system can hold onto.
+fn polyline_hint(doc: &Document, selection: &[EntityId]) -> &'static str {
+    let has_poly = selection
+        .iter()
+        .any(|&id| matches!(doc.get(id).and_then(|e| e.as_curve()), Some(Curve::Poly(_))));
+    if has_poly {
+        " — polylines can't take constraints; EXPLODE (X) into welded lines first"
+    } else {
+        ""
+    }
+}
+
 /// Applies the constraint to the selected line entities and records it on
 /// the document. Single-line kinds (horizontal/vertical) accept any number
 /// of lines; pair kinds require exactly two, with the first selected line
@@ -102,10 +117,15 @@ pub fn constrain_lines(
         ConstraintKind::Tangent => constrain_tangent(doc, selection),
         ConstraintKind::Radius => constrain_radius(doc, selection, None),
         ConstraintKind::Distance => constrain_distance(doc, selection, None),
+        ConstraintKind::LineDistance => constrain_line_distance(doc, selection, None),
         ConstraintKind::Angle => constrain_angle(doc, selection, None),
         ConstraintKind::Horizontal | ConstraintKind::Vertical => {
             if lines.is_empty() {
-                return Err(format!("Select at least one line to make {}", kind.label()));
+                return Err(format!(
+                    "Select at least one line to make {}{}",
+                    kind.label(),
+                    polyline_hint(doc, selection)
+                ));
             }
             let mut count = 0;
             for (id, l) in &lines {
@@ -181,9 +201,10 @@ pub fn constrain_lines(
         | ConstraintKind::Coincident => {
             if lines.len() != 2 {
                 return Err(format!(
-                    "Select exactly two lines to make them {} (got {})",
+                    "Select exactly two lines to make them {} (got {}){}",
                     kind.label(),
-                    lines.len()
+                    lines.len(),
+                    polyline_hint(doc, selection)
                 ));
             }
             let (ref_id, ref_line) = lines[0].clone();
@@ -418,6 +439,37 @@ fn constrain_tangent_circles(
     Ok("Made the second circle tangent to the first".into())
 }
 
+/// Pins the selected entities where they currently sit — a driving "fix"
+/// that records a `Fixed` constraint on each selected line, circle/arc, or
+/// point so the solver holds it in place while its neighbours move. Pinning
+/// at the current position is trivially consistent with everything already
+/// satisfied, so no re-solve is needed. Idempotent per entity.
+pub fn constrain_fixed(doc: &mut Document, selection: &[EntityId]) -> Result<String, String> {
+    let targets: Vec<EntityId> = selection
+        .iter()
+        .copied()
+        .filter(|&id| {
+            line_of(doc, id).is_some() || arc_of(doc, id).is_some() || point_of(doc, id).is_some()
+        })
+        .collect();
+    if targets.is_empty() {
+        return Err(format!(
+            "Select a line, circle/arc, or point to fix it in place{}",
+            polyline_hint(doc, selection)
+        ));
+    }
+    let mut count = 0;
+    for id in targets {
+        if doc.add_constraint(SketchConstraint::fixed(id)) {
+            count += 1;
+        }
+    }
+    if count == 0 {
+        return Err("That selection is already fixed".into());
+    }
+    Ok(format!("Fixed {count} object(s) in place"))
+}
+
 /// Drives the radius of the selected circles/arcs, recording it so later
 /// edits re-satisfy it. `value: None` locks each arc's current radius in
 /// place. The whole constraint component of each arc re-solves with the
@@ -434,7 +486,10 @@ pub fn constrain_radius(
         .filter(|&id| arc_of(doc, id).is_some())
         .collect();
     if arcs.is_empty() {
-        return Err("Select at least one circle or arc to constrain its radius".into());
+        return Err(format!(
+            "Select at least one circle or arc to constrain its radius{}",
+            polyline_hint(doc, selection)
+        ));
     }
     if let Some(v) = value
         && (!v.is_finite() || v <= 0.0)
@@ -494,7 +549,10 @@ pub fn constrain_distance(
         .filter(|&id| line_of(doc, id).is_some())
         .collect();
     if lines.is_empty() {
-        return Err("Select at least one line to constrain its length".into());
+        return Err(format!(
+            "Select at least one line to constrain its length{}",
+            polyline_hint(doc, selection)
+        ));
     }
     if let Some(v) = value
         && (!v.is_finite() || v <= 0.0)
@@ -554,8 +612,9 @@ pub fn constrain_angle(
         .collect();
     if lines.len() != 2 {
         return Err(format!(
-            "Select exactly two lines to constrain their angle (got {})",
-            lines.len()
+            "Select exactly two lines to constrain their angle (got {}){}",
+            lines.len(),
+            polyline_hint(doc, selection)
         ));
     }
     if let Some(v) = value
@@ -638,6 +697,115 @@ pub fn constrain_angle(
     // still at their pre-solve positions — drag them back into place.
     resolve_after_transform(doc, &[mov_id]);
     Ok(format!("Held the angle between the lines at {target}°"))
+}
+
+/// Holds two parallel lines at a driving perpendicular distance (a width),
+/// recorded so later edits re-satisfy it. The first-selected line is the
+/// fixed reference; the second slides (direction and length kept) to meet
+/// the target. `value: None` locks the current width in place. The lines
+/// must already be parallel — dimensioning two crossing lines means an
+/// angle, not a width.
+pub fn constrain_line_distance(
+    doc: &mut Document,
+    selection: &[EntityId],
+    value: Option<f64>,
+) -> Result<String, String> {
+    let lines: Vec<(EntityId, LineSeg)> = selection
+        .iter()
+        .filter_map(|&id| line_of(doc, id).map(|l| (id, l)))
+        .collect();
+    if lines.len() != 2 {
+        return Err(format!(
+            "Select exactly two parallel lines to constrain their distance (got {}){}",
+            lines.len(),
+            polyline_hint(doc, selection)
+        ));
+    }
+    let (ref_id, ref_line) = lines[0].clone();
+    let (mov_id, mov_line) = lines[1].clone();
+    if ref_id == mov_id {
+        return Err("Select two different lines to constrain their distance".into());
+    }
+    let (ux, uy) = (ref_line.p1.x - ref_line.p0.x, ref_line.p1.y - ref_line.p0.y);
+    let (vx, vy) = (mov_line.p1.x - mov_line.p0.x, mov_line.p1.y - mov_line.p0.y);
+    let (nu, nv) = (ux.hypot(uy).max(1e-12), vx.hypot(vy).max(1e-12));
+    if ((ux * vy - uy * vx) / (nu * nv)).abs() > 1e-7 {
+        return Err("The two lines must be parallel to hold a distance between them".into());
+    }
+    // Perpendicular distance from the mover's midpoint to the reference's
+    // infinite line — with parallel lines any point gives the same value.
+    let (mx, my) = (
+        (mov_line.p0.x + mov_line.p1.x) * 0.5,
+        (mov_line.p0.y + mov_line.p1.y) * 0.5,
+    );
+    let current = ((ux * (my - ref_line.p0.y) - uy * (mx - ref_line.p0.x)) / nu).abs();
+    let target = match value {
+        Some(v) => v,
+        None => current,
+    };
+    if !target.is_finite() || target <= 0.0 {
+        return Err("Distance must be a positive number".into());
+    }
+
+    // Record (or retarget) first and validate against the FULL connected
+    // component, like the other pair kinds; restore the previous record on
+    // failure — the relation may already have existed with another value.
+    let candidate = SketchConstraint::line_distance(ref_id, mov_id, target);
+    let prev = doc
+        .constraints
+        .iter()
+        .find(|c| c.same_relation(&candidate))
+        .copied();
+    if doc.add_constraint(candidate) {
+        let CompSketch {
+            mut s,
+            vars,
+            constraint_doc_idx,
+        } = component_sketch(doc, &[ref_id, mov_id]);
+        anchor_line_lengths(&mut s, doc, &vars);
+        let initial = s.snapshot();
+        if !s.solve_robust().converged {
+            let touched = doc
+                .constraints
+                .iter()
+                .position(|c| c.same_relation(&candidate));
+            let culprits: Vec<usize> = s
+                .diagnose_conflict(&initial)
+                .culprits
+                .into_iter()
+                .filter_map(|i| constraint_doc_idx.get(i).copied())
+                .collect();
+            let conflict = describe_conflict(doc, &culprits, touched);
+            restore_or_remove(doc, prev, |c| c.same_relation(&candidate));
+            return Err(format!(
+                "Could not hold the lines {target} apart against their existing constraints{conflict}"
+            ));
+        }
+    }
+
+    let mut s = Sketch::new();
+    let a0 = s.add_point(ref_line.p0.x, ref_line.p0.y);
+    let a1 = s.add_point(ref_line.p1.x, ref_line.p1.y);
+    let b0 = s.add_point(mov_line.p0.x, mov_line.p0.y);
+    let b1 = s.add_point(mov_line.p1.x, mov_line.p1.y);
+    s.constrain(Constraint::Fixed(a0, ref_line.p0.x, ref_line.p0.y));
+    s.constrain(Constraint::Fixed(a1, ref_line.p1.x, ref_line.p1.y));
+    // The mover keeps its length so it slides rather than collapsing.
+    s.constrain(Constraint::Distance(b0, b1, len(&mov_line)));
+    s.constrain(Constraint::PointLineDistance(b0, a0, a1, target));
+    s.constrain(Constraint::PointLineDistance(b1, a0, a1, target));
+    let res = s.solve();
+    if !res.converged {
+        return Err(format!(
+            "Could not hold the lines {target} apart (residual {:.2e})",
+            res.residual
+        ));
+    }
+    write_line(doc, mov_id, s.point(b0), s.point(b1));
+    // Same as the other pair solves: linked neighbours of the mover are
+    // still at their pre-solve positions — drag them back into place.
+    resolve_after_transform(doc, &[mov_id]);
+    Ok(format!("Held the lines {target} apart"))
 }
 
 /// Rolls back a failed valued-constraint record: the previous record is
@@ -835,10 +1003,16 @@ fn component_sketch(doc: &Document, seeds: &[EntityId]) -> CompSketch {
         let sb = c.b.and_then(|b| vars.get(&b));
         match c.kind {
             ConstraintKind::Fixed => {
-                let Some(p) = sa.endpoint(0) else { continue };
-                let (x, y) = s.point(p);
-                s.constrain(Constraint::Fixed(p, x, y));
-                constraint_doc_idx.push(doc_idx);
+                // Pin every degree of freedom of the entity where it sits — a
+                // user Fix locks a whole line/arc, not just one endpoint (the
+                // origin, a point, pins to a single Fixed either way). One doc
+                // constraint lowers to several solver rows, so record `doc_idx`
+                // for each so diagnostics stay aligned.
+                let before = s.constraint_count();
+                pin_shape(&mut s, sa);
+                for _ in before..s.constraint_count() {
+                    constraint_doc_idx.push(doc_idx);
+                }
             }
             ConstraintKind::Horizontal | ConstraintKind::Vertical => {
                 let Some((a0, a1)) = sa.line() else { continue };
@@ -883,6 +1057,20 @@ fn component_sketch(doc: &Document, seeds: &[EntityId]) -> CompSketch {
                     continue;
                 };
                 s.constrain(Constraint::Distance(a0, a1, v));
+                constraint_doc_idx.push(doc_idx);
+            }
+            ConstraintKind::LineDistance => {
+                // Both of b's endpoints held at the width from a's infinite
+                // line — this pins the gap *and* keeps the pair parallel.
+                // Two solver rows for one record, so log doc_idx twice.
+                let (Some((a0, a1)), Some((b0, b1)), Some(v)) =
+                    (sa.line(), sb.and_then(|s| s.line()), c.val)
+                else {
+                    continue;
+                };
+                s.constrain(Constraint::PointLineDistance(b0, a0, a1, v));
+                s.constrain(Constraint::PointLineDistance(b1, a0, a1, v));
+                constraint_doc_idx.push(doc_idx);
                 constraint_doc_idx.push(doc_idx);
             }
             ConstraintKind::Angle => {
@@ -1544,6 +1732,88 @@ mod tests {
         } else {
             panic!("expected the origin to still be a point");
         }
+    }
+
+    #[test]
+    fn line_distance_slides_the_second_line_to_the_width() {
+        let mut doc = Document::new();
+        let a = add_line(&mut doc, 0.0, 0.0, 6.0, 0.0);
+        let b = add_line(&mut doc, 1.0, 2.0, 5.0, 2.0);
+        constrain_line_distance(&mut doc, &[a, b], Some(5.0)).expect("must solve");
+        let la = line_of(&doc, a).unwrap();
+        assert!(
+            (la.p0.x, la.p0.y, la.p1.x, la.p1.y) == (0.0, 0.0, 6.0, 0.0),
+            "the first pick is the fixed reference: {la:?}"
+        );
+        let lb = line_of(&doc, b).unwrap();
+        assert!(
+            (lb.p0.y - 5.0).abs() < 1e-6 && (lb.p1.y - 5.0).abs() < 1e-6,
+            "mover slid to the width: {lb:?}"
+        );
+        assert!((len(&lb) - 4.0).abs() < 1e-6, "mover length kept");
+        assert_eq!(doc.constraints.len(), 1);
+        assert_eq!(doc.constraints[0].kind, ConstraintKind::LineDistance);
+        assert_eq!(doc.constraints[0].val, Some(5.0));
+
+        // Re-constraining the same pair retargets the record in place.
+        constrain_line_distance(&mut doc, &[a, b], Some(3.0)).expect("must solve");
+        assert_eq!(doc.constraints.len(), 1);
+        assert_eq!(doc.constraints[0].val, Some(3.0));
+        let lb = line_of(&doc, b).unwrap();
+        assert!((lb.p0.y - 3.0).abs() < 1e-6, "retarget moved it: {lb:?}");
+    }
+
+    #[test]
+    fn line_distance_rejects_crossing_lines() {
+        let mut doc = Document::new();
+        let a = add_line(&mut doc, 0.0, 0.0, 6.0, 0.0);
+        let b = add_line(&mut doc, 0.0, 0.0, 4.0, 4.0);
+        assert!(
+            constrain_line_distance(&mut doc, &[a, b], Some(2.0)).is_err(),
+            "crossing lines have an angle, not a width"
+        );
+        assert!(doc.constraints.is_empty(), "nothing recorded on failure");
+    }
+
+    #[test]
+    fn fix_pins_a_whole_line_against_a_neighbours_resolve() {
+        let mut doc = Document::new();
+        let a = add_line(&mut doc, 0.0, 0.0, 4.0, 0.0);
+        let b = add_line(&mut doc, 4.0, 0.0, 4.0, 3.0);
+        doc.add_constraint(SketchConstraint::coincident(a, 1, b, 0));
+
+        constrain_fixed(&mut doc, &[a]).expect("a line is fixable");
+        assert!(
+            doc.constraints
+                .iter()
+                .any(|c| c.kind == ConstraintKind::Fixed && c.a == a),
+            "a Fixed constraint was recorded on the line"
+        );
+        // Idempotent: fixing an already-fixed selection is a no-op error.
+        assert!(constrain_fixed(&mut doc, &[a]).is_err());
+
+        // Drag b's free end far away and re-solve its component. Because a is
+        // fully pinned (both endpoints), it must not drift, and b's welded end
+        // stays on the fixed corner.
+        set_line(&mut doc, b, 4.0, 0.0, 7.0, 5.0);
+        assert!(resolve_after_edit(&mut doc, b, Some(1)));
+        let la = line_of(&doc, a).unwrap();
+        for (got, want) in [
+            (la.p0.x, 0.0),
+            (la.p0.y, 0.0),
+            (la.p1.x, 4.0),
+            (la.p1.y, 0.0),
+        ] {
+            assert!(
+                (got - want).abs() < 1e-6,
+                "fixed line a never moved: {la:?}"
+            );
+        }
+        let lb = line_of(&doc, b).unwrap();
+        assert!(
+            (lb.p0.x - 4.0).abs() < 1e-6 && lb.p0.y.abs() < 1e-6,
+            "b's welded end stayed on the fixed corner: {lb:?}"
+        );
     }
 
     #[test]

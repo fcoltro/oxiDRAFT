@@ -92,6 +92,67 @@ impl AppState {
                 }
                 true
             }
+            Tool::DimConstraint { first, pending } => {
+                let hit = pick(self);
+                match (first, pending, hit) {
+                    // A fully picked dimension is following the cursor —
+                    // this click drops it wherever it lands, entity or not.
+                    (_, Some((a, b)), _) => {
+                        self.smart_dimension(a, b, Some((px, py)));
+                        self.tool = Tool::DimConstraint {
+                            first: None,
+                            pending: None,
+                        };
+                    }
+                    // First pick: a line may still pair with a second line,
+                    // so it waits in `first`; a circle/arc pairs with
+                    // nothing, so its radius preview starts following the
+                    // cursor right away.
+                    (None, None, Some(id)) if is_dimensionable(self, id) => {
+                        self.tool = if line_endpoints_of(self, id).is_some() {
+                            Tool::DimConstraint {
+                                first: Some(id),
+                                pending: None,
+                            }
+                        } else {
+                            Tool::DimConstraint {
+                                first: None,
+                                pending: Some((id, None)),
+                            }
+                        };
+                    }
+                    // A polyline pick is a dead end today — say how to fix
+                    // it instead of silently ignoring the click.
+                    (None, None, Some(id)) if is_polycurve(self, id) => {
+                        self.command_log.push(
+                            "Polylines can't take dimensions — EXPLODE (X) into welded \
+                             lines first"
+                                .into(),
+                        );
+                    }
+                    // A second line → the pair (angle, or width when
+                    // parallel) follows the cursor until placed.
+                    (Some(a), None, Some(id))
+                        if id != a && line_endpoints_of(self, id).is_some() =>
+                    {
+                        self.tool = Tool::DimConstraint {
+                            first: None,
+                            pending: Some((a, Some(id))),
+                        };
+                    }
+                    // Empty space, the same line, or a non-line second pick
+                    // → place the held line's length here.
+                    (Some(a), None, _) => {
+                        self.smart_dimension(a, None, Some((px, py)));
+                        self.tool = Tool::DimConstraint {
+                            first: None,
+                            pending: None,
+                        };
+                    }
+                    (None, None, _) => {}
+                }
+                true
+            }
             Tool::DimAngularLines { a, geom: None } => {
                 if let Some(id) = pick(self)
                     && line_endpoints_of(self, id).is_some()
@@ -525,6 +586,24 @@ fn circle_center_radius(c: &oxidraft_geometry::Curve) -> Option<(Point2d, f64)> 
         oxidraft_geometry::Curve::Arc(a) => Some((a.center, a.radius)),
         _ => None,
     }
+}
+
+/// Whether the entity can carry a driving dimension the smart-dimension tool
+/// understands: a line (length or, paired, angle) or a circle/arc (radius).
+fn is_dimensionable(app: &AppState, id: EntityId) -> bool {
+    matches!(
+        app.document.get(id).and_then(|e| e.as_curve()),
+        Some(oxidraft_geometry::Curve::Line(_)) | Some(oxidraft_geometry::Curve::Arc(_))
+    )
+}
+
+/// Whether the entity is a multi-segment polyline — undimensionable as-is,
+/// but one EXPLODE away from welded, dimensionable lines.
+fn is_polycurve(app: &AppState, id: EntityId) -> bool {
+    matches!(
+        app.document.get(id).and_then(|e| e.as_curve()),
+        Some(oxidraft_geometry::Curve::Poly(_))
+    )
 }
 
 fn line_endpoints_of(app: &AppState, id: EntityId) -> Option<(Point2d, Point2d)> {

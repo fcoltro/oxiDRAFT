@@ -28,6 +28,8 @@ pub enum Command {
     /// curve; `None` means the interval was missing/invalid.
     Measure(Option<f64>),
     Unconstrain,
+    /// Pins the selected geometry in place (a driving Fix constraint).
+    Fix,
     LayerSet(String),
     LayerNew(String),
     SelectAll,
@@ -276,6 +278,13 @@ pub fn parse_command(input: &str) -> Command {
                 .filter(|d| *d > 0.0),
         ),
         "UNCONSTRAIN" | "UNCON" => Command::Unconstrain,
+        // Pin the selected geometry in place.
+        "FIX" | "FIXCON" | "GCFIX" | "ANCHOR" => Command::Fix,
+        // Smart dimension: pick geometry to add a driving length/radius/angle.
+        "DIMCON" | "SMARTDIM" | "GCDIM" | "SD" => Command::Activate(Tool::DimConstraint {
+            first: None,
+            pending: None,
+        }),
         "ERASE" | "E" | "DELETE" => Command::Erase,
         "DISJOINT" | "EXPLODE" | "X" => Command::Explode,
         "JOIN" | "J" => Command::Join,

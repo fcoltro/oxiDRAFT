@@ -60,9 +60,12 @@ pub enum Icon {
     ConLengthLock,
     ConAngle,
     ConCoincident,
+    ConFix,
     ConRemove,
     ConstAuto,
+    ConstAutoOff,
     ConstShowHide,
+    ConstShowHideOff,
     CurvComb,
 }
 
@@ -155,12 +158,19 @@ impl Icon {
             Icon::ConCoincident => {
                 include_bytes!("../assets/icons/icons_constraint_coincident.png")
             }
+            Icon::ConFix => include_bytes!("../assets/icons/icons_constraint_fix.png"),
             Icon::ConRemove => {
                 include_bytes!("../assets/icons/icons_constraint_remove.png")
             }
             Icon::ConstAuto => include_bytes!("../assets/icons/icons_ui_const_auto.png"),
+            Icon::ConstAutoOff => {
+                include_bytes!("../assets/icons/icons_ui_const_auto_off.png")
+            }
             Icon::ConstShowHide => {
                 include_bytes!("../assets/icons/icons_ui_const_show-hide.png")
+            }
+            Icon::ConstShowHideOff => {
+                include_bytes!("../assets/icons/icons_ui_const_show-hide_off.png")
             }
             Icon::CurvComb => include_bytes!("../assets/icons/icons_ui_curv_comb.png"),
         }
