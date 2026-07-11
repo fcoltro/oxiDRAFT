@@ -96,6 +96,7 @@ Or build it yourself in one command (see [Build & run](#-build--run)).
 - **Drawing units** — mm / cm / m / km / in / ft / unitless — that bound the zoom range and label measurements
 - **Curvature comb** on selected curves for smoothness inspection
 - **`Ctrl+F` command palette** plus an always-available command line, **window / crossing marquee**, hover highlight, ghost previews, **undo / redo**
+- **Radial tool wheel** — hold `Tab` for a **Tools** / **Modifiers** picker at the cursor; drag toward either to reveal its full ring, then to a wedge and release to activate it, or push out further on Circle/Arc/Dimension/Line to reveal their construction-method variants
 - Modern dark, glass-panelled interface — top bar, two-column tool dock (draw + modify), inspector and status pill; preferences persist between sessions
 
 ### Geometry kernel
@@ -160,6 +161,7 @@ bare. `UNCON` drops every constraint on the selection.
 | `Esc` | Cancel / deselect | `Ctrl+A` | Select all |
 | `Z` | Zoom extents | `Ctrl+F` | Command palette |
 | `Space` | Repeat last command | `Del` | Delete selection |
+| `Hold Tab` | Radial tool wheel — drag to Tools or Modifiers, then a wedge | | |
 | `F7`–`F12` | Toggle object snap · grid · grid snap · polar · tracking · dynamic input | | |
 
 ## 🔨 Build & run

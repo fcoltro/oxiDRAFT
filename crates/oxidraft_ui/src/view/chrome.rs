@@ -1588,19 +1588,19 @@ fn tool_menu_item(ui: &mut egui::Ui, app: &mut AppState, label: &str, tool: Tool
 }
 
 #[derive(Clone)]
-enum Act {
+pub(super) enum Act {
     Tool(Tool),
     Cmd(Command),
 }
 
-fn run_act(app: &mut AppState, act: &Act) {
+pub(super) fn run_act(app: &mut AppState, act: &Act) {
     match act {
         Act::Tool(t) => app.execute(Command::Activate(t.clone())),
         Act::Cmd(c) => app.execute(c.clone()),
     }
 }
 
-fn draw_entries() -> Vec<(crate::icons::Icon, &'static str, Act)> {
+pub(super) fn draw_entries() -> Vec<(crate::icons::Icon, &'static str, Act)> {
     use crate::icons::Icon;
     vec![
         (Icon::Select, "Select  (Esc)", Act::Tool(Tool::Select)),
@@ -1683,7 +1683,7 @@ fn draw_entries() -> Vec<(crate::icons::Icon, &'static str, Act)> {
     ]
 }
 
-fn modify_entries() -> Vec<(crate::icons::Icon, &'static str, Act)> {
+pub(super) fn modify_entries() -> Vec<(crate::icons::Icon, &'static str, Act)> {
     use crate::icons::Icon;
     vec![
         (
@@ -1784,7 +1784,7 @@ fn modify_entries() -> Vec<(crate::icons::Icon, &'static str, Act)> {
     ]
 }
 
-fn act_needs_selection(act: &Act) -> bool {
+pub(super) fn act_needs_selection(act: &Act) -> bool {
     match act {
         Act::Tool(t) => matches!(
             t,
@@ -1799,7 +1799,7 @@ fn act_needs_selection(act: &Act) -> bool {
     }
 }
 
-fn group_id(act: &Act) -> Option<u8> {
+pub(super) fn group_id(act: &Act) -> Option<u8> {
     match act {
         Act::Tool(Tool::Line { .. }) => Some(0),
         Act::Tool(Tool::Circle { .. }) => Some(1),
@@ -1809,7 +1809,7 @@ fn group_id(act: &Act) -> Option<u8> {
     }
 }
 
-fn group_entries(id: u8) -> Vec<(crate::icons::Icon, &'static str, Act)> {
+pub(super) fn group_entries(id: u8) -> Vec<(crate::icons::Icon, &'static str, Act)> {
     use crate::icons::Icon;
     match id {
         0 => vec![
@@ -3242,6 +3242,7 @@ fn tool_hints(app: &AppState) -> (&'static str, Vec<(&'static str, &'static str)
                     ("L", "draw a line"),
                     ("C", "draw a circle"),
                     ("R", "draw a rectangle"),
+                    ("Hold Tab", "tool wheel"),
                     ("Ctrl+F", "all commands"),
                 ],
             );
@@ -3254,6 +3255,7 @@ fn tool_hints(app: &AppState) -> (&'static str, Vec<(&'static str, &'static str)
                     ("Ctrl+C / V", "copy / paste"),
                     ("Del", "delete"),
                     ("Esc", "deselect"),
+                    ("Hold Tab", "modify wheel"),
                 ],
             );
         }

@@ -10,6 +10,7 @@ use crate::tools::Tool;
 mod chrome;
 pub(crate) mod overlays;
 mod palette;
+mod radial;
 mod render;
 mod tessellate;
 use chrome::{
@@ -17,6 +18,7 @@ use chrome::{
     line_props_dialog, plot_dialog, ribbon, settings_dialog, status_pill, tool_hint_panel, top_bar,
 };
 use palette::command_bar;
+use radial::{RadialRing, radial_menu};
 use render::{
     HATCH_SELECT, draw_blend_preview, draw_corner_preview, draw_dashed_line, draw_dimension,
     draw_entity, draw_grid, draw_prompt_chip, draw_scale_bar, draw_transform_ghost,
@@ -87,6 +89,15 @@ pub struct UiState {
     pub last_autosave: Option<std::time::Instant>,
     pub recovery_offer: Option<std::path::PathBuf>,
     pub recovery_checked: bool,
+    /// True while the hold-Tab radial tool menu is open; see
+    /// `radial::radial_menu`. It always opens on a 2-item Tools/Modifiers
+    /// root; `radial_category` is `Some` once the user has dragged past the
+    /// root into one of those rings, and `radial_expanded` once they've
+    /// drilled further into a grouped tool's construction-method variants.
+    pub radial_open: bool,
+    pub radial_center: Option<egui::Pos2>,
+    pub radial_category: Option<RadialRing>,
+    pub radial_expanded: Option<u8>,
 }
 
 pub fn draw_ui(ui: &mut egui::Ui, app: &mut AppState, ui_state: &mut UiState) {
@@ -144,6 +155,9 @@ pub fn draw_ui(ui: &mut egui::Ui, app: &mut AppState, ui_state: &mut UiState) {
     }
     handle_shortcuts(&ctx, app, ui_state);
     let canvas_rect = ui.max_rect();
+    // Must run before any widget that could otherwise consume/react to Tab
+    // for egui's own focus-cycling (e.g. the top bar's buttons).
+    let radial_open = radial_menu(&ctx, app, ui_state, canvas_rect);
     top_bar(&ctx, app, canvas_rect);
     ribbon(&ctx, app, canvas_rect);
     inspector(&ctx, app, canvas_rect);
@@ -157,7 +171,7 @@ pub fn draw_ui(ui: &mut egui::Ui, app: &mut AppState, ui_state: &mut UiState) {
     settings_dialog(&ctx, app, ui_state);
     plot_dialog(&ctx, app);
     let cmd_bar_focused = command_bar(&ctx, app, ui_state, canvas_rect);
-    canvas(ui, app, ui_state, cmd_bar_focused);
+    canvas(ui, app, ui_state, cmd_bar_focused || radial_open);
 }
 
 fn canvas(root_ui: &mut egui::Ui, app: &mut AppState, ui_state: &mut UiState, palette_open: bool) {
