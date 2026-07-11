@@ -3,7 +3,6 @@ use super::chrome::{self, Act, act_needs_selection, group_entries, group_id, run
 use crate::icons::{self, Icon};
 use crate::state::AppState;
 use crate::theme;
-use crate::tools::Tool;
 use egui::{Color32, Context, Key, Pos2, Rect, Stroke, vec2};
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -13,16 +12,27 @@ pub enum RadialRing {
 }
 
 const DEAD_ZONE: f32 = 26.0;
+
 const ROOT_RADIUS: f32 = 58.0;
-const ROOT_EXPAND: f32 = 84.0;
+
+const ROOT_EXPAND: f32 = 34.0;
+
+const CATEGORY_EXPAND: f32 = ROOT_EXPAND;
+
+const ROOT_BACKDROP_RADIUS: f32 = 100.0;
+
 const CATEGORY_RADIUS: f32 = 148.0;
-const CATEGORY_EXPAND: f32 = 176.0;
-const VARIANT_RADIUS: f32 = 222.0;
+
+const VARIANT_RADIUS: f32 = 210.0;
+
+const VARIANT_ARC_STEP: f32 = 0.34;
+
+const VARIANT_UNLATCH_MARGIN: f32 = 0.15;
+
 const ICON_SIZE: f32 = 30.0;
+
 const ROOT_ICON_SIZE: f32 = 40.0;
 
-/// Buckets a clockwise-from-up angle (radians, any range) into one of
-/// `count` evenly-spaced wedges centred on multiples of `TAU / count`.
 fn wedge_at(angle: f32, count: usize) -> usize {
     if count == 0 {
         return 0;
@@ -46,8 +56,35 @@ fn wedge_point(center: Pos2, index: usize, count: usize, radius: f32) -> Pos2 {
     center + vec2(a.sin(), -a.cos()) * radius
 }
 
-/// Strips the trailing "  (hotkey)" / " — explanation" suffixes dock
-/// tooltips carry, so the pie shows just the tool name.
+fn variant_angle(parent_angle: f32, index: usize, count: usize) -> f32 {
+    let offset = index as f32 - (count as f32 - 1.0) / 2.0;
+    parent_angle + offset * VARIANT_ARC_STEP
+}
+
+fn variant_point(center: Pos2, parent_angle: f32, index: usize, count: usize, radius: f32) -> Pos2 {
+    let a = variant_angle(parent_angle, index, count);
+    center + vec2(a.sin(), -a.cos()) * radius
+}
+
+fn angle_diff(a: f32, b: f32) -> f32 {
+    let d = oxidraft_geometry::util::wrap_tau((a - b) as f64) as f32;
+    if d > std::f32::consts::PI {
+        d - std::f32::consts::TAU
+    } else {
+        d
+    }
+}
+
+fn nearest_variant(angle: f32, parent_angle: f32, count: usize) -> usize {
+    (0..count)
+        .min_by(|&i, &j| {
+            let da = angle_diff(angle, variant_angle(parent_angle, i, count)).abs();
+            let db = angle_diff(angle, variant_angle(parent_angle, j, count)).abs();
+            da.partial_cmp(&db).unwrap_or(std::cmp::Ordering::Equal)
+        })
+        .unwrap_or(0)
+}
+
 fn short_label(s: &str) -> &str {
     s.split("  (")
         .next()
@@ -65,12 +102,6 @@ fn ring_entries(ring: RadialRing) -> Vec<(Icon, &'static str, Act)> {
     }
 }
 
-/// Shared shape for revealing a nested ring: `state` becomes `compute()`'s
-/// result once `dist` first exceeds `expand`, and resets to `None` once the
-/// user retreats back under it. Latching (rather than re-deriving the choice
-/// from the current angle every frame) means the revealed ring occupies the
-/// *full* circle instead of flipping underneath the cursor as it sweeps past
-/// the angle where the ring was first entered.
 fn latch<T>(state: &mut Option<T>, dist: f32, expand: f32, compute: impl FnOnce() -> Option<T>) {
     if state.is_none() {
         if dist > expand {
@@ -81,22 +112,6 @@ fn latch<T>(state: &mut Option<T>, dist: f32, expand: f32, compute: impl FnOnce(
     }
 }
 
-/// The ellipse tool's dynamic-input HUD already binds Tab to hop between its
-/// major/minor length fields (see `dyn_ellipse_hud`); the radial menu must
-/// not steal that key while it's active.
-fn ellipse_hud_wants_tab(app: &AppState) -> bool {
-    app.dyn_on
-        && matches!(
-            app.tool,
-            Tool::Ellipse {
-                center: Some(_),
-                ..
-            }
-        )
-}
-
-/// Fill + stroke for a wedge's circular backdrop, shared by
-/// `draw_wedge_icon` and `draw_root_wedge`.
 fn wedge_shell(
     painter: &egui::Painter,
     center: Pos2,
@@ -120,10 +135,6 @@ fn draw_wedge_icon(
     active: bool,
     enabled: bool,
 ) {
-    // Hover gets the app's ordinary neutral hover tint; `ACCENT` is reserved
-    // for "this is the currently active tool" everywhere else in the UI
-    // (see `icons::icon_button_sized`), so a wedge that's merely hovered
-    // shouldn't look identical to the one that's actually active.
     let bg = if hovered {
         theme::WIDGET_HOVER
     } else {
@@ -160,9 +171,6 @@ fn draw_wedge_icon(
     }
 }
 
-/// Draws one of the two root wedges ("Tools" / "Modifiers"). These are pure
-/// navigation choices — not `Act`s — so they get their own, label-carrying
-/// widget instead of `draw_wedge_icon`'s icon+tooltip-on-hover shape.
 fn draw_root_wedge(
     painter: &egui::Painter,
     center: Pos2,
@@ -204,15 +212,6 @@ fn draw_root_wedge(
     );
 }
 
-/// Drives the hold-Tab radial tool menu. It always opens on a 2-item
-/// Tools/Modifiers root at the cursor; dragging past `ROOT_EXPAND` while
-/// over one of those reveals its full tool ring, and pushing further past
-/// `CATEGORY_EXPAND` on a grouped tool (Circle/Arc/Dimension/Line) reveals
-/// its construction-method variants as a third ring. Whatever's hovered
-/// deepest activates on key-up via the same `run_act`/`Command::Activate`
-/// path the dock uses. Returns whether the menu is open this frame, so
-/// callers can suppress canvas picking the same way the command palette
-/// already does.
 pub(super) fn radial_menu(
     ctx: &Context,
     app: &mut AppState,
@@ -220,7 +219,6 @@ pub(super) fn radial_menu(
     canvas_rect: Rect,
 ) -> bool {
     let pointer = ctx.pointer_latest_pos();
-
     if !ui_state.radial_open {
         let focused = ctx.memory(|m| m.focused()).is_some();
         let over_canvas = pointer.is_some_and(|p| canvas_rect.contains(p));
@@ -233,20 +231,15 @@ pub(super) fn radial_menu(
                     .unwrap_or(false)
             });
         let raw_keystroke_capture = app.grip_editing() || app.interaction.corner_action.is_some();
-        if focused
-            || !over_canvas
-            || ellipse_hud_wants_tab(app)
-            || other_overlay_open
-            || raw_keystroke_capture
-        {
+        if focused || !over_canvas || other_overlay_open || raw_keystroke_capture {
             return false;
         }
         let mods = ctx.input(|i| i.modifiers);
         if mods.ctrl || mods.command || mods.alt {
             return false;
         }
-        let pressed = ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, Key::Tab))
-            || ctx.input_mut(|i| i.consume_key(egui::Modifiers::SHIFT, Key::Tab));
+        let pressed = ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, Key::Q))
+            || ctx.input_mut(|i| i.consume_key(egui::Modifiers::SHIFT, Key::Q));
         if !pressed {
             return false;
         }
@@ -256,65 +249,77 @@ pub(super) fn radial_menu(
         ui_state.radial_expanded = None;
         return true;
     }
-
     let center = ui_state
         .radial_center
         .unwrap_or_else(|| canvas_rect.center());
-
     let cancel = |ui_state: &mut UiState| {
         ui_state.radial_open = false;
         ui_state.radial_category = None;
         ui_state.radial_expanded = None;
     };
-
     if ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, Key::Escape)) {
         cancel(ui_state);
         return false;
     }
-
+    if ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, Key::Q))
+        || ctx.input_mut(|i| i.consume_key(egui::Modifiers::SHIFT, Key::Q))
+    {
+        cancel(ui_state);
+        return false;
+    }
     let cur = pointer.unwrap_or(center);
     let dist = (cur - center).length();
     let angle = angle_of(center, cur);
-
     let root_idx = wedge_at(angle, 2);
     let root_choice = if root_idx == 0 {
         RadialRing::Draw
     } else {
         RadialRing::Modify
     };
-    // The category, once chosen, occupies the *full* circle — Circle or
-    // Mirror can sit anywhere around it — so the root choice is latched at
-    // the moment of crossing `ROOT_EXPAND`, not re-derived from the current
-    // angle every frame; otherwise sweeping past the halfway point while
-    // picking a tool would flip the whole ring underneath the cursor.
     latch(&mut ui_state.radial_category, dist, ROOT_EXPAND, || {
         Some(root_choice)
     });
     let category = ui_state.radial_category;
-
     let category_entries = category.map(ring_entries);
     let category_hovered = category_entries
         .as_ref()
         .map(|entries| wedge_at(angle, entries.len()).min(entries.len().saturating_sub(1)));
-
-    // Same latching logic one level deeper: once a grouped tool's variant
-    // ring is showing, it also occupies the full circle.
-    latch(
-        &mut ui_state.radial_expanded,
-        dist,
-        CATEGORY_EXPAND,
-        || match (&category_entries, category_hovered) {
-            (Some(entries), Some(idx)) => group_id(&entries[idx].2),
-            _ => None,
-        },
-    );
+    let parent_angle_of = |gid: u8| -> Option<f32> {
+        let entries = category_entries.as_ref()?;
+        let count = entries.len();
+        entries
+            .iter()
+            .position(|(_, _, act)| group_id(act) == Some(gid))
+            .map(|idx| wedge_center_angle(idx, count))
+    };
+    let hovered_gid = match (&category_entries, category_hovered) {
+        (Some(entries), Some(idx)) => group_id(&entries[idx].2),
+        _ => None,
+    };
+    let variant_still_relevant = ui_state.radial_expanded.is_some_and(|gid| {
+        let sub_count = group_entries(gid).len();
+        let half_span = if sub_count > 1 {
+            VARIANT_ARC_STEP * (sub_count - 1) as f32 / 2.0
+        } else {
+            0.0
+        };
+        parent_angle_of(gid)
+            .is_some_and(|pa| angle_diff(angle, pa).abs() <= half_span + VARIANT_UNLATCH_MARGIN)
+    });
+    if !variant_still_relevant {
+        ui_state.radial_expanded = None;
+    }
+    latch(&mut ui_state.radial_expanded, dist, CATEGORY_EXPAND, || {
+        hovered_gid
+    });
     let variant_gid = ui_state.radial_expanded;
     let variant_entries = variant_gid.map(group_entries);
-    let variant_hovered = variant_entries
-        .as_ref()
-        .map(|v| wedge_at(angle, v.len()).min(v.len().saturating_sub(1)));
-
-    egui::Area::new(egui::Id::new("radial_menu"))
+    let parent_angle = variant_gid.and_then(parent_angle_of);
+    let variant_hovered = match (&variant_entries, parent_angle) {
+        (Some(v), Some(pa)) => Some(nearest_variant(angle, pa, v.len())),
+        _ => None,
+    };
+    let catch = egui::Area::new(egui::Id::new("radial_menu"))
         .order(egui::Order::Tooltip)
         .fixed_pos(canvas_rect.min)
         .show(ctx, |ui| {
@@ -325,19 +330,17 @@ pub(super) fn radial_menu(
             } else if category_entries.is_some() {
                 CATEGORY_RADIUS + 40.0
             } else {
-                ROOT_EXPAND + 24.0
+                ROOT_BACKDROP_RADIUS
             };
             painter.circle_filled(center, outer_r, theme::PANEL_GLASS);
             painter.circle_stroke(center, outer_r, Stroke::new(1.0_f32, theme::OUTLINE));
             painter.circle_filled(center, DEAD_ZONE, theme::WIDGET_BG);
-
             let root_dimmed = category.is_some();
             for (i, label) in ["Tools", "Modifiers"].iter().enumerate() {
                 let pos = wedge_point(center, i, 2, ROOT_RADIUS);
                 let hovered = !root_dimmed && i == root_idx && dist > DEAD_ZONE;
                 draw_root_wedge(painter, pos, label, hovered, root_dimmed);
             }
-
             let active_name = app.tool.name();
             let has_sel = app.has_selection();
             if let Some(entries) = &category_entries {
@@ -347,7 +350,9 @@ pub(super) fn radial_menu(
                     let pos = wedge_point(center, i, count, CATEGORY_RADIUS);
                     let hovered =
                         !category_dimmed && category_hovered == Some(i) && dist > ROOT_EXPAND;
-                    let active = matches!(act, Act::Tool(t) if active_name == t.name());
+                    let active = matches!(
+                        act, Act::Tool(t) if active_name == t.name()
+                    );
                     let enabled = has_sel || !act_needs_selection(act);
                     draw_wedge_icon(painter, ctx, pos, *icon, label, hovered, active, enabled);
                     if group_id(act).is_some() {
@@ -356,20 +361,22 @@ pub(super) fn radial_menu(
                     }
                 }
             }
-            if let Some(sub) = &variant_entries {
+            if let (Some(sub), Some(pa)) = (&variant_entries, parent_angle) {
                 let sub_count = sub.len();
                 for (i, (icon, label, act)) in sub.iter().enumerate() {
-                    let pos = wedge_point(center, i, sub_count, VARIANT_RADIUS);
+                    let pos = variant_point(center, pa, i, sub_count, VARIANT_RADIUS);
                     let hovered = variant_hovered == Some(i);
-                    let active = matches!(act, Act::Tool(t) if active_name == t.name());
+                    let active = matches!(
+                        act, Act::Tool(t) if active_name == t.name()
+                    );
                     let enabled = has_sel || !act_needs_selection(act);
                     draw_wedge_icon(painter, ctx, pos, *icon, label, hovered, active, enabled);
                 }
             }
             catch
-        });
-
-    if ctx.input(|i| i.key_released(Key::Tab)) {
+        })
+        .inner;
+    if catch.clicked() {
         if dist > DEAD_ZONE {
             if let (Some(sub), Some(si)) = (&variant_entries, variant_hovered) {
                 let act = &sub[si].2;
@@ -441,7 +448,6 @@ mod tests {
 
     #[test]
     fn two_entry_root_splits_into_halves() {
-        // Straight up -> Tools (index 0); straight down -> Modifiers (index 1).
         assert_eq!(wedge_at(0.0, 2), 0);
         assert_eq!(wedge_at(std::f32::consts::PI, 2), 1);
     }

@@ -1,3 +1,7 @@
+use crate::command::{Command, CoordInput, parse_command, parse_coordinate};
+use crate::history::History;
+use crate::tools::{Tool, ToolEvent};
+use crate::view_transform::ViewTransform;
 use oxidraft_cad::{
     Grip, Guide, SnapPoint, SnapSettings, apply_grip, best_snap, edit, find_snaps_excluding,
     grips_for, infer_axis, pick_at,
@@ -8,15 +12,10 @@ use oxidraft_document::{
 };
 use oxidraft_geometry::{Curve, LineSeg, MinTracker, Point2d, Transform2d};
 
-use crate::command::{Command, CoordInput, parse_command, parse_coordinate};
-use crate::history::History;
-use crate::tools::{Tool, ToolEvent};
-use crate::view_transform::ViewTransform;
-
 mod modify;
 pub use modify::TrimExtendPreview;
-mod contextual;
 
+mod contextual;
 pub use contextual::{CornerAction, CornerGeom, CornerKind, fillet_arc};
 
 pub struct AppState {
@@ -43,8 +42,6 @@ pub struct AppState {
     pub current_file_path: Option<std::path::PathBuf>,
     pub text_font: Option<String>,
     pub hatch_pattern: oxidraft_document::HatchPattern,
-    /// [`History::current_revision`] at the last successful save; the
-    /// document is dirty whenever the current revision differs.
     pub saved_revision: u64,
     pub zoom_target: Option<(f64, f64, f64)>,
     pub default_line_type: LineTypeRef,
@@ -68,19 +65,9 @@ pub struct AppState {
     pub hint_tool: Option<Tool>,
     pub infer_constraints: bool,
     pub show_constraints: bool,
-    /// A driving dimension the smart-dimension tool just created and wants
-    /// the view layer to open its inline value editor on. The view moves it
-    /// into `UiState::editing_dim` on the next frame and clears it here.
     pub pending_dim_edit: Option<SketchConstraint>,
-    /// Last plot window picked on canvas (sorted world corners); used by
-    /// the Plot dialog's "Window" area mode until re-picked.
     pub plot_window: Option<(f64, f64, f64, f64)>,
-    /// Whether the Plot dialog is showing. Typed here (not egui temp-data)
-    /// so both the dialog and the canvas overlay read one source of truth,
-    /// and a finished window pick can reopen it directly.
     pub plot_dialog_open: bool,
-    /// Plot area mode: `true` plots the picked [`Self::plot_window`],
-    /// `false` the full drawing extents.
     pub plot_window_mode: bool,
 }
 
@@ -331,14 +318,8 @@ pub struct InteractionState {
     pub corner_action: Option<CornerAction>,
     pub active_guide: Option<((f64, f64), f64)>,
     pub active_guides: Vec<Guide>,
-    /// Snap used for the pending start point of the Line tool, so a
-    /// finished segment can infer coincident constraints for both ends.
     pub line_snap_prev: Option<SnapPoint>,
-    /// Previous segment of the active Line chain; consecutive segments
-    /// share a corner by construction and get welded coincident.
     pub line_chain_prev: Option<EntityId>,
-    /// First segment of the active Line chain, so a segment that ends back
-    /// on the chain's start point closes the loop with a coincident weld.
     pub line_chain_first: Option<EntityId>,
 }
 
@@ -388,28 +369,16 @@ fn seed_default_layers(doc: &mut oxidraft_document::Document) {
     }
 }
 
-/// Adds the origin marker and records it as permanently `Fixed` in the
-/// constraint solver — not just protected from Select/Erase/Transform at the
-/// UI layer (see `fixed_origin_test`), but a real anchor a coincident weld
-/// to it can hold onto under solving, the same as welding to any other
-/// entity would.
 fn add_origin_point(doc: &mut oxidraft_document::Document) -> EntityId {
     let origin_id = doc.add(EntityKind::Point(Point2d::from_i64(0, 0)));
     doc.add_constraint(oxidraft_document::SketchConstraint::fixed(origin_id));
     origin_id
 }
 
-/// Whether the entity is a circular arc or full circle — the geometry the
-/// smart-dimension tool drives with a radius rather than a length.
 fn arc_or_circle(doc: &Document, id: EntityId) -> bool {
     matches!(doc.get(id).and_then(|e| e.as_curve()), Some(Curve::Arc(_)))
 }
 
-/// Whether both entities are lines pointing the same (or opposite) way —
-/// the pair the smart-dimension tool reads as "the width between them"
-/// rather than an angle. The tolerance is deliberately snug: lines made
-/// parallel by a constraint or drawn axis-aligned pass, hand-drawn
-/// almost-parallel lines still read as an angle pick.
 pub(crate) fn lines_parallel(doc: &Document, a: EntityId, b: EntityId) -> bool {
     let line = |id| match doc.get(id).and_then(|e| e.as_curve()) {
         Some(Curve::Line(l)) => Some(l.clone()),
@@ -431,9 +400,6 @@ fn line_endpoints(kind: &EntityKind) -> Option<((f64, f64), (f64, f64))> {
     }
 }
 
-/// Endpoints of the entity kinds the constraint solver can hold onto: a
-/// line's two ends, or a partial arc's start/end (index order matches the
-/// solver's arc endpoint convention: 0 = start, 1 = end).
 fn segment_endpoints(kind: &EntityKind) -> Option<[(f64, f64); 2]> {
     match kind {
         EntityKind::Curve(Curve::Line(l)) => Some([l.p0.to_f64(), l.p1.to_f64()]),
@@ -452,7 +418,6 @@ impl AppState {
         let mut document = Document::new();
         seed_default_layers(&mut document);
         let origin_id = add_origin_point(&mut document);
-
         AppState {
             document,
             view: ViewTransform::new(canvas_w, canvas_h),
@@ -474,7 +439,6 @@ impl AppState {
             click_count: 0,
             origin_id,
             interaction: InteractionState::default(),
-
             current_file_path: None,
             text_font: None,
             hatch_pattern: oxidraft_document::HatchPattern::Solid,
@@ -592,10 +556,8 @@ impl AppState {
 
     pub fn pointer_moved(&mut self, sx: f64, sy: f64) {
         let (wx, wy) = self.view.screen_to_world(sx, sy);
-
         let dragged_entity = self.interaction.grip_drag.as_ref().map(|d| d.entity_id);
         let allow_snap = self.tool.wants_point_snap() || dragged_entity.is_some();
-
         self.active_snap = if self.snap_on && allow_snap {
             let mut s = self.snap.clone();
             s.tolerance = self.view.pixel_world_size() * self.snap_px;
@@ -618,10 +580,8 @@ impl AppState {
         } else {
             None
         };
-
         self.interaction.active_guide = None;
         self.interaction.active_guides.clear();
-
         if let Some(ref sp) = self.active_snap {
             self.cursor_world = sp.pos;
         } else if self.grid_snap_on && allow_snap {
@@ -653,10 +613,6 @@ impl AppState {
                 let dy = wy - ry;
                 let dist = (dx * dx + dy * dy).sqrt();
                 if self.polar_on && dist > 1e-4 {
-                    // Angular capture zone for locking onto a polar guide —
-                    // kept tight so a nearby object snap (checked above,
-                    // before this branch even runs) isn't fought over by a
-                    // guide that grabs the cursor too eagerly.
                     const POLAR_CAPTURE_DEG: f64 = 1.5;
                     let angle_rad = dy.atan2(dx);
                     let angle_deg_wrapped = oxidraft_geometry::wrap_deg360(angle_rad.to_degrees());
@@ -664,7 +620,6 @@ impl AppState {
                     let nearest = (angle_deg_wrapped / step).round() * step;
                     let diff = (angle_deg_wrapped - nearest).abs();
                     let diff = diff.min(360.0 - diff);
-
                     if diff <= POLAR_CAPTURE_DEG {
                         let snapped_rad = nearest.to_radians();
                         self.cursor_world =
@@ -680,7 +635,6 @@ impl AppState {
                 self.cursor_world = (wx, wy);
             }
         }
-
         if self.track_on
             && self.active_snap.is_none()
             && let Some(drag) = self.interaction.grip_drag.as_ref()
@@ -728,11 +682,9 @@ impl AppState {
         self.click_count = self.click_count.wrapping_add(1);
         self.pointer_moved(sx, sy);
         let p = self.resolved_point();
-
         if self.handle_modify_click(&p) {
             return;
         }
-
         if let Tool::Text { anchor, height } = &self.tool {
             let height = *height;
             let need_anchor = anchor.is_none();
@@ -744,12 +696,7 @@ impl AppState {
             }
             return;
         }
-
         if matches!(self.tool, Tool::Select) {
-            // Constraint badges sit on top of the drawing: a click on a
-            // chip or weld dot deletes what it shows, undoably. Driving
-            // dimensions are exempt — a click there opens their value
-            // editor (handled in the view layer), never a silent delete.
             if let Some(hits) = crate::view::overlays::badge_hit(self, sx, sy) {
                 let hits: Vec<SketchConstraint> =
                     hits.into_iter().filter(|c| !c.kind.is_valued()).collect();
@@ -772,14 +719,12 @@ impl AppState {
             }
             return;
         }
-
         if self.try_close_on_start(p) {
             self.interaction.line_snap_prev = None;
             self.interaction.line_chain_prev = None;
             self.interaction.line_chain_first = None;
             return;
         }
-
         let was_line = matches!(self.tool, Tool::Line { .. });
         let was_arc = matches!(
             self.tool,
@@ -813,9 +758,6 @@ impl AppState {
         let created = matches!(ev, ToolEvent::Create(_));
         self.apply_tool_event(ev);
         if was_line {
-            // Typed points are exact, not snapped: the start of the segment
-            // may still have come from a snap, but this end did not. The
-            // typed end is authoritative, so axis inference must not move it.
             self.after_line_point(created, None, true);
             self.interaction.line_snap_prev = None;
         } else if was_arc && created {
@@ -823,12 +765,6 @@ impl AppState {
         }
     }
 
-    /// Constraint inference bookkeeping after the Line tool consumed a
-    /// point. On a finished segment, infers endpoint-snap coincidence,
-    /// welds it to the previous segment of the chain (and to the chain's
-    /// first segment when it closes the loop), and infers horizontal/
-    /// vertical alignment. `end_pinned` marks an end the user placed
-    /// exactly (snap or typed) that axis inference must not move.
     fn after_line_point(&mut self, created: bool, end_snap: Option<&SnapPoint>, end_pinned: bool) {
         if !created {
             self.interaction.line_chain_prev = None;
@@ -857,8 +793,6 @@ impl AppState {
         self.interaction.line_chain_prev = Some(new_id);
     }
 
-    /// Welds consecutive Line-chain segments: the new segment starts exactly
-    /// where the previous one ended.
     fn weld_chain_segments(&mut self, prev: EntityId, new_id: EntityId) {
         if !self.infer_constraints {
             return;
@@ -883,10 +817,6 @@ impl AppState {
             ));
     }
 
-    /// Welds the closing segment of a Line chain: when the new segment ends
-    /// exactly back on the chain's first point (endpoint snap and typed
-    /// closes are exact), the loop corner is recorded coincident. Returns
-    /// whether the chain closed, which pins the end for axis inference.
     fn weld_chain_closure(&mut self, new_id: EntityId) -> bool {
         if !self.infer_constraints {
             return false;
@@ -923,15 +853,6 @@ impl AppState {
         true
     }
 
-    /// Welds a freshly created batch of chained segments (a Rectangle,
-    /// Polygon, or Polyline outline emitted as individual lines): each
-    /// consecutive pair sharing an endpoint gets a coincident weld, plus the
-    /// closing weld when the chain loops back to its start. The welds are
-    /// unconditional — the user drew one connected shape. With
-    /// auto-constrain on, the tool's implied shape constraints are added
-    /// too: Horizontal/Vertical on a Rectangle's axis-aligned sides, and
-    /// EqualLength across a Polygon's sides (so dimensioning one side of a
-    /// hexagon drives all six).
     fn weld_created_loop(&mut self, ids: &[EntityId]) {
         self.weld_adjacent_segments(ids);
         if !self.infer_constraints {
@@ -939,8 +860,6 @@ impl AppState {
         }
         match self.tool {
             Tool::Rectangle { .. } => {
-                // Sides are axis-aligned by construction; still check each
-                // one so a degenerate batch can't record a false H/V.
                 for &id in ids {
                     let Some([p0, p1]) = self
                         .document
@@ -973,11 +892,6 @@ impl AppState {
         }
     }
 
-    /// Records the constraints a fillet/chamfer corner implies: the new
-    /// connector is welded coincident to each trimmed source at the shared
-    /// endpoints, and a fillet arc is additionally tangent to its line
-    /// sources. This is what lets a filleted corner stay smooth when a leg
-    /// is dragged later.
     pub(crate) fn record_corner_constraints(
         &mut self,
         sources: [EntityId; 2],
@@ -1030,18 +944,6 @@ impl AppState {
         }
     }
 
-    /// Infers a tangent constraint when a drawn line leaves an arc's
-    /// endpoint along the tangent direction — the classic "continue the
-    /// curve smoothly" stroke. A near miss (within 3 px of the tangent ray
-    /// over the segment, capped at ~3°) is rotated exactly tangent about
-    /// the end sitting on the arc — but a pinned far end (snap, typed,
-    /// chain weld, or chain close) is authoritative, so only exact tangency
-    /// is recorded there. The coincident weld to the arc endpoint is
-    /// inference's job too, but it is already recorded by
-    /// `infer_line_coincidence` before this runs (and the attached end
-    /// never moves here, so the weld stays valid). Returns whether a
-    /// tangency was recorded, which pins the segment against axis
-    /// inference rotating it afterwards.
     fn infer_arc_tangency(
         &mut self,
         new_id: EntityId,
@@ -1080,8 +982,6 @@ impl AppState {
                 arc.end_angle
             };
             let arc_id = sp.entity;
-            // Reread endpoints each pass: the other end may have attached
-            // to a different arc and rotated the line already.
             let Some((p0, p1)) = self
                 .document
                 .get(new_id)
@@ -1130,8 +1030,6 @@ impl AppState {
                         Point2d::from_f64(q1.0, q1.1),
                     )));
                 }
-                // The chain continues from wherever the tool last clicked;
-                // keep it attached to the rotated end.
                 if attached_end == 0
                     && let Tool::Line { last: Some(lp) } = &mut self.tool
                 {
@@ -1154,9 +1052,6 @@ impl AppState {
         recorded
     }
 
-    /// Constraint inference after an arc-draw tool created an arc: the mirror
-    /// of `infer_arc_tangency` (which handles a line drawn off an arc). See
-    /// [`AppState::infer_arc_onset_tangency`].
     fn after_arc_create(&mut self) {
         let Some(&new_id) = self.document.order.last() else {
             return;
@@ -1169,14 +1064,6 @@ impl AppState {
         }
     }
 
-    /// Infers a tangent constraint (plus the coincident weld that keeps them
-    /// attached) when a freshly drawn arc starts or ends exactly on a line's
-    /// endpoint and leaves it nearly tangent — the mirror of
-    /// `infer_arc_tangency`, which handles a line drawn off an arc. Here the
-    /// line is authoritative (it was there first): the arc is pulled exactly
-    /// tangent about the shared endpoint by the solver while the line stays
-    /// put. Only the first shared end is inferred (a fresh arc off one line);
-    /// arc↔arc onset tangency is not covered.
     fn infer_arc_onset_tangency(&mut self, arc_id: EntityId) {
         if !self.infer_constraints {
             return;
@@ -1193,10 +1080,6 @@ impl AppState {
             (0u8, arc.start_point(), arc.start_angle),
             (1u8, arc.end_point(), arc.end_angle),
         ];
-        // Scan (immutably) for the first line whose endpoint coincides with an
-        // arc end and lies nearly along the arc's tangent line there. The
-        // tangent line at angle theta is (-sin, cos), perpendicular to the
-        // radius — the same ray the line-off-arc case levels onto.
         let mut hit: Option<(EntityId, u8, u8)> = None;
         'search: for (arc_end, apos, theta) in ends {
             let t = (-theta.sin(), theta.cos());
@@ -1229,9 +1112,6 @@ impl AppState {
         let Some((line_id, line_end, arc_end)) = hit else {
             return;
         };
-        // Record the weld and tangency, then pull the arc exactly tangent with
-        // the line pinned where it was drawn. A failed solve drops the pair so
-        // the raw arc is left untouched (same policy as the other inferences).
         let prev = self.document.constraints.clone();
         self.document
             .add_constraint(oxidraft_document::SketchConstraint::coincident(
@@ -1254,11 +1134,6 @@ impl AppState {
         }
     }
 
-    /// Infers a horizontal/vertical constraint on a freshly drawn line that
-    /// is exactly or nearly axis-aligned. A near miss (within 3 px of level
-    /// over the segment, capped at ~3°) is snapped level about its start —
-    /// but a pinned end (snap, typed, or chain close) is authoritative, so
-    /// only exact alignment is recorded there.
     fn infer_axis_alignment(&mut self, new_id: EntityId, end_pinned: bool) {
         if !self.infer_constraints {
             return;
@@ -1302,8 +1177,6 @@ impl AppState {
                     Point2d::from_f64(new_p1.0, new_p1.1),
                 )));
             }
-            // The chain continues from wherever the tool last clicked;
-            // keep it attached to the levelled end.
             if let Tool::Line { last: Some(lp) } = &mut self.tool {
                 *lp = Point2d::from_f64(new_p1.0, new_p1.1);
             }
@@ -1319,9 +1192,6 @@ impl AppState {
         }
     }
 
-    /// Records coincident constraints for a just-drawn line whose endpoints
-    /// were placed via Endpoint snaps onto other lines or arcs. This is what
-    /// makes corners drawn with snaps stay attached under later edits.
     fn infer_line_coincidence(
         &mut self,
         new_id: EntityId,
@@ -1368,9 +1238,6 @@ impl AppState {
         }
     }
 
-    /// Commits the pending polygon (center + radius both picked, popup
-    /// showing) with whatever side count is currently set. No-op outside
-    /// that pending state.
     pub fn confirm_pending_polygon(&mut self) {
         if !matches!(
             self.tool,
@@ -1386,9 +1253,6 @@ impl AppState {
         self.apply_tool_event(ev);
     }
 
-    /// Drops the pending polygon pick (both clicks made, popup showing)
-    /// without committing, returning to "click the center point" — the last
-    /// side count used is kept for next time.
     pub fn cancel_pending_polygon(&mut self) {
         if let Tool::Polygon { sides, .. } = self.tool.clone() {
             self.tool = Tool::Polygon {
@@ -1413,10 +1277,6 @@ impl AppState {
         close
     }
 
-    /// True when `t` is non-finite: logs the reason and returns to Select
-    /// so the caller can bail before snapshotting. The geometry itself is
-    /// already protected by `Entity::transform`'s floor; this is the UX
-    /// layer (don't record a no-op undo step, tell the user why).
     fn reject_nonfinite_transform(&mut self, t: &Transform2d) -> bool {
         if t.is_finite() {
             return false;
@@ -1431,9 +1291,6 @@ impl AppState {
         match ev {
             ToolEvent::Pending => {}
             ToolEvent::PlotWindow(a, b) => {
-                // Doesn't touch the document — no history snapshot. Validate
-                // through the same predicate the exporter uses, rather than
-                // re-deriving the sort/finite/area check here.
                 let win = oxidraft_io::PlotWindow {
                     x0: a.x,
                     y0: a.y,
@@ -1449,8 +1306,6 @@ impl AppState {
                         .command_log
                         .push("Plot window has no area — pick two different corners".into()),
                 }
-                // Reopen the dialog in Window mode directly — no cross-frame
-                // flag to translate.
                 self.plot_dialog_open = true;
                 self.plot_window_mode = true;
             }
@@ -1462,12 +1317,6 @@ impl AppState {
                     self.apply_new_entity_defaults(id);
                     created.push(id);
                 }
-                // A shape tool that emits its outline as a batch of lines
-                // (Rectangle, Polygon, Polyline) drew one connected figure:
-                // weld its corners so it behaves as joined geometry. The
-                // welds are structural facts of the drawn shape — recorded
-                // regardless of the auto-constrain toggle, which only gates
-                // the *inferred* extras added inside `weld_created_loop`.
                 if created.len() >= 2
                     && matches!(
                         self.tool,
@@ -1478,10 +1327,6 @@ impl AppState {
                 }
             }
             ToolEvent::Transform { ids, t } => {
-                // A degenerate gesture (mirror across a single point, NaN
-                // cursor) yields a non-finite transform: skip the wasted
-                // history snapshot and tell the user, rather than record a
-                // no-op step. (Entity::transform floors the geometry.)
                 if self.reject_nonfinite_transform(&t) {
                     return;
                 }
@@ -1504,7 +1349,6 @@ impl AppState {
                 self.tool = Tool::Select;
             }
             ToolEvent::CopyOf { ids, t } => {
-                // Same contract as Transform above.
                 if self.reject_nonfinite_transform(&t) {
                     return;
                 }
@@ -1537,7 +1381,6 @@ impl AppState {
 
     pub fn run_command(&mut self, text: &str) {
         let trimmed = text.trim();
-
         if let Tool::Text {
             anchor: Some(p),
             height,
@@ -1557,7 +1400,6 @@ impl AppState {
             self.command_log.push(trimmed.to_string());
             return;
         }
-
         if matches!(self.tool, Tool::Polyline { .. } | Tool::Spline { .. }) {
             if trimmed.is_empty() {
                 let ev = self.tool.commit();
@@ -1574,7 +1416,6 @@ impl AppState {
                 return;
             }
         }
-
         if let Tool::Polygon { center: None, .. } = self.tool
             && let Ok(n) = trimmed.parse::<usize>()
             && n >= 3
@@ -1587,7 +1428,6 @@ impl AppState {
             self.command_log.push(trimmed.to_string());
             return;
         }
-
         if let Ok(v) = trimmed.parse::<f64>()
             && v > 0.0
         {
@@ -1642,7 +1482,6 @@ impl AppState {
                 _ => {}
             }
         }
-
         if let Ok(dist) = trimmed.parse::<f64>()
             && let Some(ref_pt) = self.tool.reference_point()
         {
@@ -1664,7 +1503,6 @@ impl AppState {
             self.command_log.push(trimmed.to_string());
             return;
         }
-
         if let Some(coord) = parse_coordinate(trimmed) {
             let (rx, ry) = self
                 .tool
@@ -1688,7 +1526,6 @@ impl AppState {
             self.command_log.push(trimmed.to_string());
             return;
         }
-
         let cmd = parse_command(text);
         self.command_log.push(text.trim().to_string());
         if !matches!(cmd, Command::Cancel | Command::Unknown(_)) {
@@ -1802,10 +1639,6 @@ impl AppState {
             .into_iter()
             .filter(|&id| id != self.origin_id)
             .collect();
-        // Explode one source at a time so each polycurve's own segments can
-        // be welded as a group: with auto-constrain on, EXPLODE is the
-        // migration path that turns an existing polyline/hexagon into
-        // constraint-ready lines without letting the shape fall apart.
         let mut new_ids = Vec::new();
         for &id in &ids {
             let group = edit::explode(&mut self.document, &[id]);
@@ -1821,9 +1654,6 @@ impl AppState {
         self.selection = survived.into_iter().chain(new_ids).collect();
     }
 
-    /// Coincident-welds consecutive segments of one exploded polycurve where
-    /// their endpoints actually touch, closing the loop when it loops.
-    /// Handles lines and partial arcs alike (`segment_endpoints`).
     fn weld_adjacent_segments(&mut self, ids: &[EntityId]) {
         let ends: Vec<Option<[(f64, f64); 2]>> = ids
             .iter()
@@ -1918,13 +1748,7 @@ impl AppState {
         true
     }
 
-    /// Applies and records a geometric constraint on the selected lines.
-    /// Solving happens on a scratch copy so a failed solve leaves the
-    /// document (and the undo stack) untouched.
     pub fn constrain_selection(&mut self, kind: oxidraft_cad::ConstraintKind) {
-        // Coincident without two selected lines switches to the pick-based
-        // WELD tool: click any two points — endpoint, midpoint, center, or
-        // the origin — instead of pre-selecting geometry.
         if kind == oxidraft_cad::ConstraintKind::Coincident {
             let lines = self
                 .selection
@@ -1954,11 +1778,6 @@ impl AppState {
         }
     }
 
-    /// Welds two picked anchors coincident — an endpoint, a line midpoint,
-    /// an arc/circle center, or a point entity like the origin — re-solving
-    /// so they actually meet. Backs the pick-based WELD tool; solving
-    /// happens on a scratch copy so a failed weld leaves the document
-    /// untouched.
     pub fn weld_points(&mut self, a: (EntityId, u8), b: (EntityId, u8)) {
         let mut doc = self.document.clone();
         match oxidraft_cad::constrain_coincident_points(&mut doc, a, b) {
@@ -1971,9 +1790,6 @@ impl AppState {
         }
     }
 
-    /// Applies and records a driving radius on the selected circles/arcs;
-    /// `None` locks the current radius. Solving happens on a scratch copy
-    /// so a failed solve leaves the document untouched.
     pub fn constrain_radius_selection(&mut self, value: Option<f64>) {
         let mut doc = self.document.clone();
         match oxidraft_cad::constrain_radius(&mut doc, &self.selection, value) {
@@ -1986,9 +1802,6 @@ impl AppState {
         }
     }
 
-    /// Applies and records a driving length on the selected lines; `None`
-    /// locks the current length. Solving happens on a scratch copy so a
-    /// failed solve leaves the document untouched.
     pub fn constrain_distance_selection(&mut self, value: Option<f64>) {
         let mut doc = self.document.clone();
         match oxidraft_cad::constrain_distance(&mut doc, &self.selection, value) {
@@ -2001,9 +1814,6 @@ impl AppState {
         }
     }
 
-    /// Applies and records a driving angle between the two selected lines;
-    /// `None` locks the current angle. Solving happens on a scratch copy so
-    /// a failed solve leaves the document untouched.
     pub fn constrain_angle_selection(&mut self, value: Option<f64>) {
         let mut doc = self.document.clone();
         match oxidraft_cad::constrain_angle(&mut doc, &self.selection, value) {
@@ -2016,12 +1826,6 @@ impl AppState {
         }
     }
 
-    /// Retargets an existing driving dimension (length, radius, or angle) to
-    /// `value`, re-solving its constraint component on a scratch copy so a
-    /// failed solve leaves the document untouched. `value` is in the
-    /// constraint's own unit — world length for length/radius, degrees for
-    /// angle. Non-driving kinds are ignored. Backs the inline dimension
-    /// editor opened by clicking a dimension badge.
     pub fn set_constraint_value(&mut self, target: SketchConstraint, value: f64) {
         let mut doc = self.document.clone();
         let res = match target.kind {
@@ -2053,7 +1857,6 @@ impl AppState {
         }
     }
 
-    /// Pins the selected geometry in place with a driving Fix constraint.
     pub fn fix_selection(&mut self) {
         let sel: Vec<EntityId> = self
             .selection
@@ -2072,12 +1875,6 @@ impl AppState {
         }
     }
 
-    /// Smart-dimension entry point: adds a driving dimension to the picked
-    /// geometry — a length on a line, a radius on a circle/arc, or (with a
-    /// second line) an angle — then queues its inline value editor. `b` is
-    /// the optional second line for an angle. `place` is where the user
-    /// dropped the annotation (world coordinates); `None` leaves it to the
-    /// automatic layout. Returns whether a constraint was added.
     pub fn smart_dimension(
         &mut self,
         a: EntityId,
@@ -2086,9 +1883,6 @@ impl AppState {
     ) -> bool {
         let mut doc = self.document.clone();
         let (res, kind): (Result<String, String>, ConstraintKind) = match b {
-            // Two parallel lines mean the width *between* them — the angle
-            // between parallels is a meaningless 180°. Crossing lines mean
-            // the angle, exactly like the big CAD sketchers.
             Some(b) if lines_parallel(&self.document, a, b) => (
                 oxidraft_cad::constrain_line_distance(&mut doc, &[a, b], None),
                 ConstraintKind::LineDistance,
@@ -2108,8 +1902,6 @@ impl AppState {
         };
         match res {
             Ok(msg) => {
-                // Pin the annotation where the user dropped it before the
-                // document swap, so undo/redo carry the placement too.
                 if place.is_some()
                     && let Some(c) = doc
                         .constraints
@@ -2122,8 +1914,6 @@ impl AppState {
                 self.history.snapshot(&self.document);
                 self.document = doc;
                 self.command_log.push(msg);
-                // Surface the new dimension and open its editor so the user
-                // can type the value straight away.
                 self.show_constraints = true;
                 self.pending_dim_edit = self
                     .document
@@ -2141,8 +1931,6 @@ impl AppState {
         }
     }
 
-    /// Removes one specific constraint (by exact match), undoably. Backs the
-    /// ✕ button in the inline dimension editor.
     pub fn remove_constraint(&mut self, target: SketchConstraint) {
         if self.document.constraints.contains(&target) {
             self.history.snapshot(&self.document);
@@ -2152,8 +1940,6 @@ impl AppState {
         }
     }
 
-    /// Places n−1 division points at equal arc-length spacing on every
-    /// selected curve (DIVIDE).
     pub fn divide_selection(&mut self, n: Option<u32>) {
         let Some(n) = n else {
             self.command_log
@@ -2167,8 +1953,6 @@ impl AppState {
         );
     }
 
-    /// Places points every `interval` of arc length on every selected
-    /// curve (MEASURE).
     pub fn measure_selection(&mut self, interval: Option<f64>) {
         let Some(interval) = interval else {
             self.command_log
@@ -2182,10 +1966,6 @@ impl AppState {
         );
     }
 
-    /// Shared body for DIVIDE/MEASURE: run `per_curve` over each selected
-    /// curve as one undo step, discarding the snapshot when it places
-    /// nothing. `empty_msg` is logged for an empty selection, `zero_msg`
-    /// when the operation places no points.
     fn place_points_on_selection(
         &mut self,
         empty_msg: &str,
@@ -2214,8 +1994,6 @@ impl AppState {
         }
     }
 
-    /// Drops every recorded constraint that references a selected entity;
-    /// the geometry stays exactly where it is.
     pub fn unconstrain_selection(&mut self) {
         if self.selection.is_empty() {
             self.command_log
@@ -2357,9 +2135,11 @@ impl AppState {
         size: f64,
     ) {
         let size = size.max(0.1);
-        let changed = matches!(self.document.get(id).map(|e| &e.kind),
-            Some(EntityKind::Text { content: c, font: f, height: h, .. })
-                if *c != content || *f != font || (*h - size).abs() > 1e-9);
+        let changed = matches!(
+            self.document.get(id).map(| e | & e.kind), Some(EntityKind::Text { content :
+            c, font : f, height : h, .. }) if * c != content || * f != font || (* h -
+            size).abs() > 1e-9
+        );
         if !changed {
             return;
         }
@@ -2425,7 +2205,6 @@ impl AppState {
             if curves.is_empty() {
                 continue;
             }
-
             for c in curves {
                 let cid = self.document.add_on_layer(EntityKind::Curve(c), layer);
                 if let Some(e) = self.document.get_mut(cid) {
@@ -2450,8 +2229,10 @@ impl AppState {
     }
 
     pub fn adjust_nurbs_weight(&mut self, id: EntityId, index: usize, factor: f64) -> bool {
-        let ok = matches!(self.document.get(id).map(|e| &e.kind),
-            Some(EntityKind::Curve(Curve::Nurbs(nc))) if index < nc.weights.len());
+        let ok = matches!(
+            self.document.get(id).map(| e | & e.kind),
+            Some(EntityKind::Curve(Curve::Nurbs(nc))) if index < nc.weights.len()
+        );
         if !ok {
             return false;
         }
@@ -2524,8 +2305,6 @@ impl AppState {
             .and_then(|e| e.to_str())
             .unwrap_or("")
             .to_ascii_lowercase();
-        // Every format saves atomically: a crash or full disk mid-write must
-        // never truncate the existing good file on disk.
         let result = match ext.as_str() {
             "dxf" => {
                 oxidraft_io::write_atomic(&path, oxidraft_io::export_dxf(&save_doc).as_bytes())
@@ -2544,7 +2323,6 @@ impl AppState {
             Ok(()) => {
                 self.current_file_path = Some(path);
                 self.saved_revision = self.history.current_revision();
-                // The work is on disk now; the crash-recovery copy is stale.
                 crate::autosave::discard_recovery();
                 true
             }
@@ -2559,10 +2337,6 @@ impl AppState {
         self.history.current_revision() != self.saved_revision
     }
 
-    /// Loads the crash-recovery copy as an *untitled, unsaved* document: no
-    /// file path (so a save never targets the recovery file itself) and a
-    /// saved-depth sentinel that keeps the document dirty until the user
-    /// saves it somewhere real.
     pub fn restore_recovery(&mut self, path: &std::path::Path) -> bool {
         match oxidraft_io::load_native(path) {
             Ok(mut doc) => {
@@ -2629,7 +2403,6 @@ impl AppState {
         if self.selection.is_empty() {
             return;
         }
-
         let mut bbox: Option<oxidraft_geometry::BoundingBox> = None;
         for &id in &self.selection {
             if let Some(e) = self.document.get(id)
@@ -2642,7 +2415,6 @@ impl AppState {
                 });
             }
         }
-
         if let Some(bbox_start) = bbox {
             let originals: Vec<(EntityId, EntityKind)> = self
                 .selection
@@ -2668,29 +2440,21 @@ impl AppState {
             return;
         };
         let ids: Vec<_> = self.selection.clone();
-        // Last solvable state for the moved set — this frame rebuilds from the
-        // drag originals, so `prev` is the geometry we hold if the transform
-        // can't satisfy the constraints (stick at the boundary, don't tear
-        // welded neighbours apart).
         let prev: Vec<(EntityId, EntityKind)> = ids
             .iter()
             .filter_map(|&id| self.document.get(id).map(|e| (id, e.kind.clone())))
             .collect();
-
         for (id, kind) in &drag.originals {
             if let Some(e) = self.document.get_mut(*id) {
                 e.kind = kind.clone();
             }
         }
-
         let (cx, cy) = cursor;
         let (sx, sy) = drag.cursor_start;
         let (dx, dy) = (cx - sx, cy - sy);
-
         let bbox = drag.bbox_start;
         let (bx0, by0) = (bbox.min.x, bbox.min.y);
         let (bx1, by1) = (bbox.max.x, bbox.max.y);
-
         match drag.handle {
             BboxHandle::Body => {
                 edit::move_by(&mut self.document, &ids, dx, dy);
@@ -2715,7 +2479,6 @@ impl AppState {
                 let angle_start = (sy - center.y).atan2(sx - center.x);
                 let angle_current = (cy - center.y).atan2(cx - center.x);
                 let angle = angle_current - angle_start;
-
                 if angle.abs() > 1e-9 {
                     edit::rotate(&mut self.document, &ids, &center, angle);
                 }
@@ -2743,12 +2506,10 @@ impl AppState {
         let h = (cy - oy).abs();
         let orig_w = (bbox.max.x - bbox.min.x).abs();
         let orig_h = (bbox.max.y - bbox.min.y).abs();
-
         if orig_w > 1e-9 && orig_h > 1e-9 {
             let sx = w / orig_w;
             let sy = h / orig_h;
             let s = sx.max(sy);
-
             if (s - 1.0).abs() > 1e-6 {
                 let base = Point2d::from_f64(ox, oy);
                 edit::scale(&mut self.document, ids, &base, s);
@@ -2774,10 +2535,6 @@ impl AppState {
         let to = Point2d::from_f64(cursor.0, cursor.1);
         let edited = apply_grip(&drag.start_kind, &drag.grip, to);
         let id = drag.entity_id;
-        // Snapshot the last solvable state. If this cursor position can't
-        // satisfy the constraints, roll back to it so welded/constrained
-        // geometry never visibly separates — the grip just stops at the
-        // boundary instead of dragging a broken edit past the solver.
         let prev_kind = self.document.get(id).map(|e| e.kind.clone());
         let prev_constraints = self.document.constraints.clone();
         if let Some(e) = self.document.get_mut(id) {
@@ -2794,11 +2551,6 @@ impl AppState {
         }
     }
 
-    /// Re-satisfies persistent sketch constraints after `id` was edited.
-    /// During a grip drag the dragged endpoint is pinned so the cursor wins;
-    /// constrained partners follow. A failed solve leaves the raw edit.
-    /// Returns whether the solve converged; `false` means the edit left the
-    /// constraints unsatisfiable, and the caller should roll back.
     fn resolve_constraints_after(&mut self, id: EntityId) -> bool {
         let role = self.interaction.grip_drag.as_ref().map(|d| d.grip.role);
         self.retarget_driven_dimension(id, role);
@@ -2809,11 +2561,6 @@ impl AppState {
         oxidraft_cad::resolve_after_edit(&mut self.document, id, pinned)
     }
 
-    /// A grip that redefines a driven dimension — an arc's radius grip, a
-    /// line's endpoint — retargets that dimension to the value just drawn,
-    /// so the drag wins and the badge follows instead of the solver fighting
-    /// the old value. Only an existing constraint is retargeted; dragging a
-    /// grip never creates one.
     fn retarget_driven_dimension(&mut self, id: EntityId, role: Option<oxidraft_cad::GripRole>) {
         let retarget = match (role, self.document.get(id).and_then(|e| e.as_curve())) {
             (Some(oxidraft_cad::GripRole::Radius), Some(Curve::Arc(a))) => {
@@ -2922,12 +2669,10 @@ impl AppState {
     }
 
     pub fn cancel_grip_drag(&mut self) {
-        if self.interaction.grip_drag.take().is_some() {
-            // Constraint re-solve may have moved partner entities during the
-            // drag, so restore the whole pre-drag document.
-            if let Some(prev) = self.history.rollback() {
-                self.document = prev;
-            }
+        if self.interaction.grip_drag.take().is_some()
+            && let Some(prev) = self.history.rollback()
+        {
+            self.document = prev;
         }
     }
 
@@ -2996,10 +2741,6 @@ mod tests {
         EntityKind::Curve(Curve::Line(LineSeg::from_endpoints(pt(x0, y0), pt(x1, y1))))
     }
 
-    /// Every fresh document carries one `Fixed` constraint pinning the
-    /// origin (see `add_origin_point`) — filtered out here so constraint
-    /// assertions written before that existed still read as "the
-    /// constraints this test's own actions produced."
     fn user_constraints(a: &AppState) -> Vec<oxidraft_document::SketchConstraint> {
         a.document
             .constraints
@@ -3017,9 +2758,6 @@ mod tests {
         a.place_tool_point(pt(10, 0));
         a.place_tool_point(pt(5, 8));
         a.place_tool_point(pt(0, 0));
-
-        // The closed chain commits as three individual welded lines, not
-        // one PolyCurve — that's what lets each segment take constraints.
         let lines: Vec<_> = a
             .document
             .iter()
@@ -3050,7 +2788,6 @@ mod tests {
         a.tool = Tool::Rectangle { first: None };
         a.place_tool_point(pt(0, 0));
         a.place_tool_point(pt(8, 5));
-
         let lines = a
             .document
             .iter()
@@ -3080,7 +2817,6 @@ mod tests {
         a.tool = Tool::Rectangle { first: None };
         a.place_tool_point(pt(0, 0));
         a.place_tool_point(pt(8, 5));
-
         let count = |k: oxidraft_document::ConstraintKind| {
             a.document
                 .constraints
@@ -3114,7 +2850,6 @@ mod tests {
         a.place_tool_point(pt(0, 0));
         a.place_tool_point(pt(10, 0));
         a.confirm_pending_polygon();
-
         let sides: Vec<EntityId> = a
             .document
             .iter()
@@ -3135,10 +2870,6 @@ mod tests {
             5,
             "every side equal to the first"
         );
-
-        // The scenario that motivated all of this: smart-dimension one side
-        // of the hexagon, type a value, and the equal-length chain resizes
-        // every side.
         assert!(a.smart_dimension(sides[0], None, None));
         let dim = a
             .document
@@ -3173,7 +2904,6 @@ mod tests {
         let id = a.add_entity(EntityKind::Curve(Curve::Poly(Box::new(tri))));
         a.selection = vec![id];
         a.explode_selection();
-
         assert!(a.document.get(id).is_none(), "the polycurve is gone");
         let lines = a
             .document
@@ -3269,13 +2999,11 @@ mod tests {
         let id = a.document.add(line(0, 0, 10, 0));
         a.selection = vec![id];
         assert_eq!(a.clipboard_copy(), 1);
-
         a.cursor_world = (50.0, 20.0);
         let before = a.document.len();
         a.clipboard_paste();
         assert_eq!(a.document.len(), before + 1);
         assert_eq!(a.selection.len(), 1, "pasted entity becomes the selection");
-
         let pasted = a.document.get(a.selection[0]).unwrap();
         if let EntityKind::Curve(Curve::Line(l)) = &pasted.kind {
             assert!((l.p0.x - 45.0).abs() < 1e-9 && (l.p0.y - 20.0).abs() < 1e-9);
@@ -3370,15 +3098,14 @@ mod tests {
                 Point2d::from_f64(6.0, 5.0),
             ))));
         a.tool = crate::tools::Tool::Weld { first: None };
-        // First pick: the origin point entity at (0,0).
         let (ox, oy) = a.view.world_to_screen(0.0, 0.0);
         a.canvas_click(ox, oy);
         assert!(
-            matches!(a.tool, crate::tools::Tool::Weld { first: Some((id, 0, _)) } if id == a.origin_id),
+            matches!(a.tool, crate ::tools::Tool::Weld { first : Some((id, 0, _)) } if id
+            == a.origin_id),
             "origin picked as the first anchor: {:?}",
             a.tool
         );
-        // Second pick: the line's midpoint at (4,4).
         let (mx, my) = a.view.world_to_screen(4.0, 4.0);
         a.canvas_click(mx, my);
         let c = a
@@ -3427,15 +3154,18 @@ mod tests {
         let (sx, sy) = a.view.world_to_screen(5.0, 0.0);
         a.canvas_click(sx, sy);
         assert!(
-            matches!(a.tool, crate::tools::Tool::DimRadial { center: Some(_), radius, .. } if (radius - 5.0).abs() < 1e-9),
+            matches!(a.tool, crate ::tools::Tool::DimRadial { center : Some(_), radius,
+            .. } if (radius - 5.0).abs() < 1e-9),
             "circle pick set centre+radius"
         );
         let (lx, ly) = a.view.world_to_screen(0.0, 6.0);
         a.canvas_click(lx, ly);
-        let made = a
-            .document
-            .iter()
-            .any(|e| matches!(&e.kind, EntityKind::RadialDim { center, .. } if *center == Point2d::from_f64(0.0, 0.0)));
+        let made = a.document.iter().any(|e| {
+            matches!(
+                & e.kind, EntityKind::RadialDim { center, .. } if * center ==
+                Point2d::from_f64(0.0, 0.0)
+            )
+        });
         assert!(made, "radial dimension created on the circle");
         let _ = circle;
     }
@@ -3499,8 +3229,6 @@ mod tests {
 
     #[test]
     fn save_open_dispatches_by_extension() {
-        // save_file_to retires the process-wide recovery file on success;
-        // serialize with the autosave test so neither deletes the other's.
         let _guard = crate::autosave::RECOVERY_TEST_LOCK
             .lock()
             .unwrap_or_else(|e| e.into_inner());
@@ -3515,11 +3243,9 @@ mod tests {
                 oxidraft_geometry::CircularArc::new(pt(3, 4), 5.0, 0.0, std::f64::consts::TAU),
             )));
             let want = a.document.iter().filter(|e| e.id != a.origin_id).count();
-
             let path = std::env::temp_dir()
                 .join(format!("o2d_io_test_{}_{ext}.{ext}", std::process::id()));
             assert!(a.save_file_to(path.clone()), "save .{ext} should succeed");
-
             let mut b = app();
             b.open_file(path.clone());
             let got = b.document.iter().filter(|e| e.id != b.origin_id).count();
@@ -3533,15 +3259,11 @@ mod tests {
 
     #[test]
     fn opening_a_legacy_e2d_file_still_works() {
-        // Files saved before the rename to oxiDRAFT (extension .e2d, magic
-        // "E2D") must still open through the real File > Open path.
         let path = std::env::temp_dir().join(format!("o2d_legacy_test_{}.e2d", std::process::id()));
         std::fs::write(&path, "E2D 1\nE LINE 0 bylayer 0;0 4;0 ByLayer bylayer\n").unwrap();
-
         let mut a = app();
         a.open_file(path.clone());
         let _ = std::fs::remove_file(path);
-
         assert!(
             a.command_log.is_empty(),
             "opening a legacy .e2d file should not log an error: {:?}",
@@ -3673,15 +3395,11 @@ mod tests {
         ))));
         a.snap.enabled = vec![oxidraft_cad::SnapKind::Perpendicular];
         a.snap_on = true;
-
         a.run_command("LINE");
-
         let (s1x, s1y) = a.view.world_to_screen(3.0, 5.0);
         a.canvas_click(s1x, s1y);
-
         let (s2x, s2y) = a.view.world_to_screen(3.1, 0.1);
         a.pointer_moved(s2x, s2y);
-
         assert!(a.active_snap.is_some());
         let sp = a.active_snap.as_ref().unwrap();
         assert_eq!(sp.kind, oxidraft_cad::SnapKind::Perpendicular);
@@ -3695,7 +3413,6 @@ mod tests {
         a.snap_on = false;
         a.grid_snap_on = true;
         a.run_command("LINE");
-
         let g = a.view.grid_spacing();
         let (sx, sy) = a.view.world_to_screen(2.0 * g + g * 0.2, -g - g * 0.1);
         a.pointer_moved(sx, sy);
@@ -3820,8 +3537,6 @@ mod tests {
 
     #[test]
     fn infeasible_grip_drag_holds_the_last_solvable_state() {
-        // Two length locks that can never both hold: any solve stays above
-        // tolerance, so the drag is unsatisfiable at every cursor position.
         let mut a = app();
         a.snap_on = false;
         let id = a.add_entity(EntityKind::Curve(Curve::Line(LineSeg::from_endpoints(
@@ -3861,7 +3576,6 @@ mod tests {
         ))));
         a.selection = vec![id];
         a.constrain_distance_selection(Some(4.0));
-        // Grab the far endpoint and stretch it out along the axis.
         let grip = oxidraft_cad::grips_for(&a.document.get(id).unwrap().kind)[1];
         a.begin_grip_drag(id, grip);
         a.apply_grip_drag((7.0, 0.0));
@@ -3893,7 +3607,6 @@ mod tests {
         ))));
         a.selection = vec![circle];
         a.constrain_radius_selection(Some(2.0));
-        // A full circle's mid grips drive the radius; drag one out to r = 3.
         let grip = oxidraft_cad::grips_for(&a.document.get(circle).unwrap().kind)
             .into_iter()
             .find(|g| g.role == oxidraft_cad::GripRole::Radius)
@@ -3937,8 +3650,6 @@ mod tests {
         let c = welds[0];
         assert_eq!((c.a, c.b), (l1, Some(l2)));
         assert_eq!(c.pts, Some((1, 0)));
-
-        // Drag the shared corner of the first segment; the second follows.
         let grip = oxidraft_cad::grips_for(&a.document.get(l1).unwrap().kind)[1];
         a.begin_grip_drag(l1, grip);
         a.apply_grip_drag((9.0, 1.0));
@@ -3956,7 +3667,6 @@ mod tests {
         a.snap_on = false;
         a.infer_constraints = true;
         a.run_command("LINE");
-        // Typed points are exact; the last one lands back on the chain start.
         for (x, y) in [(0.0, 0.0), (8.0, 0.0), (8.0, 6.0), (0.0, 0.0)] {
             a.place_tool_point(Point2d::from_f64(x, y));
         }
@@ -3991,7 +3701,6 @@ mod tests {
         a.run_command("LINE");
         let (s1x, s1y) = a.view.world_to_screen(0.0, 0.0);
         a.canvas_click(s1x, s1y);
-        // 0.04 world units = 2 px at the default zoom: inside the 3 px slack.
         let (s2x, s2y) = a.view.world_to_screen(8.0, 0.04);
         a.canvas_click(s2x, s2y);
         let id = *a.document.order.last().unwrap();
@@ -4004,7 +3713,6 @@ mod tests {
                 .any(|c| c.kind == oxidraft_document::ConstraintKind::Horizontal && c.a == id),
             "horizontal constraint recorded"
         );
-        // The chain continues from the levelled end, not the raw click.
         match &a.tool {
             Tool::Line { last: Some(p) } => {
                 assert!((p.to_f64().1 - l.p1.y).abs() < 1e-12, "chain follows level")
@@ -4103,10 +3811,6 @@ mod tests {
         assert_eq!((c.a, c.b, c.pts), (base, Some(new_id), Some((1, 0))));
     }
 
-    /// Radius-5 arc about the origin from −45° to +45°. Returns the id,
-    /// the +45° endpoint, and the unit tangent direction there — chosen
-    /// deliberately off-axis so tangent inference can't be confused with
-    /// h/v inference.
     fn quarter_arc(a: &mut AppState) -> (EntityId, (f64, f64), (f64, f64)) {
         let q = std::f64::consts::FRAC_PI_4;
         let arc = oxidraft_geometry::CircularArc::new(pt(0, 0), 5.0, -q, q);
@@ -4126,8 +3830,6 @@ mod tests {
         a.run_command("LINE");
         let (sx, sy) = a.view.world_to_screen(att.0, att.1);
         a.canvas_click(sx, sy);
-        // 6 units out along the tangent, pushed 0.04 (2 px) off the ray:
-        // inside the 3 px slack, so the segment rotates exactly tangent.
         let click = (
             att.0 + 6.0 * t.0 - 0.04 * t.1,
             att.1 + 6.0 * t.1 + 0.04 * t.0,
@@ -4155,7 +3857,6 @@ mod tests {
             }),
             "weld to the arc endpoint recorded"
         );
-        // The chain continues from the rotated end, not the raw click.
         match &a.tool {
             Tool::Line { last: Some(p) } => {
                 assert!(
@@ -4183,8 +3884,6 @@ mod tests {
         a.canvas_click(sx2, sy2);
         let line_id = *a.document.order.last().unwrap();
         a.run_command("");
-
-        // Swing the free end; the arc must follow, staying tangent.
         let grips = oxidraft_cad::grips_for(&a.document.get(line_id).unwrap().kind);
         let grip = *grips
             .iter()
@@ -4196,7 +3895,6 @@ mod tests {
         a.begin_grip_drag(line_id, grip);
         a.apply_grip_drag((-2.0, 6.0));
         a.end_grip_drag();
-
         let l = line_of(&a, line_id);
         let arc = a
             .document
@@ -4282,8 +3980,6 @@ mod tests {
         a.track_on = false;
         let (arc_id, att, t) = quarter_arc(&mut a);
         a.run_command("LINE");
-        // Freehand start near the tangent ray, then end snapped onto the
-        // arc endpoint: the start is the only movable end.
         let start = (
             att.0 + 6.0 * t.0 - 0.04 * t.1,
             att.1 + 6.0 * t.1 + 0.04 * t.0,
@@ -4317,11 +4013,7 @@ mod tests {
         let mut a = app();
         a.snap_on = false;
         a.infer_constraints = true;
-        // Horizontal line ending at the origin; endpoint 0 is the shared corner.
         let line_id = a.add_entity(line(0, 0, -5, 0));
-        // Arc through the origin with its centre nudged just off the y-axis, so
-        // it leaves the origin a hair off horizontal — inside the 3 px slack
-        // but not yet tangent (centre-to-line gap ~1.6e-4 before solving).
         let (cx, cy) = (0.04_f64, 5.0_f64);
         let r = (cx * cx + cy * cy).sqrt();
         let start_angle = (0.0 - cy).atan2(0.0 - cx);
@@ -4329,7 +4021,6 @@ mod tests {
             oxidraft_geometry::CircularArc::new(Point2d::from_f64(cx, cy), r, start_angle, 0.0);
         let arc_id = a.add_entity(EntityKind::Curve(Curve::Arc(arc)));
         a.infer_arc_onset_tangency(arc_id);
-
         assert!(
             a.document.constraints.iter().any(|c| {
                 c.kind == oxidraft_document::ConstraintKind::Tangent
@@ -4369,14 +4060,10 @@ mod tests {
         let mut a = app();
         a.snap_on = false;
         a.infer_constraints = true;
-        // Horizontal line whose endpoint 1 lands on the origin.
         a.run_command("LINE");
         a.place_tool_point(pt(-5, 0));
         a.place_tool_point(pt(0, 0));
         let line_id = *a.document.order.last().unwrap();
-        // Three-point arc off the origin, exactly tangent to the line: all
-        // three points sit on the circle centred at (0, 5), so it leaves the
-        // origin horizontal.
         a.run_command("ARC");
         a.place_tool_point(pt(0, 0));
         a.place_tool_point(Point2d::from_f64(3.5355339, 1.4644661));
@@ -4467,7 +4154,6 @@ mod tests {
         let l2 = a.document.order[2];
         a.run_command("");
         a.selection = vec![l1];
-        // Move l1 by (2, 1) through the modify-tool path.
         let t = oxidraft_geometry::Transform2d::translation(2.0, 1.0);
         a.apply_tool_event(ToolEvent::Transform { ids: vec![l1], t });
         let s1 = line_of(&a, l1);
@@ -4486,23 +4172,19 @@ mod tests {
     fn divide_and_measure_place_points_on_the_selection() {
         let mut a = app();
         a.run_command("LINE");
-        a.canvas_click(400.0, 300.0); // world (0,0)
-        a.canvas_click(650.0, 300.0); // world (5,0) at zoom 50
+        a.canvas_click(400.0, 300.0);
+        a.canvas_click(650.0, 300.0);
         a.run_command("");
         let line_id = *a.document.order.last().unwrap();
         a.selection = vec![line_id];
-
         let before = a.document.len();
         a.run_command("DIVIDE 5");
         assert_eq!(a.document.len(), before + 4, "4 division points");
         a.execute(Command::Undo);
         assert_eq!(a.document.len(), before, "divide is one undo step");
-
         a.selection = vec![line_id];
         a.run_command("MEASURE 2");
         assert_eq!(a.document.len(), before + 2, "points at 2 and 4");
-
-        // Bad forms log usage instead of touching the document or history.
         let depth = a.history.undo_depth();
         a.run_command("DIVIDE 1");
         a.run_command("MEASURE 0");
@@ -4521,7 +4203,6 @@ mod tests {
         a.snap_on = false;
         a.grid_snap_on = false;
         a.tool = Tool::PlotWindow { first: None };
-        // Screen (300,350) is world (−2,−1); (500,250) is world (2,1).
         a.canvas_click(300.0, 350.0);
         a.canvas_click(500.0, 250.0);
         let (x0, y0, x1, y1) = a.plot_window.expect("window stored");
@@ -4537,8 +4218,6 @@ mod tests {
             "the dialog reopens in Window mode after the pick"
         );
         assert!(matches!(a.tool, Tool::Select));
-
-        // A zero-area pick declines the window but still reopens.
         a.plot_dialog_open = false;
         a.plot_window = None;
         a.tool = Tool::PlotWindow { first: None };
@@ -4553,16 +4232,13 @@ mod tests {
         let mut a = app();
         a.snap_on = false;
         a.ortho_on = true;
-
         a.run_command("LINE");
         let (s1x, s1y) = a.view.world_to_screen(0.0, 0.0);
         a.canvas_click(s1x, s1y);
-
         let (s2x, s2y) = a.view.world_to_screen(8.0, 3.0);
         a.pointer_moved(s2x, s2y);
         assert!((a.cursor_world.0 - 8.0).abs() < 1e-4);
         assert!(a.cursor_world.1.abs() < 1e-4);
-
         let (s3x, s3y) = a.view.world_to_screen(2.0, 9.0);
         a.pointer_moved(s3x, s3y);
         assert!(a.cursor_world.0.abs() < 1e-4);
@@ -4578,14 +4254,11 @@ mod tests {
         ))));
         a.snap.enabled = vec![oxidraft_cad::SnapKind::Perpendicular];
         a.snap_on = true;
-
         a.run_command("LINE");
         let (s1x, s1y) = a.view.world_to_screen(5.0, 5.0);
         a.canvas_click(s1x, s1y);
-
         let (s2x, s2y) = a.view.world_to_screen(5.3, 0.1);
         a.pointer_moved(s2x, s2y);
-
         assert!(a.active_snap.is_some());
         let sp = a.active_snap.as_ref().unwrap();
         assert_eq!(sp.kind, oxidraft_cad::SnapKind::Perpendicular);
@@ -4598,15 +4271,11 @@ mod tests {
         let mut a = app();
         a.snap_on = false;
         a.run_command("LINE");
-
         let (s1x, s1y) = a.view.world_to_screen(0.0, 0.0);
         a.canvas_click(s1x, s1y);
-
         let (s2x, s2y) = a.view.world_to_screen(3.0, 4.0);
         a.pointer_moved(s2x, s2y);
-
         a.run_command("10.0");
-
         assert_eq!(a.document.len(), 2);
         let first = a.document.iter().find(|e| e.id != a.origin_id).unwrap();
         if let EntityKind::Curve(Curve::Line(l)) = &first.kind {
@@ -4626,7 +4295,6 @@ mod tests {
         a.run_command("LINE");
         a.run_command("0,0");
         a.run_command("@10,0");
-
         assert_eq!(a.document.len(), 2);
         let line = a.document.iter().find(|e| e.id != a.origin_id).unwrap();
         if let EntityKind::Curve(Curve::Line(l)) = &line.kind {
@@ -4644,7 +4312,6 @@ mod tests {
         a.run_command("LINE");
         a.run_command("0,0");
         a.run_command("@5<90");
-
         let line = a.document.iter().find(|e| e.id != a.origin_id).unwrap();
         if let EntityKind::Curve(Curve::Line(l)) = &line.kind {
             assert!((l.p1.x).abs() < 1e-6, "x should be ~0, got {}", l.p1.x);
@@ -4682,7 +4349,6 @@ mod tests {
                 sides: None
             }
         ));
-
         a.run_command("6");
         assert!(matches!(
             a.tool,
@@ -4692,15 +4358,10 @@ mod tests {
                 sides: Some(6)
             }
         ));
-
         let (s1x, s1y) = a.view.world_to_screen(0.0, 0.0);
         a.canvas_click(s1x, s1y);
-
         let (s2x, s2y) = a.view.world_to_screen(10.0, 0.0);
         a.canvas_click(s2x, s2y);
-
-        // Both clicks placed (center + radius), but the side-count popup is
-        // now pending confirmation — nothing is created yet.
         assert_eq!(a.document.len(), 1);
         assert!(matches!(
             a.tool,
@@ -4710,9 +4371,7 @@ mod tests {
                 sides: Some(6)
             }
         ));
-
         a.confirm_pending_polygon();
-        // Origin + six individual welded side lines.
         assert_eq!(a.document.len(), 7);
         let welds = a
             .document
@@ -4740,7 +4399,6 @@ mod tests {
         let (s2x, s2y) = a.view.world_to_screen(10.0, 0.0);
         a.canvas_click(s2x, s2y);
         assert_eq!(a.document.len(), 1);
-
         a.cancel_pending_polygon();
         assert_eq!(a.document.len(), 1, "cancel must not create anything");
         assert!(matches!(
@@ -4758,17 +4416,14 @@ mod tests {
         let mut a = app();
         a.run_command("PL");
         assert!(matches!(a.tool, Tool::Polyline { .. }));
-
         let (s1x, s1y) = a.view.world_to_screen(0.0, 0.0);
         a.canvas_click(s1x, s1y);
         let (s2x, s2y) = a.view.world_to_screen(5.0, 5.0);
         a.canvas_click(s2x, s2y);
         let (s3x, s3y) = a.view.world_to_screen(10.0, 0.0);
         a.canvas_click(s3x, s3y);
-
         a.run_command("");
         assert!(matches!(a.tool, Tool::Select));
-        // Origin + two individual welded lines.
         assert_eq!(a.document.len(), 3);
         let welds = a
             .document
@@ -4784,7 +4439,6 @@ mod tests {
         let mut a = app();
         a.run_command("SPLINE");
         assert!(matches!(a.tool, Tool::Spline { .. }));
-
         for (wx, wy) in [(0.0, 0.0), (5.0, 8.0), (10.0, -4.0), (15.0, 0.0)] {
             let (sx, sy) = a.view.world_to_screen(wx, wy);
             a.canvas_click(sx, sy);
@@ -4792,7 +4446,6 @@ mod tests {
         a.run_command("");
         assert!(matches!(a.tool, Tool::Select));
         assert_eq!(a.document.len(), 2);
-
         let entity = a.document.iter().find(|e| e.id != a.origin_id).unwrap();
         match &entity.kind {
             EntityKind::Curve(Curve::Nurbs(nc)) => assert_eq!(nc.control.len(), 4),
@@ -4812,12 +4465,10 @@ mod tests {
         ]);
         let id = a.add_entity(EntityKind::Curve(Curve::Nurbs(nc)));
         a.selection = vec![id];
-
         let (sid, control, weights) = a.selected_nurbs().expect("a NURBS is selected");
         assert_eq!(sid, id);
         assert_eq!(control.len(), 5);
         assert!(weights.iter().all(|&w| w == 1.0));
-
         a.begin_edit();
         a.set_nurbs_control(id, 2, Point2d::from_f64(6.0, 9.0));
         let weight_at = |a: &AppState, i: usize| {
@@ -4843,18 +4494,14 @@ mod tests {
     fn polyline_command_closes_on_c_command() {
         let mut a = app();
         a.run_command("PL");
-
         let (s1x, s1y) = a.view.world_to_screen(0.0, 0.0);
         a.canvas_click(s1x, s1y);
         let (s2x, s2y) = a.view.world_to_screen(5.0, 5.0);
         a.canvas_click(s2x, s2y);
         let (s3x, s3y) = a.view.world_to_screen(10.0, 0.0);
         a.canvas_click(s3x, s3y);
-
         a.run_command("c");
         assert!(matches!(a.tool, Tool::Select));
-        // Origin + three individual lines (two drawn + the closer), with
-        // every corner of the closed chain welded.
         assert_eq!(a.document.len(), 4);
         let lines = a
             .document
@@ -4879,14 +4526,11 @@ mod tests {
         } else {
             panic!("expected origin point");
         }
-
         a.toggle_selection(a.origin_id);
         assert!(!a.selection.contains(&a.origin_id));
-
         a.selection = vec![a.origin_id];
         a.erase_selection();
         assert!(a.document.get(a.origin_id).is_some());
-
         let t = oxidraft_geometry::Transform2d::translation(10.0, 10.0);
         let ev = ToolEvent::Transform {
             ids: vec![a.origin_id],
@@ -4957,9 +4601,7 @@ mod tests {
                 },
             ];
         }
-        // Drop one tangent target, leaving a dangling reference.
         a.document.remove(t2);
-        // Must not panic, and must leave the arc untouched (cannot re-solve).
         a.reconstrain_tangency(arc);
         assert!(matches!(
             a.document.get(arc).and_then(|e| e.as_curve()),

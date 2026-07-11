@@ -1,21 +1,25 @@
+use crate::command::Command;
+use crate::state::AppState;
+use crate::tools::Tool;
 use egui::{CentralPanel, Color32, Sense, Stroke, pos2, vec2};
 use oxidraft_cad::GripRole;
 use oxidraft_document::{EntityId, EntityKind, SketchConstraint};
 use oxidraft_geometry::Point2d;
 
-use crate::command::Command;
-use crate::state::AppState;
-use crate::tools::Tool;
-
 mod chrome;
+
 pub(crate) mod overlays;
+
 mod palette;
+
 mod radial;
+
 mod render;
+
 mod tessellate;
 use chrome::{
     about_window, command_toast, constraint_bar, contextual_toolbar, handle_shortcuts, inspector,
-    line_props_dialog, plot_dialog, ribbon, settings_dialog, status_pill, tool_hint_panel, top_bar,
+    line_props_dialog, plot_dialog, settings_dialog, status_pill, tool_hint_panel, top_bar,
 };
 use palette::command_bar;
 use radial::{RadialRing, radial_menu};
@@ -32,7 +36,6 @@ pub type HatchCache =
 
 pub type TextCache = std::collections::HashMap<EntityId, (u64, Vec<[Point2d; 3]>)>;
 
-// World-space flattened points per curve entity, plus its closed/open flag.
 pub type CurveCache = std::collections::HashMap<EntityId, (u64, Vec<Point2d>, bool)>;
 
 #[derive(Default)]
@@ -72,8 +75,6 @@ pub struct UiState {
     pub text_edit_active: bool,
     pub text_edit_font: Option<String>,
     pub text_edit_size: f64,
-    /// The driving-dimension constraint whose value is being edited inline,
-    /// with the field buffer and a first-show flag (mirrors `editing_text`).
     pub editing_dim: Option<oxidraft_document::SketchConstraint>,
     pub dim_edit_buf: String,
     pub dim_edit_active: bool,
@@ -89,11 +90,6 @@ pub struct UiState {
     pub last_autosave: Option<std::time::Instant>,
     pub recovery_offer: Option<std::path::PathBuf>,
     pub recovery_checked: bool,
-    /// True while the hold-Tab radial tool menu is open; see
-    /// `radial::radial_menu`. It always opens on a 2-item Tools/Modifiers
-    /// root; `radial_category` is `Some` once the user has dragged past the
-    /// root into one of those rings, and `radial_expanded` once they've
-    /// drilled further into a grouped tool's construction-method variants.
     pub radial_open: bool,
     pub radial_center: Option<egui::Pos2>,
     pub radial_category: Option<RadialRing>,
@@ -126,9 +122,6 @@ pub fn draw_ui(ui: &mut egui::Ui, app: &mut AppState, ui_state: &mut UiState) {
                 ui.horizontal(|ui| {
                     if ui.button("Restore").clicked() {
                         if app.restore_recovery(&path) {
-                            // The work now lives in this session; retire the
-                            // dead session's file and re-protect immediately
-                            // under our own recovery file on the next tick.
                             crate::autosave::remove_recovery_file(&path);
                             ui_state.last_autosave = None;
                         }
@@ -155,11 +148,8 @@ pub fn draw_ui(ui: &mut egui::Ui, app: &mut AppState, ui_state: &mut UiState) {
     }
     handle_shortcuts(&ctx, app, ui_state);
     let canvas_rect = ui.max_rect();
-    // Must run before any widget that could otherwise consume/react to Tab
-    // for egui's own focus-cycling (e.g. the top bar's buttons).
     let radial_open = radial_menu(&ctx, app, ui_state, canvas_rect);
     top_bar(&ctx, app, canvas_rect);
-    ribbon(&ctx, app, canvas_rect);
     inspector(&ctx, app, canvas_rect);
     constraint_bar(&ctx, app, canvas_rect);
     status_pill(&ctx, app, canvas_rect);
@@ -185,6 +175,7 @@ fn canvas(root_ui: &mut egui::Ui, app: &mut AppState, ui_state: &mut UiState, pa
         let (rect, response) = ui.allocate_exact_size(avail, Sense::click_and_drag());
         let origin = rect.min;
         let painter = ui.painter_at(rect);
+
         const GRIP_HIT: f32 = 7.0;
         if matches!(app.tool, Tool::Select)
             && app.interaction.corner_action.is_none()
@@ -219,7 +210,6 @@ fn canvas(root_ui: &mut egui::Ui, app: &mut AppState, ui_state: &mut UiState, pa
                 }
             }
         }
-
         let mut press_consumed = false;
         if ui_state.editing_text.is_none()
             && matches!(app.tool, Tool::Select)
@@ -261,6 +251,7 @@ fn canvas(root_ui: &mut egui::Ui, app: &mut AppState, ui_state: &mut UiState, pa
             } else {
                 Vec::new()
             };
+
         const MIN_EDGE_PX: f32 = 16.0;
         let corner_dots: Vec<(crate::state::CornerGeom, egui::Pos2)> = corner_geoms
             .iter()
@@ -308,7 +299,6 @@ fn canvas(root_ui: &mut egui::Ui, app: &mut AppState, ui_state: &mut UiState, pa
                 .position(|(_, dp)| (p - *dp).length() <= 9.0)
         });
         let over_dot = hovered_dot.is_some();
-
         let corner_busy = app.interaction.corner_action.is_some() || over_dot;
         if corner_busy {
             press_consumed = true;
@@ -575,9 +565,6 @@ fn canvas(root_ui: &mut egui::Ui, app: &mut AppState, ui_state: &mut UiState, pa
                 ctx.data_mut(|d| d.insert_temp(egui::Id::new("marquee_on"), false));
             }
         }
-        // A click on a driving-dimension badge opens its inline value editor
-        // instead of selecting or placing — weld dots and glyph chips keep
-        // their delete-on-click. Consumes the click so nothing else acts on it.
         if !press_consumed
             && !palette_open
             && matches!(app.tool, Tool::Select)
@@ -951,6 +938,7 @@ fn canvas(root_ui: &mut egui::Ui, app: &mut AppState, ui_state: &mut UiState, pa
                 pos2(origin.x + p2.0 as f32, origin.y + p2.1 as f32),
             );
             painter.rect_stroke(screen_rect, 0.0, bbox_stroke, egui::StrokeKind::Middle);
+
             const HANDLE_SIZE: f32 = 4.0;
             let corners = vec![
                 (screen_rect.min.x, screen_rect.min.y, "NW"),
@@ -1067,17 +1055,12 @@ fn canvas(root_ui: &mut egui::Ui, app: &mut AppState, ui_state: &mut UiState, pa
                 }
             }
         }
-        // Badges only delete on a Select-mode click, so only hint then (and
-        // not mid grip-drag / corner-action).
         let badge_hover = (matches!(app.tool, Tool::Select)
             && app.interaction.corner_action.is_none()
             && app.interaction.grip_drag.is_none())
         .then(|| response.hover_pos())
         .flatten();
         overlays::constraint_badges(&painter, app, origin, badge_hover);
-        // While the Plot dialog is open in Window mode, show the stored
-        // plot window on canvas so "what will print" is never a guess.
-        // (During the pick itself the tool's rubber-band preview covers it.)
         if app.plot_dialog_open
             && app.plot_window_mode
             && let Some((wx0, wy0, wx1, wy1)) = app.plot_window
@@ -1265,10 +1248,6 @@ fn canvas(root_ui: &mut egui::Ui, app: &mut AppState, ui_state: &mut UiState, pa
                 }
             }
         }
-        // The smart-dimension tool creates a driving dimension and asks the
-        // view to open its editor so the value can be typed straight away.
-        // `app` is immutably borrowed here (via `to_screen`), so the queue is
-        // cleared later in the frame's mutable tail.
         if ui_state.editing_dim.is_none()
             && let Some(c) = app.pending_dim_edit
         {
@@ -1277,9 +1256,6 @@ fn canvas(root_ui: &mut egui::Ui, app: &mut AppState, ui_state: &mut UiState, pa
             ui_state.editing_dim = Some(c);
             ui_state.dim_edit_active = false;
         }
-        // Inline editor for a driving-dimension value, opened by clicking its
-        // badge. Enter or a click away commits the typed value; Esc cancels;
-        // the ✕ removes the constraint outright.
         let mut dim_commit: Option<(SketchConstraint, f64)> = None;
         let mut dim_delete: Option<SketchConstraint> = None;
         if let Some(c) = ui_state.editing_dim {
@@ -1331,9 +1307,6 @@ fn canvas(root_ui: &mut egui::Ui, app: &mut AppState, ui_state: &mut UiState, pa
                                 }
                             });
                         });
-                    // Skip the opening frame: the very click that opened the
-                    // editor would otherwise read as "clicked elsewhere" and
-                    // commit instantly.
                     if !first_show && area.response.clicked_elsewhere() {
                         commit = true;
                     }
@@ -1644,11 +1617,11 @@ fn canvas(root_ui: &mut egui::Ui, app: &mut AppState, ui_state: &mut UiState, pa
         }
         if let Some(sp) = &app.active_snap {
             let c = to_screen(sp.pos.0, sp.pos.1);
+
             const R: f32 = 8.0;
             let snap_col = crate::theme::SNAP;
             let stroke = Stroke::new(2.2, snap_col);
             let no_stroke = Stroke::NONE;
-
             match sp.kind {
                 oxidraft_cad::SnapKind::Endpoint => {
                     painter.rect_filled(
@@ -1750,18 +1723,15 @@ fn canvas(root_ui: &mut egui::Ui, app: &mut AppState, ui_state: &mut UiState, pa
             painter.rect_filled(chip, 4.0, snap_col);
             painter.galley((chip_min + pad).round(), galley, ink);
         }
-
         let has_dims = app.tool.has_pending_input();
         let is_drawing = !matches!(app.tool, Tool::Select);
         let has_input = is_drawing || !ui_state.command_input.is_empty() || has_dims;
-
         if app.dyn_on && (has_dims || has_input) {
             let font_id = egui::FontId::monospace(11.0);
             let text_color = Color32::from_rgb(230, 240, 255);
             let bg_color = Color32::from_rgba_unmultiplied(20, 26, 36, 225);
             let dim_border = Stroke::new(1.0, Color32::from_rgb(80, 95, 115));
             let input_border = Stroke::new(1.0, Color32::from_rgb(0, 255, 0));
-
             let dims_text = if has_dims {
                 let cursor = Point2d::from_f64(app.cursor_world.0, app.cursor_world.1);
                 match &app.tool {
@@ -1824,9 +1794,6 @@ fn canvas(root_ui: &mut egui::Ui, app: &mut AppState, ui_state: &mut UiState, pa
                         radius_point,
                         sides,
                     } => {
-                        // Once the radius click has landed, the shape is fixed;
-                        // report that point's numbers instead of the still-moving
-                        // cursor, matching what `Tool::preview` now renders.
                         let rp = radius_point.unwrap_or(cursor);
                         let d = c.dist_f64(&rp);
                         let (x0, y0) = c.to_f64();
@@ -1858,19 +1825,15 @@ fn canvas(root_ui: &mut egui::Ui, app: &mut AppState, ui_state: &mut UiState, pa
             } else {
                 None
             };
-
             let input_text: Option<String> = None;
-
             if dims_text.is_some() || input_text.is_some() {
                 let offset = vec2(15.0, 15.0);
                 let padding = vec2(6.0, 4.0);
-
                 let mut combined_rect = egui::Rect::NOTHING;
                 let mut size1 = vec2(0.0, 0.0);
                 let mut size2 = vec2(0.0, 0.0);
                 let mut galley1 = None;
                 let mut galley2 = None;
-
                 if let Some(t1) = &dims_text {
                     let g1 = painter.layout_no_wrap(t1.clone(), font_id.clone(), text_color);
                     size1 = g1.size() + padding * 2.0;
@@ -1881,10 +1844,8 @@ fn canvas(root_ui: &mut egui::Ui, app: &mut AppState, ui_state: &mut UiState, pa
                     size2 = g2.size() + padding * 2.0;
                     galley2 = Some(g2);
                 }
-
                 let mut rect1 = egui::Rect::NOTHING;
                 let mut rect2 = egui::Rect::NOTHING;
-
                 if galley1.is_some() && galley2.is_some() {
                     rect1 = egui::Rect::from_min_size(cc + offset, size1);
                     rect2 = egui::Rect::from_min_size(rect1.left_bottom() + vec2(0.0, 5.0), size2);
@@ -1896,7 +1857,6 @@ fn canvas(root_ui: &mut egui::Ui, app: &mut AppState, ui_state: &mut UiState, pa
                     rect2 = egui::Rect::from_min_size(cc + offset, size2);
                     combined_rect = rect2;
                 }
-
                 let mut translation = vec2(0.0, 0.0);
                 if combined_rect.right() > rect.right() {
                     translation.x = rect.right() - combined_rect.right();
@@ -1910,7 +1870,6 @@ fn canvas(root_ui: &mut egui::Ui, app: &mut AppState, ui_state: &mut UiState, pa
                 if combined_rect.top() + translation.y < rect.top() {
                     translation.y = rect.top() - combined_rect.top();
                 }
-
                 if let Some(g1) = galley1 {
                     let final_rect1 = rect1.translate(translation);
                     painter.rect(
@@ -1950,22 +1909,16 @@ fn canvas(root_ui: &mut egui::Ui, app: &mut AppState, ui_state: &mut UiState, pa
         if let Some(c) = dim_delete {
             app.remove_constraint(c);
         }
-        // The smart-dimension hand-off (read immutably above) is a one-shot;
-        // clear it now that we hold `app` mutably again.
         app.pending_dim_edit = None;
     });
 }
 
-/// The numeric text shown in the dimension editor field: the driving value
-/// alone, without its unit suffix (the unit is a separate label).
 fn format_dim_value(c: &SketchConstraint, precision: usize) -> String {
     c.val
         .map(|v| format!("{v:.*}", precision))
         .unwrap_or_default()
 }
 
-/// The unit shown beside the dimension editor field: degrees for an angle,
-/// otherwise the document's length unit (possibly empty when unitless).
 fn dim_unit_suffix(c: &SketchConstraint, units: oxidraft_document::Units) -> &'static str {
     match c.kind {
         oxidraft_document::ConstraintKind::Angle => "\u{00b0}",
@@ -1995,13 +1948,13 @@ mod tess_tests {
         };
         flatten_curve(c, &to_screen)
     }
+
     #[test]
     fn circle_stays_smooth_when_zoomed_in() {
         let mut view = ViewTransform::new(1000.0, 1000.0);
         view.zoom = 500.0;
         let c = circle(2.0);
         let poly = screen_polyline(&view, &c);
-
         let to_screen = |wx: f64, wy: f64| {
             let (sx, sy) = view.world_to_screen(wx, wy);
             egui::pos2(sx as f32, sy as f32)
@@ -2023,6 +1976,7 @@ mod tess_tests {
             worst
         );
     }
+
     #[test]
     fn segment_count_tracks_zoom() {
         let c = circle(1.0);

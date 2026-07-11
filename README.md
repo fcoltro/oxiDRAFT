@@ -96,8 +96,8 @@ Or build it yourself in one command (see [Build & run](#-build--run)).
 - **Drawing units** — mm / cm / m / km / in / ft / unitless — that bound the zoom range and label measurements
 - **Curvature comb** on selected curves for smoothness inspection
 - **`Ctrl+F` command palette** plus an always-available command line, **window / crossing marquee**, hover highlight, ghost previews, **undo / redo**
-- **Radial tool wheel** — hold `Tab` for a **Tools** / **Modifiers** picker at the cursor; drag toward either to reveal its full ring, then to a wedge and release to activate it, or push out further on Circle/Arc/Dimension/Line to reveal their construction-method variants
-- Modern dark, glass-panelled interface — top bar, two-column tool dock (draw + modify), inspector and status pill; preferences persist between sessions
+- **Radial tool wheel** — press `Q` for a **Tools** / **Modifiers** picker at the cursor; move toward either to reveal its full ring, then to a wedge and click to activate it, or push out further on Circle/Arc/Dimension/Line to reveal their construction-method variants; press `Q` again or `Esc` to dismiss
+- Modern dark, glass-panelled interface — top bar, inspector and status pill; preferences persist between sessions
 
 ### Geometry kernel
 - Curve primitives: line, circular arc, elliptical arc, cubic Bézier, rational Bézier, polycurve, clamped-cubic **NURBS**
@@ -117,7 +117,7 @@ Or build it yourself in one command (see [Build & run](#-build--run)).
 
 ## ⌨ Commands
 
-Type a verb in the command line, or use the toolbars / `Ctrl+F` palette. Common aliases:
+Type a verb in the command line, or use the `Draw`/`Modify` menus, the radial tool wheel (`Q`), or the `Ctrl+F` palette. Common aliases:
 
 | Draw | | Modify | | Other | |
 |------|--|--------|--|-------|--|
@@ -161,7 +161,7 @@ bare. `UNCON` drops every constraint on the selection.
 | `Esc` | Cancel / deselect | `Ctrl+A` | Select all |
 | `Z` | Zoom extents | `Ctrl+F` | Command palette |
 | `Space` | Repeat last command | `Del` | Delete selection |
-| `Hold Tab` | Radial tool wheel — drag to Tools or Modifiers, then a wedge | | |
+| `Q` | Radial tool wheel — move to Tools or Modifiers, then a wedge | | |
 | `F7`–`F12` | Toggle object snap · grid · grid snap · polar · tracking · dynamic input | | |
 
 ## 🔨 Build & run

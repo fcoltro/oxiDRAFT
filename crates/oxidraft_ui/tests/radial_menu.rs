@@ -1,9 +1,6 @@
 use oxidraft_ui::{AppState, UiState, draw_ui, egui};
 
-/// Runs one full frame of the real UI (top bar, ribbon, canvas, every HUD —
-/// not just the radial menu in isolation) with the given input events
-/// injected. Mirrors `tests/text_focus.rs`'s driver.
-#[allow(deprecated)] // Context::run / CentralPanel::show: fine for a synchronous test driver
+#[allow(deprecated)]
 fn frame(
     ctx: &egui::Context,
     app: &mut AppState,
@@ -56,59 +53,43 @@ fn key(key: egui::Key, pressed: bool) -> Vec<egui::Event> {
     }]
 }
 
-/// Regression test for a real bug: `radial_menu()` must run before every
-/// other chrome panel in `draw_ui` so it can consume the Tab press before
-/// egui's own focus-cycling does. When it ran later, holding Tab moved
-/// keyboard focus to the top bar's first button instead of opening the pie.
-/// If a future refactor reorders `draw_ui`'s calls, this catches it.
 #[test]
-fn holding_tab_over_the_canvas_opens_the_radial_menu() {
+fn holding_q_over_the_canvas_opens_the_radial_menu() {
     let ctx = egui::Context::default();
     let mut app = AppState::new(1200.0, 800.0);
     let mut ui_state = UiState::default();
-
     let canvas_pos = egui::pos2(600.0, 400.0);
     frame(&ctx, &mut app, &mut ui_state, pointer_move(canvas_pos));
     assert!(!ui_state.radial_open);
-
-    frame(&ctx, &mut app, &mut ui_state, key(egui::Key::Tab, true));
+    frame(&ctx, &mut app, &mut ui_state, key(egui::Key::Q, true));
     assert!(
         ui_state.radial_open,
-        "holding Tab over the canvas should open the radial menu"
+        "holding Q over the canvas should open the radial menu"
     );
 }
 
-/// The open-gate must defer to any already-open modal dialog rather than
-/// summon the pie on top of it.
 #[test]
-fn tab_does_not_open_radial_menu_while_settings_dialog_is_open() {
+fn q_does_not_open_radial_menu_while_settings_dialog_is_open() {
     let ctx = egui::Context::default();
     let mut app = AppState::new(1200.0, 800.0);
     let mut ui_state = UiState::default();
     ui_state.settings_open = true;
-
     let canvas_pos = egui::pos2(600.0, 400.0);
     frame(&ctx, &mut app, &mut ui_state, pointer_move(canvas_pos));
-    frame(&ctx, &mut app, &mut ui_state, key(egui::Key::Tab, true));
+    frame(&ctx, &mut app, &mut ui_state, key(egui::Key::Q, true));
     assert!(
         !ui_state.radial_open,
-        "Tab should not open the radial menu while Settings is open"
+        "Q should not open the radial menu while Settings is open"
     );
 }
 
-/// Escape must only dismiss the pie, not cancel whatever the user was doing
-/// underneath it — it used to double-fire because the radial menu read
-/// Escape without consuming it, so canvas()'s own Escape handler saw the
-/// same keypress and cancelled the in-progress tool.
 #[test]
 fn escape_closes_radial_menu_without_cancelling_the_active_tool() {
     let ctx = egui::Context::default();
     let mut app = AppState::new(1200.0, 800.0);
     let mut ui_state = UiState::default();
-
     frame(&ctx, &mut app, &mut ui_state, vec![]);
     app.run_command("POLYLINE");
-
     let p1 = egui::pos2(500.0, 400.0);
     let p2 = egui::pos2(600.0, 340.0);
     frame(&ctx, &mut app, &mut ui_state, pointer_move(p1));
@@ -116,18 +97,18 @@ fn escape_closes_radial_menu_without_cancelling_the_active_tool() {
     frame(&ctx, &mut app, &mut ui_state, pointer_move(p2));
     frame(&ctx, &mut app, &mut ui_state, pointer_click(p2));
     assert!(
-        matches!(&app.tool, oxidraft_ui::tools::Tool::Polyline { pts } if pts.len() == 2),
+        matches!(& app.tool, oxidraft_ui::tools::Tool::Polyline { pts } if pts.len() ==
+        2),
         "expected 2 placed points before opening the radial menu, tool={:?}",
         app.tool
     );
-
-    frame(&ctx, &mut app, &mut ui_state, key(egui::Key::Tab, true));
+    frame(&ctx, &mut app, &mut ui_state, key(egui::Key::Q, true));
     assert!(ui_state.radial_open);
-
     frame(&ctx, &mut app, &mut ui_state, key(egui::Key::Escape, true));
     assert!(!ui_state.radial_open, "Escape should close the radial menu");
     assert!(
-        matches!(&app.tool, oxidraft_ui::tools::Tool::Polyline { pts } if pts.len() == 2),
+        matches!(& app.tool, oxidraft_ui::tools::Tool::Polyline { pts } if pts.len() ==
+        2),
         "Escape should only dismiss the radial menu, not cancel the in-progress polyline; tool={:?}",
         app.tool
     );
