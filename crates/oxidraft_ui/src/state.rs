@@ -410,6 +410,27 @@ fn line_endpoints(kind: &EntityKind) -> Option<((f64, f64), (f64, f64))> {
     }
 }
 
+/// Whether a segment p0→p1 is close enough to an axis (at the given
+/// pixel-world size) to auto-infer Horizontal/Vertical — the single
+/// predicate shared by the post-commit capture (`infer_axis_alignment`)
+/// and the live cursor preview (`inference_preview`) so the glyph shown
+/// before the click always matches what the click records.
+fn axis_infer_kind(p0: (f64, f64), p1: (f64, f64), px: f64) -> Option<ConstraintKind> {
+    let (adx, ady) = ((p1.0 - p0.0).abs(), (p1.1 - p0.1).abs());
+    let len = adx.max(ady);
+    if len < px * 12.0 {
+        return None;
+    }
+    let slack = (px * 3.0).min(len * 0.05);
+    if ady <= slack && ady < adx {
+        Some(ConstraintKind::Horizontal)
+    } else if adx <= slack && adx < ady {
+        Some(ConstraintKind::Vertical)
+    } else {
+        None
+    }
+}
+
 fn segment_endpoints(kind: &EntityKind) -> Option<[(f64, f64); 2]> {
     match kind {
         EntityKind::Curve(Curve::Line(l)) => Some([l.p0.to_f64(), l.p1.to_f64()]),
@@ -1158,23 +1179,13 @@ impl AppState {
         else {
             return;
         };
-        let (adx, ady) = ((p1.0 - p0.0).abs(), (p1.1 - p0.1).abs());
         let px = self.view.pixel_world_size();
-        let len = adx.max(ady);
-        if len < px * 12.0 {
-            return;
-        }
-        let slack = (px * 3.0).min(len * 0.05);
-        let kind = if ady <= slack && ady < adx {
-            oxidraft_document::ConstraintKind::Horizontal
-        } else if adx <= slack && adx < ady {
-            oxidraft_document::ConstraintKind::Vertical
-        } else {
+        let Some(kind) = axis_infer_kind(p0, p1, px) else {
             return;
         };
         let off_axis = match kind {
-            oxidraft_document::ConstraintKind::Horizontal => ady,
-            _ => adx,
+            oxidraft_document::ConstraintKind::Horizontal => (p1.1 - p0.1).abs(),
+            _ => (p1.0 - p0.0).abs(),
         };
         if off_axis > 1e-9 {
             if end_pinned {
@@ -1824,6 +1835,43 @@ impl AppState {
             self.dof_cache = Some((self.doc_epoch, summary));
         }
         self.dof_cache.as_ref().map(|(_, s)| s)
+    }
+
+    /// The constraint the auto-inference would capture if the user clicked
+    /// right now while drawing — for the live cursor glyph. `None` when
+    /// inference is off, no line is in progress, or nothing would be
+    /// inferred. Pure and O(1): it reads only the tool's last point, the
+    /// live cursor, and the active snap, all already computed each frame.
+    pub fn inference_preview(&self) -> Option<ConstraintKind> {
+        if !self.infer_constraints {
+            return None;
+        }
+        // Only the Line and Polyline tools infer as they go, and only once
+        // a first point has been placed.
+        let last = match &self.tool {
+            Tool::Line { last: Some(p) } => *p,
+            Tool::Polyline { pts } => *pts.last()?,
+            _ => return None,
+        };
+        // Snapping the incoming end onto an existing entity's point captures
+        // a coincident weld — that takes precedence over an axis guess.
+        if let Some(sp) = &self.active_snap
+            && matches!(
+                sp.kind,
+                oxidraft_cad::SnapKind::Endpoint
+                    | oxidraft_cad::SnapKind::Midpoint
+                    | oxidraft_cad::SnapKind::Center
+                    | oxidraft_cad::SnapKind::Node
+                    | oxidraft_cad::SnapKind::Intersection
+            )
+        {
+            return Some(ConstraintKind::Coincident);
+        }
+        axis_infer_kind(
+            last.to_f64(),
+            self.cursor_world,
+            self.view.pixel_world_size(),
+        )
     }
 
     pub fn constrain_selection(&mut self, kind: oxidraft_cad::ConstraintKind) {

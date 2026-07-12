@@ -354,6 +354,7 @@ fn canvas(root_ui: &mut egui::Ui, app: &mut AppState, ui_state: &mut UiState, pa
         overlays::dyn_text_hud(ctx, app, ui_state, origin);
         overlays::dyn_transform_hud(ctx, app, ui_state, origin);
         overlays::cursor_readout(ctx, app, origin);
+        overlays::inference_preview_glyph(ctx, app, origin);
         let has_own_grips = !app.selection_grips().is_empty();
         let mut bbox_drag_active = false;
         if !press_consumed

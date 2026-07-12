@@ -1052,6 +1052,40 @@ pub(super) fn cursor_readout(ctx: &egui::Context, app: &AppState, origin: egui::
         });
 }
 
+/// A small badge glyph beside the cursor while drawing, showing which
+/// constraint the auto-inference will capture on the next click (Fusion-
+/// style). Nothing is drawn when there's no inference pending.
+pub(super) fn inference_preview_glyph(ctx: &egui::Context, app: &AppState, origin: egui::Pos2) {
+    let Some(kind) = app.inference_preview() else {
+        return;
+    };
+    let glyph = match kind {
+        ConstraintKind::Horizontal => BadgeGlyph::Horizontal,
+        ConstraintKind::Vertical => BadgeGlyph::Vertical,
+        ConstraintKind::Coincident => BadgeGlyph::Midpoint,
+        _ => return,
+    };
+    let (cx, cy) = app.cursor_world;
+    let cur = app.view.world_to_screen(cx, cy);
+    let center = pos2(
+        origin.x + cur.0 as f32 + 20.0,
+        origin.y + cur.1 as f32 - 18.0,
+    );
+    let painter = ctx.layer_painter(egui::LayerId::new(
+        egui::Order::Foreground,
+        egui::Id::new("inference_preview_glyph"),
+    ));
+    // A faint accent chip behind the glyph so it reads as a hint, not a
+    // committed badge.
+    painter.circle_filled(center, 11.0, crate::theme::ACCENT_DIM);
+    painter.circle_stroke(
+        center,
+        11.0,
+        Stroke::new(1.0, crate::theme::ACCENT.gamma_multiply(0.6)),
+    );
+    paint_badge_glyph(&painter, center, glyph);
+}
+
 fn hud_field(
     ui: &mut egui::Ui,
     id: egui::Id,

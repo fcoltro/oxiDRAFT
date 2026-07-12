@@ -631,3 +631,29 @@ fn dof_status_reports_fully_constrained_and_flashes_conflicts() {
     let (ids, _) = a.conflict_flash.as_ref().unwrap();
     assert!(ids.contains(&l), "the conflicting line is a flash target");
 }
+
+#[test]
+fn inference_preview_predicts_the_horizontal_capture() {
+    use oxidraft_document::ConstraintKind;
+    let mut a = app();
+    a.infer_constraints = true;
+    a.run_command("LINE");
+    // Place the first point, then hover a nearly-horizontal cursor far
+    // enough to trip the axis threshold.
+    click(&mut a, 0.0, 0.0);
+    let (sx, sy) = a.view.world_to_screen(8.0, 0.02);
+    a.pointer_moved(sx, sy);
+    assert_eq!(
+        a.inference_preview(),
+        Some(ConstraintKind::Horizontal),
+        "a near-horizontal drag previews a Horizontal capture"
+    );
+    // A clearly diagonal cursor previews nothing.
+    let (sx, sy) = a.view.world_to_screen(6.0, 6.0);
+    a.pointer_moved(sx, sy);
+    assert_eq!(
+        a.inference_preview(),
+        None,
+        "a diagonal drag previews nothing"
+    );
+}
