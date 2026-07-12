@@ -607,3 +607,27 @@ fn con_pick_symmetric_needs_three_picks() {
     }
     let _ = (mirror, p1);
 }
+
+#[test]
+fn dof_status_reports_fully_constrained_and_flashes_conflicts() {
+    use oxidraft_document::ConstraintKind;
+    let mut a = app();
+    a.infer_constraints = false;
+    let l = a.add_entity(line(0, 0, 4, 1));
+    // A free line is 4 DOF; report it via a Horizontal constraint on it.
+    a.selection = vec![l];
+    a.run_command("HOR");
+    let s = a.dof_status().expect("has constraints");
+    assert!(s.dof > 0, "a single H-constrained line still has DOF");
+
+    // Forcing Vertical onto the now-Horizontal line conflicts; the reject
+    // path must flash the culprit entity.
+    a.selection = vec![l];
+    a.run_command("VER");
+    assert!(
+        a.conflict_flash.is_some(),
+        "a rejected conflicting constraint flashes its culprits"
+    );
+    let (ids, _) = a.conflict_flash.as_ref().unwrap();
+    assert!(ids.contains(&l), "the conflicting line is a flash target");
+}

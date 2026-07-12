@@ -964,6 +964,18 @@ fn canvas(root_ui: &mut egui::Ui, app: &mut AppState, ui_state: &mut UiState, pa
         refresh_curve_cache(app, &mut ui_state.curve_cache);
         let selected_set: std::collections::HashSet<EntityId> =
             app.selection.iter().copied().collect();
+        // Conflict flash: entities whose constraints a rejected command
+        // clashed with pulse red for ~1.2s, then fade out. Repaint while
+        // active so the fade animates even without other input.
+        const FLASH_SECS: f32 = 1.2;
+        let flash: Option<(std::collections::HashSet<EntityId>, f32)> = app
+            .conflict_flash
+            .as_ref()
+            .map(|(ids, t)| (ids.iter().copied().collect(), t.elapsed().as_secs_f32()))
+            .filter(|(_, age)| *age < FLASH_SECS);
+        if flash.is_some() {
+            ctx.request_repaint();
+        }
         let (vx0, vy0, vx1, vy1) = app.view.visible_bounds();
         let cull_pad = 32.0 * app.view.pixel_world_size();
         let view_bb = oxidraft_geometry::BoundingBox::from_corners(
@@ -988,7 +1000,16 @@ fn canvas(root_ui: &mut egui::Ui, app: &mut AppState, ui_state: &mut UiState, pa
                 && Some(e.id) == hovered_id
                 && !matches!(app.tool, Tool::Trim | Tool::Extend);
             let is_hatch = matches!(e.kind, EntityKind::Hatch { .. });
-            let color = if selected {
+            let flashing = flash
+                .as_ref()
+                .filter(|(ids, _)| ids.contains(&e.id))
+                .map(|(_, age)| 1.0 - age / FLASH_SECS);
+            let color = if let Some(t) = flashing {
+                // Blend from a hot red toward the entity's own colour as the
+                // flash fades.
+                let mix = |a: u8, b: u8| (a as f32 * t + b as f32 * (1.0 - t)) as u8;
+                Color32::from_rgb(mix(240, r), mix(60, g), mix(60, b))
+            } else if selected {
                 if is_hatch {
                     HATCH_SELECT
                 } else {
@@ -1004,7 +1025,9 @@ fn canvas(root_ui: &mut egui::Ui, app: &mut AppState, ui_state: &mut UiState, pa
                 Color32::from_rgb(r, g, b)
             };
             let base = resolve_line_weight_px(app, e);
-            let width = if selected {
+            let width = if flashing.is_some() {
+                base + 1.5
+            } else if selected {
                 base + 1.0
             } else if hovered {
                 base + 0.5

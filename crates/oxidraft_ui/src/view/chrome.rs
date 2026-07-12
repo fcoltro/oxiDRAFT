@@ -2076,6 +2076,21 @@ pub(super) fn command_toast(ctx: &Context, app: &AppState, canvas_rect: egui::Re
 }
 
 pub(super) fn status_pill(ctx: &Context, app: &mut AppState, canvas_rect: egui::Rect) {
+    // DoF chip content, computed up front (dof_status borrows app mutably,
+    // and the pill's own closure borrows it too). `None` when there are no
+    // constraints to report on.
+    let dof_chip: Option<(String, egui::Color32)> = app.dof_status().map(|s| {
+        if s.dof == 0 {
+            ("Fully constrained".to_string(), crate::theme::STATUS_GREEN)
+        } else if !s.redundant.is_empty() {
+            (
+                format!("{} DOF · redundant", s.dof),
+                crate::theme::STATUS_AMBER,
+            )
+        } else {
+            (format!("{} DOF", s.dof), crate::theme::TEXT_DIM)
+        }
+    });
     let area = egui::Area::new(egui::Id::new("status_pill"))
         .anchor(
             egui::Align2::CENTER_BOTTOM,
@@ -2171,6 +2186,15 @@ pub(super) fn status_pill(ctx: &Context, app: &mut AppState, canvas_rect: egui::
                         }
                         pill_sep(ui);
                         unit_dropdown(ui, app);
+                        if let Some((text, color)) = &dof_chip {
+                            pill_sep(ui);
+                            ui.label(egui::RichText::new(text).size(11.5).color(*color))
+                                .on_hover_text(
+                                    "Degrees of freedom left in the selected \
+                                     constraint group (or the whole sketch when \
+                                     nothing is selected)",
+                                );
+                        }
                     });
                 });
         });

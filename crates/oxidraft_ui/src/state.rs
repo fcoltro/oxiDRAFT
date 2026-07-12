@@ -69,6 +69,16 @@ pub struct AppState {
     pub plot_window: Option<(f64, f64, f64, f64)>,
     pub plot_dialog_open: bool,
     pub plot_window_mode: bool,
+    /// Entities to briefly pulse red after a constraint was rejected for
+    /// conflicting with theirs, paired with when the flash started so the
+    /// renderer can fade it out. Set on the failure path of constraint
+    /// commands; cleared once it elapses.
+    pub conflict_flash: Option<(Vec<EntityId>, std::time::Instant)>,
+    /// Bumped on every structural change (a committed constraint, undo,
+    /// redo) so the DoF status indicator recomputes only when it must,
+    /// rather than solving every frame. See `dof_status`.
+    pub doc_epoch: u64,
+    dof_cache: Option<(u64, oxidraft_cad::DofSummary)>,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -469,6 +479,9 @@ impl AppState {
             plot_window: None,
             plot_dialog_open: false,
             plot_window_mode: false,
+            conflict_flash: None,
+            doc_epoch: 0,
+            dof_cache: None,
         }
     }
 
@@ -1608,6 +1621,7 @@ impl AppState {
         if let Some(prev) = self.history.undo(&self.document) {
             self.document = prev;
             self.selection.clear();
+            self.doc_epoch = self.doc_epoch.wrapping_add(1);
         }
     }
 
@@ -1615,6 +1629,7 @@ impl AppState {
         if let Some(next) = self.history.redo(&self.document) {
             self.document = next;
             self.selection.clear();
+            self.doc_epoch = self.doc_epoch.wrapping_add(1);
         }
     }
 
@@ -1748,6 +1763,69 @@ impl AppState {
         true
     }
 
+    /// Applies a constraint result: on success snapshots history, swaps in
+    /// the new document, logs the message, and bumps the DoF epoch; on
+    /// failure logs the message and flashes the conflicting entities. The
+    /// one place the repeated snapshot/replace/log pattern lives.
+    fn commit_constraint(
+        &mut self,
+        doc: Document,
+        res: Result<String, oxidraft_cad::ConstrainError>,
+    ) -> bool {
+        match res {
+            Ok(msg) => {
+                self.history.snapshot(&self.document);
+                self.document = doc;
+                self.command_log.push(msg);
+                self.doc_epoch = self.doc_epoch.wrapping_add(1);
+                true
+            }
+            Err(e) => {
+                self.command_log.push(e.message);
+                if !e.culprits.is_empty() {
+                    self.conflict_flash = Some((e.culprits, std::time::Instant::now()));
+                }
+                false
+            }
+        }
+    }
+
+    /// DoF/redundancy of the constraint component the current selection sits
+    /// in — or of the largest component in the drawing when nothing is
+    /// selected — recomputed only when `doc_epoch` changes (an analyze()
+    /// solves the component, too costly to run every frame). `None` when
+    /// there are no constraints to report on.
+    pub fn dof_status(&mut self) -> Option<&oxidraft_cad::DofSummary> {
+        if self.document.constraints.is_empty() {
+            self.dof_cache = None;
+            return None;
+        }
+        if self.dof_cache.as_ref().map(|(e, _)| *e) != Some(self.doc_epoch) {
+            // Seeds: the selection if it touches any constraint, else every
+            // constrained entity (dof_report grows to the whole component).
+            let seeds: Vec<EntityId> = if self
+                .selection
+                .iter()
+                .any(|&id| self.document.constraints_on(id).next().is_some())
+            {
+                self.selection.clone()
+            } else {
+                let mut ids = Vec::new();
+                for c in &self.document.constraints {
+                    for id in [Some(c.a), c.b, c.c].into_iter().flatten() {
+                        if !ids.contains(&id) {
+                            ids.push(id);
+                        }
+                    }
+                }
+                ids
+            };
+            let summary = oxidraft_cad::dof_report(&self.document, &seeds);
+            self.dof_cache = Some((self.doc_epoch, summary));
+        }
+        self.dof_cache.as_ref().map(|(_, s)| s)
+    }
+
     pub fn constrain_selection(&mut self, kind: oxidraft_cad::ConstraintKind) {
         use oxidraft_cad::ConstraintKind as K;
         if kind == K::Coincident {
@@ -1785,26 +1863,14 @@ impl AppState {
             return;
         }
         let mut doc = self.document.clone();
-        match oxidraft_cad::constrain_lines(&mut doc, &self.selection, kind) {
-            Ok(msg) => {
-                self.history.snapshot(&self.document);
-                self.document = doc;
-                self.command_log.push(msg);
-            }
-            Err(e) => self.command_log.push(e.message),
-        }
+        let res = oxidraft_cad::constrain_lines(&mut doc, &self.selection, kind);
+        self.commit_constraint(doc, res);
     }
 
     pub fn weld_points(&mut self, a: (EntityId, u8), b: (EntityId, u8)) {
         let mut doc = self.document.clone();
-        match oxidraft_cad::constrain_coincident_points(&mut doc, a, b) {
-            Ok(msg) => {
-                self.history.snapshot(&self.document);
-                self.document = doc;
-                self.command_log.push(msg);
-            }
-            Err(e) => self.command_log.push(e.message),
-        }
+        let res = oxidraft_cad::constrain_coincident_points(&mut doc, a, b);
+        self.commit_constraint(doc, res);
     }
 
     /// Applies a completed pick set from the `ConPick` tool. Each pick is
@@ -1830,51 +1896,27 @@ impl AppState {
             }
             _ => return,
         };
-        match res {
-            Ok(msg) => {
-                self.history.snapshot(&self.document);
-                self.document = doc;
-                self.command_log.push(msg);
-                self.show_constraints = true;
-            }
-            Err(e) => self.command_log.push(e.message),
+        if self.commit_constraint(doc, res) {
+            self.show_constraints = true;
         }
     }
 
     pub fn constrain_radius_selection(&mut self, value: Option<f64>) {
         let mut doc = self.document.clone();
-        match oxidraft_cad::constrain_radius(&mut doc, &self.selection, value) {
-            Ok(msg) => {
-                self.history.snapshot(&self.document);
-                self.document = doc;
-                self.command_log.push(msg);
-            }
-            Err(e) => self.command_log.push(e.message),
-        }
+        let res = oxidraft_cad::constrain_radius(&mut doc, &self.selection, value);
+        self.commit_constraint(doc, res);
     }
 
     pub fn constrain_distance_selection(&mut self, value: Option<f64>) {
         let mut doc = self.document.clone();
-        match oxidraft_cad::constrain_distance(&mut doc, &self.selection, value) {
-            Ok(msg) => {
-                self.history.snapshot(&self.document);
-                self.document = doc;
-                self.command_log.push(msg);
-            }
-            Err(e) => self.command_log.push(e.message),
-        }
+        let res = oxidraft_cad::constrain_distance(&mut doc, &self.selection, value);
+        self.commit_constraint(doc, res);
     }
 
     pub fn constrain_angle_selection(&mut self, value: Option<f64>) {
         let mut doc = self.document.clone();
-        match oxidraft_cad::constrain_angle(&mut doc, &self.selection, value) {
-            Ok(msg) => {
-                self.history.snapshot(&self.document);
-                self.document = doc;
-                self.command_log.push(msg);
-            }
-            Err(e) => self.command_log.push(e.message),
-        }
+        let res = oxidraft_cad::constrain_angle(&mut doc, &self.selection, value);
+        self.commit_constraint(doc, res);
     }
 
     pub fn set_constraint_value(&mut self, target: SketchConstraint, value: f64) {
@@ -1898,14 +1940,7 @@ impl AppState {
             },
             _ => return,
         };
-        match res {
-            Ok(msg) => {
-                self.history.snapshot(&self.document);
-                self.document = doc;
-                self.command_log.push(msg);
-            }
-            Err(e) => self.command_log.push(e.message),
-        }
+        self.commit_constraint(doc, res);
     }
 
     pub fn fix_selection(&mut self) {
@@ -1916,14 +1951,8 @@ impl AppState {
             .filter(|&id| id != self.origin_id)
             .collect();
         let mut doc = self.document.clone();
-        match oxidraft_cad::constrain_fixed(&mut doc, &sel) {
-            Ok(msg) => {
-                self.history.snapshot(&self.document);
-                self.document = doc;
-                self.command_log.push(msg);
-            }
-            Err(e) => self.command_log.push(e.message),
-        }
+        let res = oxidraft_cad::constrain_fixed(&mut doc, &sel);
+        self.commit_constraint(doc, res);
     }
 
     pub fn smart_dimension(
@@ -1951,34 +1980,30 @@ impl AppState {
                 ConstraintKind::Distance,
             ),
         };
-        match res {
-            Ok(msg) => {
-                if place.is_some()
-                    && let Some(c) = doc
-                        .constraints
-                        .iter_mut()
-                        .rev()
-                        .find(|c| c.kind == kind && c.a == a && c.b == b && c.val.is_some())
-                {
-                    c.place = place;
-                }
-                self.history.snapshot(&self.document);
-                self.document = doc;
-                self.command_log.push(msg);
-                self.show_constraints = true;
-                self.pending_dim_edit = self
-                    .document
-                    .constraints
-                    .iter()
-                    .rev()
-                    .find(|c| c.kind == kind && c.a == a && c.b == b && c.val.is_some())
-                    .copied();
-                true
-            }
-            Err(e) => {
-                self.command_log.push(e.message);
-                false
-            }
+        // Apply the placement to the fresh record before committing, so the
+        // clone that gets swapped in already carries it.
+        if res.is_ok()
+            && place.is_some()
+            && let Some(c) = doc
+                .constraints
+                .iter_mut()
+                .rev()
+                .find(|c| c.kind == kind && c.a == a && c.b == b && c.val.is_some())
+        {
+            c.place = place;
+        }
+        if self.commit_constraint(doc, res) {
+            self.show_constraints = true;
+            self.pending_dim_edit = self
+                .document
+                .constraints
+                .iter()
+                .rev()
+                .find(|c| c.kind == kind && c.a == a && c.b == b && c.val.is_some())
+                .copied();
+            true
+        } else {
+            false
         }
     }
 
@@ -1988,6 +2013,7 @@ impl AppState {
             self.document.constraints.retain(|c| c != &target);
             self.command_log
                 .push(format!("Removed {} constraint", target.kind.label()));
+            self.doc_epoch = self.doc_epoch.wrapping_add(1);
         }
     }
 
@@ -2069,6 +2095,7 @@ impl AppState {
         self.command_log.push(format!(
             "Removed constraints touching the selection ({remaining} left in drawing)"
         ));
+        self.doc_epoch = self.doc_epoch.wrapping_add(1);
     }
 
     pub fn join_selection(&mut self) {
