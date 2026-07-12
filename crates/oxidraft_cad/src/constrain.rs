@@ -58,7 +58,7 @@ fn culprit_entities(doc: &Document, indices: &[usize]) -> Vec<EntityId> {
         let Some(c) = doc.constraints.get(i) else {
             continue;
         };
-        for id in [Some(c.a), c.b].into_iter().flatten() {
+        for id in [Some(c.a), c.b, c.c].into_iter().flatten() {
             if !out.contains(&id) {
                 out.push(id);
             }
@@ -173,12 +173,14 @@ pub fn constrain_lines(
         ConstraintKind::Angle => constrain_angle(doc, selection, None),
         ConstraintKind::Concentric => constrain_concentric(doc, selection),
         ConstraintKind::EqualRadius => constrain_equal_radius(doc, selection),
+        ConstraintKind::Block => constrain_block(doc, selection),
         ConstraintKind::Midpoint
         | ConstraintKind::PointOnLine
         | ConstraintKind::PointOnCircle
         | ConstraintKind::PointDistance
         | ConstraintKind::HDistance
-        | ConstraintKind::VDistance => {
+        | ConstraintKind::VDistance
+        | ConstraintKind::Symmetric => {
             Err(format!("{} is pick-based — pick its points on canvas", kind.label()).into())
         }
         ConstraintKind::Horizontal | ConstraintKind::Vertical => {
@@ -1179,6 +1181,103 @@ pub fn constrain_point_distance(
     Ok(format!("Held the points {target} apart"))
 }
 
+/// Mirrors two picked point anchors about a line: their midpoint is held on
+/// the mirror's infinite carrier and their segment perpendicular to it.
+/// Both sides move minimally, like the other pick-based relations.
+pub fn constrain_symmetric_points(
+    doc: &mut Document,
+    a: (EntityId, u8),
+    b: (EntityId, u8),
+    mirror: EntityId,
+) -> Result<String, ConstrainError> {
+    let (a_id, ea) = a;
+    let (b_id, eb) = b;
+    if line_of(doc, mirror).is_none() {
+        return Err("Symmetric needs a line to mirror about".into());
+    }
+    if (a_id == b_id && ea == eb) || a_id == mirror || b_id == mirror {
+        return Err("Pick two different points, then the mirror line".into());
+    }
+    if !anchor_ok(doc, a_id, ea) || !anchor_ok(doc, b_id, eb) {
+        return Err(format!(
+            "Pick an endpoint, midpoint, center, or point{}",
+            polyline_hint(doc, &[a_id, b_id])
+        )
+        .into());
+    }
+    let candidate = SketchConstraint::symmetric(a_id, ea, b_id, eb, mirror);
+    if !doc.add_constraint(candidate) {
+        return Err("Those points are already symmetric about that line".into());
+    }
+    if let Err(conflict) = validate_recorded(doc, &[a_id, b_id, mirror], &candidate, false) {
+        doc.constraints.retain(|c| !c.same_relation(&candidate));
+        return Err(ConstrainError {
+            message: format!(
+                "Could not make the points symmetric against their existing constraints{}",
+                conflict.message
+            ),
+            culprits: conflict.culprits,
+        });
+    }
+    let CompSketch { mut s, vars, .. } = component_sketch(doc, &[a_id, b_id, mirror]);
+    if !s.solve_robust().converged {
+        doc.constraints.retain(|c| !c.same_relation(&candidate));
+        return Err("Could not make the points symmetric".into());
+    }
+    write_back(doc, &s, &vars);
+    Ok("Made the points symmetric about the line".into())
+}
+
+/// Locks the selection into a rigid group: every member holds its shape and
+/// its pose relative to the first-selected entity (the reference), leaving
+/// the group only its translate/rotate freedom. Recorded as one Block pair
+/// per member; UNCON on any member releases its record.
+pub fn constrain_block(
+    doc: &mut Document,
+    selection: &[EntityId],
+) -> Result<String, ConstrainError> {
+    let members: Vec<EntityId> = selection
+        .iter()
+        .copied()
+        .filter(|&id| {
+            line_of(doc, id).is_some() || arc_of(doc, id).is_some() || point_of(doc, id).is_some()
+        })
+        .collect();
+    if members.len() < 2 {
+        return Err(format!(
+            "Select at least two lines/arcs/points to block together{}",
+            polyline_hint(doc, selection)
+        )
+        .into());
+    }
+    let reference = members[0];
+    let mut count = 0;
+    for &m in &members[1..] {
+        let candidate = SketchConstraint::block(m, reference);
+        if !doc.add_constraint(candidate) {
+            continue;
+        }
+        if let Err(conflict) = validate_recorded(doc, &[m, reference], &candidate, false) {
+            doc.constraints.retain(|c| !c.same_relation(&candidate));
+            return Err(ConstrainError {
+                message: format!(
+                    "Could not block the selection against its existing constraints{}",
+                    conflict.message
+                ),
+                culprits: conflict.culprits,
+            });
+        }
+        count += 1;
+    }
+    if count == 0 {
+        return Err("That selection is already blocked together".into());
+    }
+    // Blocking freezes everything exactly where it sits, so like Fixed no
+    // re-solve is needed — the records are trivially consistent by
+    // construction (validated above against pre-existing constraints).
+    Ok(format!("Blocked {} object(s) as a rigid group", count + 1))
+}
+
 /// The current world position of a picked anchor: an endpoint, a line's
 /// midpoint, an arc's center, or a point entity.
 fn anchor_pos(doc: &Document, id: EntityId, idx: u8) -> Option<(f64, f64)> {
@@ -1272,6 +1371,13 @@ pub fn selection_validity(
                 Err("Select lines, arcs, or points")
             }
         }
+        ConstraintKind::Block => {
+            if lines + arcs + points >= 2 {
+                Ok(())
+            } else {
+                Err("Select two or more lines, arcs, or points")
+            }
+        }
         // Pick-based kinds open a pick tool; any selection state is fine.
         ConstraintKind::Coincident
         | ConstraintKind::Midpoint
@@ -1279,7 +1385,8 @@ pub fn selection_validity(
         | ConstraintKind::PointOnCircle
         | ConstraintKind::PointDistance
         | ConstraintKind::HDistance
-        | ConstraintKind::VDistance => Ok(()),
+        | ConstraintKind::VDistance
+        | ConstraintKind::Symmetric => Ok(()),
     }
 }
 
@@ -1544,12 +1651,20 @@ fn component_sketch(doc: &Document, seeds: &[EntityId]) -> CompSketch {
     while grew {
         grew = false;
         for c in &doc.constraints {
-            let Some(b) = c.b else { continue };
-            let has_a = comp.contains(&c.a);
-            let has_b = comp.contains(&b);
-            if has_a != has_b {
-                comp.push(if has_a { b } else { c.a });
-                grew = true;
+            // A constraint is an edge over every entity it references —
+            // {a, b} for pairs, plus the mirror line for Symmetric — so one
+            // member being in pulls the rest in.
+            let members: Vec<EntityId> = [Some(c.a), c.b, c.c].into_iter().flatten().collect();
+            if members.len() < 2 {
+                continue;
+            }
+            if members.iter().any(|m| comp.contains(m)) {
+                for &m in &members {
+                    if !comp.contains(&m) {
+                        comp.push(m);
+                        grew = true;
+                    }
+                }
             }
         }
     }
@@ -1778,12 +1893,93 @@ fn component_sketch(doc: &Document, seeds: &[EntityId]) -> CompSketch {
                 });
                 constraint_doc_idx.push(doc_idx);
             }
+            ConstraintKind::Symmetric => {
+                let Some((ea, eb)) = c.pts else { continue };
+                let sm = c.c.and_then(|m| vars.get(&m));
+                let (Some(pa), Some(pb), Some((m0, m1))) = (
+                    anchor_point_var(&mut s, sa, ea, doc_idx, &mut constraint_doc_idx),
+                    sb.and_then(|svb| {
+                        anchor_point_var(&mut s, svb, eb, doc_idx, &mut constraint_doc_idx)
+                    }),
+                    sm.and_then(|v| v.line()),
+                ) else {
+                    continue;
+                };
+                // Midpoint of the pair on the mirror line, and the pair's
+                // segment perpendicular to it: reflection, in two rows.
+                s.constrain(Constraint::MidpointOnLine(pa, pb, m0, m1));
+                s.constrain(Constraint::Perpendicular(pa, pb, m0, m1));
+                constraint_doc_idx.push(doc_idx);
+                constraint_doc_idx.push(doc_idx);
+            }
+            ConstraintKind::Block => {
+                let Some(sb) = sb else { continue };
+                let before = s.constraint_count();
+                lower_block(&mut s, sa, sb);
+                for _ in before..s.constraint_count() {
+                    constraint_doc_idx.push(doc_idx);
+                }
+            }
         }
     }
     CompSketch {
         s,
         vars,
         constraint_doc_idx,
+    }
+}
+
+/// Up to two representative points of an entity for the Block lowering:
+/// enough, together with the entity's own rigidity, to pin its pose
+/// relative to another entity's pair.
+fn block_points(sv: &ShapeVars) -> Vec<PointVar> {
+    match sv {
+        ShapeVars::Line(p0, p1) => vec![*p0, *p1],
+        ShapeVars::Point(p) => vec![*p],
+        ShapeVars::Arc { c, ends, .. } => match ends {
+            Some((ps, _)) => vec![*c, *ps],
+            None => vec![*c],
+        },
+    }
+}
+
+/// Freezes an entity's own shape at its current dimensions (not its pose):
+/// a line keeps its length, an arc its radius and chord.
+fn rigidify(s: &mut Sketch, sv: &ShapeVars) {
+    match sv {
+        ShapeVars::Line(p0, p1) => {
+            let (x0, y0) = s.point(*p0);
+            let (x1, y1) = s.point(*p1);
+            s.constrain(Constraint::Distance(*p0, *p1, (x1 - x0).hypot(y1 - y0)));
+        }
+        ShapeVars::Point(_) => {}
+        ShapeVars::Arc { r, ends, .. } => {
+            let rv = s.scalar(*r);
+            s.constrain(Constraint::FixedScalar(*r, rv));
+            if let Some((ps, pe)) = ends {
+                let (sx, sy) = s.point(*ps);
+                let (ex, ey) = s.point(*pe);
+                s.constrain(Constraint::Distance(*ps, *pe, (ex - sx).hypot(ey - sy)));
+            }
+        }
+    }
+}
+
+/// Lowers one Block record: both entities rigid in themselves, plus every
+/// pairwise distance between their representative points frozen at its
+/// current value — the pair moves as one rigid body (all members share the
+/// same reference, so the whole group does). Targets are read from the
+/// current geometry, the same "as it currently sits" semantics `Fixed`
+/// uses; every converged solve preserves them exactly.
+fn lower_block(s: &mut Sketch, sa: &ShapeVars, sb: &ShapeVars) {
+    rigidify(s, sa);
+    rigidify(s, sb);
+    for &p in &block_points(sa) {
+        for &q in &block_points(sb) {
+            let (px, py) = s.point(p);
+            let (qx, qy) = s.point(q);
+            s.constrain(Constraint::Distance(p, q, (qx - px).hypot(qy - py)));
+        }
     }
 }
 

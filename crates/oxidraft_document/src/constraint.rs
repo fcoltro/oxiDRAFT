@@ -50,6 +50,13 @@ pub enum ConstraintKind {
     /// Like [`ConstraintKind::PointDistance`] but driving only the
     /// vertical separation of the two anchors.
     VDistance,
+    /// Two point anchors (one per entity, indices in `pts`) mirrored about
+    /// the line entity in `c`.
+    Symmetric,
+    /// Entity `a` locked rigid relative to reference entity `b` — one
+    /// record per member of a blocked group, all sharing the same `b`. The
+    /// group keeps only its translate/rotate freedom.
+    Block,
 }
 
 impl ConstraintKind {
@@ -76,6 +83,8 @@ impl ConstraintKind {
             ConstraintKind::PointDistance => "distance",
             ConstraintKind::HDistance => "horizontal distance",
             ConstraintKind::VDistance => "vertical distance",
+            ConstraintKind::Symmetric => "symmetric",
+            ConstraintKind::Block => "block",
         }
     }
 
@@ -99,6 +108,8 @@ impl ConstraintKind {
                 | ConstraintKind::PointDistance
                 | ConstraintKind::HDistance
                 | ConstraintKind::VDistance
+                | ConstraintKind::Symmetric
+                | ConstraintKind::Block
         )
     }
 
@@ -131,6 +142,7 @@ impl ConstraintKind {
                 | ConstraintKind::PointDistance
                 | ConstraintKind::HDistance
                 | ConstraintKind::VDistance
+                | ConstraintKind::Symmetric
         )
     }
 
@@ -157,6 +169,8 @@ impl ConstraintKind {
             ConstraintKind::PointDistance => "PDIST",
             ConstraintKind::HDistance => "HDIST",
             ConstraintKind::VDistance => "VDIST",
+            ConstraintKind::Symmetric => "SYM",
+            ConstraintKind::Block => "BLOCK",
         }
     }
 
@@ -183,6 +197,8 @@ impl ConstraintKind {
             "PDIST" => ConstraintKind::PointDistance,
             "HDIST" => ConstraintKind::HDistance,
             "VDIST" => ConstraintKind::VDistance,
+            "SYM" => ConstraintKind::Symmetric,
+            "BLOCK" => ConstraintKind::Block,
             _ => return None,
         })
     }
@@ -218,6 +234,9 @@ pub struct SketchConstraint {
     pub kind: ConstraintKind,
     pub a: EntityId,
     pub b: Option<EntityId>,
+    /// A third entity for kinds that need one — Symmetric's mirror line.
+    /// `None` for every other kind.
+    pub c: Option<EntityId>,
     pub pts: Option<(u8, u8)>,
     pub val: Option<f64>,
     /// Where the user placed the dimension annotation (world coordinates),
@@ -232,6 +251,7 @@ impl SketchConstraint {
             kind,
             a,
             b: None,
+            c: None,
             pts: None,
             val: None,
             place: None,
@@ -243,6 +263,7 @@ impl SketchConstraint {
             kind,
             a,
             b: Some(b),
+            c: None,
             pts: None,
             val: None,
             place: None,
@@ -254,6 +275,7 @@ impl SketchConstraint {
             kind: ConstraintKind::Coincident,
             a,
             b: Some(b),
+            c: None,
             pts: Some((ea, eb)),
             val: None,
             place: None,
@@ -268,6 +290,7 @@ impl SketchConstraint {
             kind,
             a,
             b: Some(b),
+            c: None,
             pts: Some((ea, eb)),
             val: None,
             place: None,
@@ -288,6 +311,7 @@ impl SketchConstraint {
             kind,
             a,
             b: Some(b),
+            c: None,
             pts: Some((ea, eb)),
             val: Some(value),
             place: None,
@@ -299,6 +323,7 @@ impl SketchConstraint {
             kind: ConstraintKind::Radius,
             a,
             b: None,
+            c: None,
             pts: None,
             val: Some(value),
             place: None,
@@ -312,6 +337,7 @@ impl SketchConstraint {
             kind: ConstraintKind::Angle,
             a,
             b: Some(b),
+            c: None,
             pts: None,
             val: Some(normalize_angle_deg(degrees)),
             place: None,
@@ -324,6 +350,7 @@ impl SketchConstraint {
             kind: ConstraintKind::Distance,
             a,
             b: None,
+            c: None,
             pts: None,
             val: Some(value),
             place: None,
@@ -337,6 +364,7 @@ impl SketchConstraint {
             kind: ConstraintKind::LineDistance,
             a,
             b: Some(b),
+            c: None,
             pts: None,
             val: Some(value),
             place: None,
@@ -348,16 +376,38 @@ impl SketchConstraint {
         SketchConstraint::single(ConstraintKind::Fixed, a)
     }
 
+    /// Two point anchors mirrored about a line: `a`/`b` carry the anchors
+    /// (indices in `pts`), `mirror` is the line reflected about.
+    pub fn symmetric(a: EntityId, ea: u8, b: EntityId, eb: u8, mirror: EntityId) -> Self {
+        SketchConstraint {
+            kind: ConstraintKind::Symmetric,
+            a,
+            b: Some(b),
+            c: Some(mirror),
+            pts: Some((ea, eb)),
+            val: None,
+            place: None,
+        }
+    }
+
+    /// One member of a blocked rigid group, held rigid relative to the
+    /// group's reference entity.
+    pub fn block(member: EntityId, reference: EntityId) -> Self {
+        SketchConstraint::pair(ConstraintKind::Block, member, reference)
+    }
+
     pub fn references(&self, id: EntityId) -> bool {
-        self.a == id || self.b == Some(id)
+        self.a == id || self.b == Some(id) || self.c == Some(id)
     }
 
     /// All pair kinds are symmetric relations, so a duplicate with the
     /// entities (and endpoint indices) swapped is still the same constraint.
-    /// `val` is deliberately not compared: a valued constraint on the same
-    /// geometry is the same relation with a different target.
+    /// The third entity (`c`, a mirror line) plays a distinct role and is
+    /// never swapped. `val` is deliberately not compared: a valued
+    /// constraint on the same geometry is the same relation with a
+    /// different target.
     pub fn same_relation(&self, other: &SketchConstraint) -> bool {
-        if self.kind != other.kind {
+        if self.kind != other.kind || self.c != other.c {
             return false;
         }
         let straight = self.a == other.a && self.b == other.b && self.pts == other.pts;

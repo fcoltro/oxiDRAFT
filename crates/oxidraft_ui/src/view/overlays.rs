@@ -87,6 +87,8 @@ pub(super) enum BadgeGlyph {
     EqualRadius,
     PointOnLine,
     PointOnCircle,
+    Symmetric,
+    Block,
 }
 
 /// A row of glyph chips: each glyph carries the constraints it stands for
@@ -299,6 +301,8 @@ pub(super) fn badge_model(doc: &Document) -> BadgeModel {
             ConstraintKind::Midpoint => BadgeGlyph::Midpoint,
             ConstraintKind::PointOnLine => BadgeGlyph::PointOnLine,
             ConstraintKind::PointOnCircle => BadgeGlyph::PointOnCircle,
+            ConstraintKind::Symmetric => BadgeGlyph::Symmetric,
+            ConstraintKind::Block => BadgeGlyph::Block,
             ConstraintKind::Coincident => {
                 // Resolve the weld position from either side — welds to a
                 // point entity (the origin) or a midpoint/center anchor
@@ -972,6 +976,8 @@ fn badge_icon(g: BadgeGlyph) -> crate::icons::Icon {
         BadgeGlyph::EqualRadius => Icon::ConEqual,
         BadgeGlyph::PointOnLine => Icon::ConCoincident,
         BadgeGlyph::PointOnCircle => Icon::ConCoincident,
+        BadgeGlyph::Symmetric => Icon::ConEqual,
+        BadgeGlyph::Block => Icon::ConFix,
     }
 }
 

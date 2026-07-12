@@ -5,8 +5,8 @@
 //! reject genuine conflicts without touching the document.
 
 use oxidraft_cad::constrain::{
-    constrain_lines, constrain_point_distance, constrain_point_pair, resolve_after_transform,
-    selection_validity,
+    constrain_block, constrain_lines, constrain_point_distance, constrain_point_pair,
+    constrain_symmetric_points, resolve_after_transform, selection_validity,
 };
 use oxidraft_document::{
     ANCHOR_DERIVED, ConstraintKind, Document, EntityId, EntityKind, SketchConstraint,
@@ -294,6 +294,129 @@ fn point_distance_retargets_like_other_driving_dimensions() {
     assert_eq!(records[0].val, Some(6.0));
     let pb = point(&doc, b).to_f64();
     assert!((pb.0.hypot(pb.1) - 6.0).abs() < 1e-6);
+}
+
+#[test]
+fn symmetric_reflects_a_point_across_the_mirror() {
+    let mut doc = Document::new();
+    // Mirror along the x axis, pinned; p1 fixed above it, p2 sloppy below.
+    let mirror = add_line(&mut doc, 0.0, 0.0, 10.0, 0.0);
+    let p1 = add_point(&mut doc, 3.0, 2.0);
+    let p2 = add_point(&mut doc, 4.1, -1.2);
+    doc.add_constraint(SketchConstraint::fixed(mirror));
+    doc.add_constraint(SketchConstraint::fixed(p1));
+    constrain_symmetric_points(&mut doc, (p1, 0), (p2, 0), mirror).expect("symmetric");
+    let r = point(&doc, p2).to_f64();
+    assert!(
+        (r.0 - 3.0).abs() < 1e-6 && (r.1 + 2.0).abs() < 1e-6,
+        "p2 landed on the reflection (3, -2): {r:?}"
+    );
+}
+
+#[test]
+fn symmetric_holds_under_a_mirror_drag() {
+    let mut doc = Document::new();
+    let mirror = add_line(&mut doc, 0.0, 0.0, 10.0, 0.0);
+    let p1 = add_point(&mut doc, 3.0, 2.0);
+    let p2 = add_point(&mut doc, 3.0, -2.0);
+    constrain_symmetric_points(&mut doc, (p1, 0), (p2, 0), mirror).expect("symmetric");
+    // Tilt the mirror 45° through the origin and re-solve.
+    if let Some(e) = doc.get_mut(mirror) {
+        e.kind = EntityKind::Curve(Curve::Line(LineSeg::from_endpoints(
+            Point2d::from_f64(0.0, 0.0),
+            Point2d::from_f64(5.0, 5.0),
+        )));
+    }
+    assert!(resolve_after_transform(&mut doc, &[mirror]));
+    let (a, b) = (point(&doc, p1).to_f64(), point(&doc, p2).to_f64());
+    // Reflection across y=x swaps coordinates: check the pair is still a
+    // mirror image about the (dragged) line y = x.
+    let m = ((a.0 + b.0) * 0.5, (a.1 + b.1) * 0.5);
+    assert!((m.0 - m.1).abs() < 1e-5, "midpoint on y=x: {m:?}");
+    let seg = (b.0 - a.0, b.1 - a.1);
+    // Segment perpendicular to the mirror direction (1,1): dot ≈ 0.
+    assert!((seg.0 + seg.1).abs() < 1e-5, "segment ⟂ mirror: {seg:?}");
+}
+
+#[test]
+fn block_keeps_the_group_rigid_when_a_neighbour_pulls_it() {
+    // A rigid L (two welded lines) blocked together, with a third line
+    // welded onto the L's free end and driven to rotate. The L must ride
+    // along as one rigid body — its own two edges keep their 90° corner and
+    // relative offset — rather than the pull distorting it.
+    let mut doc = Document::new();
+    let h = add_line(&mut doc, 0.0, 0.0, 4.0, 0.0);
+    let v = add_line(&mut doc, 4.0, 0.0, 4.0, 3.0);
+    let arm = add_line(&mut doc, 0.0, 0.0, 0.0, -3.0);
+    doc.add_constraint(SketchConstraint::coincident(h, 1, v, 0));
+    doc.add_constraint(SketchConstraint::coincident(h, 0, arm, 0));
+    constrain_block(&mut doc, &[h, v]).expect("block");
+
+    let corner_before = {
+        let (lh, lv) = (line(&doc, h), line(&doc, v));
+        ((lv.p1.x - lh.p0.x), (lv.p1.y - lh.p0.y))
+    };
+
+    // Swing the arm's far end around; its weld drags the whole L with it.
+    if let Some(e) = doc.get_mut(arm) {
+        e.kind = EntityKind::Curve(Curve::Line(LineSeg::from_endpoints(
+            Point2d::from_f64(0.0, 0.0),
+            Point2d::from_f64(3.0, 0.0),
+        )));
+    }
+    assert!(resolve_after_transform(&mut doc, &[arm]));
+
+    let (lh, lv) = (line(&doc, h), line(&doc, v));
+    // The L kept its own edge lengths.
+    assert!(
+        ((lh.p1.x - lh.p0.x).hypot(lh.p1.y - lh.p0.y) - 4.0).abs() < 1e-4,
+        "h kept its length: {lh:?}"
+    );
+    assert!(
+        ((lv.p1.x - lv.p0.x).hypot(lv.p1.y - lv.p0.y) - 3.0).abs() < 1e-4,
+        "v kept its length: {lv:?}"
+    );
+    // The corner weld held.
+    assert!(
+        (lh.p1.x - lv.p0.x).hypot(lh.p1.y - lv.p0.y) < 1e-4,
+        "corner still welded"
+    );
+    // The L's far corner stayed at the same distance from its own base —
+    // the whole shape is preserved, only relocated/rotated.
+    let corner_after = ((lv.p1.x - lh.p0.x), (lv.p1.y - lh.p0.y));
+    let d_before = corner_before.0.hypot(corner_before.1);
+    let d_after = corner_after.0.hypot(corner_after.1);
+    assert!(
+        (d_before - d_after).abs() < 1e-4,
+        "rigid shape preserved: {d_before} vs {d_after}"
+    );
+}
+
+#[test]
+fn block_moves_as_one_when_the_whole_group_is_dragged() {
+    let mut doc = Document::new();
+    let h = add_line(&mut doc, 0.0, 0.0, 4.0, 0.0);
+    let v = add_line(&mut doc, 4.0, 0.0, 4.0, 3.0);
+    doc.add_constraint(SketchConstraint::coincident(h, 1, v, 0));
+    constrain_block(&mut doc, &[h, v]).expect("block");
+
+    // Translate both members together by (1, 1): the frozen inter-member
+    // distances still hold, so this is trivially consistent.
+    for id in [h, v] {
+        let l = line(&doc, id);
+        if let Some(e) = doc.get_mut(id) {
+            e.kind = EntityKind::Curve(Curve::Line(LineSeg::from_endpoints(
+                Point2d::from_f64(l.p0.x + 1.0, l.p0.y + 1.0),
+                Point2d::from_f64(l.p1.x + 1.0, l.p1.y + 1.0),
+            )));
+        }
+    }
+    assert!(resolve_after_transform(&mut doc, &[h, v]));
+    let lh = line(&doc, h);
+    assert!(
+        (lh.p0.x - 1.0).abs() < 1e-6 && (lh.p0.y - 1.0).abs() < 1e-6,
+        "group translated intact: {lh:?}"
+    );
 }
 
 #[test]

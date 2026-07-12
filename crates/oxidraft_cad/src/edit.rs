@@ -94,7 +94,9 @@ fn remap_constraints_to_pieces(
             | ConstraintKind::PointOnCircle
             | ConstraintKind::PointDistance
             | ConstraintKind::HDistance
-            | ConstraintKind::VDistance => {}
+            | ConstraintKind::VDistance
+            | ConstraintKind::Symmetric
+            | ConstraintKind::Block => {}
             ConstraintKind::Coincident => {
                 let (other, other_end, my_end) = if c.a == old {
                     let (Some(b), Some((ea, eb))) = (c.b, c.pts) else {
