@@ -45,6 +45,11 @@ pub enum Constraint {
     Vertical(PointVar, PointVar),
     /// The distance |ab| equals the given value.
     Distance(PointVar, PointVar, f64),
+    /// The horizontal separation |bx − ax| equals the given value
+    /// (unsigned, so the points may sit in either order).
+    HorizontalDistance(PointVar, PointVar, f64),
+    /// The vertical separation |by − ay| equals the given value (unsigned).
+    VerticalDistance(PointVar, PointVar, f64),
     /// Segment a→b is parallel to segment c→d.
     Parallel(PointVar, PointVar, PointVar, PointVar),
     /// Segment a→b is perpendicular to segment c→d.
@@ -57,6 +62,10 @@ pub enum Constraint {
     Fixed(PointVar, f64, f64),
     /// Point p lies on the infinite line through a and b.
     PointOnLine(PointVar, PointVar, PointVar),
+    /// The midpoint of segment p1→p2 lies on the infinite line through a
+    /// and b. With Perpendicular(p1, p2, a, b) this makes p1 and p2
+    /// symmetric about the line.
+    MidpointOnLine(PointVar, PointVar, PointVar, PointVar),
     /// The perpendicular distance from point p to the infinite line through
     /// a and b equals the given value (unsigned — the point may sit on
     /// either side). Two of these on a segment's endpoints hold two lines
@@ -66,6 +75,8 @@ pub enum Constraint {
     EqualLength(PointVar, PointVar, PointVar, PointVar),
     /// The scalar is pinned to a fixed value.
     FixedScalar(ScalarVar, f64),
+    /// The two scalars are equal (equal radii, typically).
+    EqualScalar(ScalarVar, ScalarVar),
     /// Point p lies on the circle with the given center and radius.
     PointOnCircle(PointVar, PointVar, ScalarVar),
     /// The infinite line through a→b is tangent to the circle with the
@@ -209,6 +220,16 @@ impl Sketch {
                     let (bx, by) = p(b);
                     out.push((bx - ax).hypot(by - ay) - d);
                 }
+                Constraint::HorizontalDistance(a, b, d) => {
+                    let (ax, _) = p(a);
+                    let (bx, _) = p(b);
+                    out.push((bx - ax).abs() - d);
+                }
+                Constraint::VerticalDistance(a, b, d) => {
+                    let (_, ay) = p(a);
+                    let (_, by) = p(b);
+                    out.push((by - ay).abs() - d);
+                }
                 Constraint::Parallel(a, b, c2, d) => {
                     let (ax, ay) = p(a);
                     let (bx, by) = p(b);
@@ -258,6 +279,16 @@ impl Sketch {
                     let n = ux.hypot(uy).max(1e-12);
                     out.push((ux * (qy - ay) - uy * (qx - ax)) / n);
                 }
+                Constraint::MidpointOnLine(p1, p2, a, b) => {
+                    let (x1, y1) = p(p1);
+                    let (x2, y2) = p(p2);
+                    let (ax, ay) = p(a);
+                    let (bx, by) = p(b);
+                    let (mx, my) = ((x1 + x2) * 0.5, (y1 + y2) * 0.5);
+                    let (ux, uy) = (bx - ax, by - ay);
+                    let n = ux.hypot(uy).max(1e-12);
+                    out.push((ux * (my - ay) - uy * (mx - ax)) / n);
+                }
                 Constraint::PointLineDistance(q, a, b, dist) => {
                     let (qx, qy) = p(q);
                     let (ax, ay) = p(a);
@@ -276,6 +307,9 @@ impl Sketch {
                 }
                 Constraint::FixedScalar(s, v) => {
                     out.push(vars[s.0] - v);
+                }
+                Constraint::EqualScalar(s1, s2) => {
+                    out.push(vars[s1.0] - vars[s2.0]);
                 }
                 Constraint::PointOnCircle(q, c2, r) => {
                     let (qx, qy) = p(q);
@@ -375,6 +409,16 @@ impl Sketch {
                     let len = dual::hypot(&(&bx - &ax), &(&by - &ay));
                     push(ci, &len - &Dual::constant(d, nv));
                 }
+                Constraint::HorizontalDistance(a, b, d) => {
+                    let (ax, _) = p(a);
+                    let (bx, _) = p(b);
+                    push(ci, &(&bx - &ax).abs() - &Dual::constant(d, nv));
+                }
+                Constraint::VerticalDistance(a, b, d) => {
+                    let (_, ay) = p(a);
+                    let (_, by) = p(b);
+                    push(ci, &(&by - &ay).abs() - &Dual::constant(d, nv));
+                }
                 Constraint::Parallel(a, b, c2, d) => {
                     let (ax, ay) = p(a);
                     let (bx, by) = p(b);
@@ -430,6 +474,20 @@ impl Sketch {
                     let cross = &(&ux * &(&qy - &ay)) - &(&uy * &(&qx - &ax));
                     push(ci, &cross / &n);
                 }
+                Constraint::MidpointOnLine(p1, p2, a, b) => {
+                    let (x1, y1) = p(p1);
+                    let (x2, y2) = p(p2);
+                    let (ax, ay) = p(a);
+                    let (bx, by) = p(b);
+                    let half = Dual::constant(0.5, nv);
+                    let mx = &(&x1 + &x2) * &half;
+                    let my = &(&y1 + &y2) * &half;
+                    let (ux, uy) = (&bx - &ax, &by - &ay);
+                    let n = dual::hypot(&ux, &uy);
+                    let n = floor(&n);
+                    let cross = &(&ux * &(&my - &ay)) - &(&uy * &(&mx - &ax));
+                    push(ci, &cross / &n);
+                }
                 Constraint::PointLineDistance(q, a, b, dist) => {
                     let (qx, qy) = p(q);
                     let (ax, ay) = p(a);
@@ -453,6 +511,11 @@ impl Sketch {
                 Constraint::FixedScalar(s, v) => {
                     let sv = Dual::var(vars[s.0], s.0, nv);
                     push(ci, &sv - &Dual::constant(v, nv));
+                }
+                Constraint::EqualScalar(s1, s2) => {
+                    let v1 = Dual::var(vars[s1.0], s1.0, nv);
+                    let v2 = Dual::var(vars[s2.0], s2.0, nv);
+                    push(ci, &v1 - &v2);
                 }
                 Constraint::PointOnCircle(q, c2, r) => {
                     let (qx, qy) = p(q);
@@ -1197,14 +1260,18 @@ mod tests {
         s.constrain(Constraint::Horizontal(a, b));
         s.constrain(Constraint::Vertical(c, d));
         s.constrain(Constraint::Distance(a, b, 2.5));
+        s.constrain(Constraint::HorizontalDistance(a, b, 1.2));
+        s.constrain(Constraint::VerticalDistance(c, d, 0.9));
         s.constrain(Constraint::Parallel(a, b, c, d));
         s.constrain(Constraint::Perpendicular(a, b, c, d));
         s.constrain(Constraint::Angle(a, b, c, d, 0.6));
         s.constrain(Constraint::Fixed(a, 0.3, 0.2));
         s.constrain(Constraint::PointOnLine(q, a, b));
+        s.constrain(Constraint::MidpointOnLine(c, d, a, b));
         s.constrain(Constraint::PointLineDistance(q, a, b, 0.8));
         s.constrain(Constraint::EqualLength(a, b, c, d));
         s.constrain(Constraint::FixedScalar(r, 1.7));
+        s.constrain(Constraint::EqualScalar(r, r2));
         s.constrain(Constraint::PointOnCircle(q, center, r));
         s.constrain(Constraint::TangentLineCircle(a, b, center, r));
         s.constrain(Constraint::TangentCircleCircle {
@@ -1241,6 +1308,61 @@ mod tests {
                 );
             }
         }
+    }
+
+    #[test]
+    fn equal_scalar_evens_out_two_radii() {
+        let mut s = Sketch::new();
+        let c1 = s.add_point(0.0, 0.0);
+        let r1 = s.add_scalar(2.0);
+        let c2 = s.add_point(6.0, 0.0);
+        let r2 = s.add_scalar(0.8);
+        s.constrain(Constraint::Fixed(c1, 0.0, 0.0));
+        s.constrain(Constraint::Fixed(c2, 6.0, 0.0));
+        s.constrain(Constraint::FixedScalar(r1, 2.0));
+        s.constrain(Constraint::EqualScalar(r1, r2));
+        let res = s.solve();
+        assert!(res.converged, "residual {}", res.residual);
+        assert!((s.scalar(r2) - 2.0).abs() < 1e-6, "r2 grew to match r1");
+    }
+
+    #[test]
+    fn midpoint_on_line_with_perpendicular_makes_symmetry() {
+        // Mirror line = the x axis (pinned). Point p1 pinned above it; p2
+        // starts somewhere sloppy and must settle at p1's reflection.
+        let mut s = Sketch::new();
+        let a = s.add_point(0.0, 0.0);
+        let b = s.add_point(10.0, 0.0);
+        let p1 = s.add_point(3.0, 2.0);
+        let p2 = s.add_point(4.1, -1.2);
+        s.constrain(Constraint::Fixed(a, 0.0, 0.0));
+        s.constrain(Constraint::Fixed(b, 10.0, 0.0));
+        s.constrain(Constraint::Fixed(p1, 3.0, 2.0));
+        s.constrain(Constraint::MidpointOnLine(p1, p2, a, b));
+        s.constrain(Constraint::Perpendicular(p1, p2, a, b));
+        let res = s.solve_robust();
+        assert!(res.converged, "residual {}", res.residual);
+        assert!(
+            dist(s.point(p2), (3.0, -2.0)) < 1e-6,
+            "p2 landed on the reflection: {:?}",
+            s.point(p2)
+        );
+    }
+
+    #[test]
+    fn horizontal_and_vertical_distance_drive_separations() {
+        let mut s = Sketch::new();
+        let a = s.add_point(0.0, 0.0);
+        let b = s.add_point(2.6, 1.2);
+        s.constrain(Constraint::Fixed(a, 0.0, 0.0));
+        s.constrain(Constraint::HorizontalDistance(a, b, 4.0));
+        s.constrain(Constraint::VerticalDistance(a, b, 3.0));
+        let res = s.solve();
+        assert!(res.converged, "residual {}", res.residual);
+        let (bx, by) = s.point(b);
+        assert!((bx.abs() - 4.0).abs() < 1e-6, "dx settled at 4: {bx}");
+        assert!((by.abs() - 3.0).abs() < 1e-6, "dy settled at 3: {by}");
+        assert!(bx > 0.0 && by > 0.0, "b stayed on its own side");
     }
 
     #[test]

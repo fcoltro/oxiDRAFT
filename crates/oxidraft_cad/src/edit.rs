@@ -83,8 +83,18 @@ fn remap_constraints_to_pieces(
         match c.kind {
             // Length-based relations no longer describe the shorter pieces;
             // Fixed only ever applies to point entities, which are never
-            // trimmed into pieces.
-            ConstraintKind::EqualLength | ConstraintKind::Distance | ConstraintKind::Fixed => {}
+            // trimmed into pieces. Anchor-based relations (midpoint,
+            // point-on-curve, point distances) name picked points the
+            // pieces may no longer carry — dropped the same way.
+            ConstraintKind::EqualLength
+            | ConstraintKind::Distance
+            | ConstraintKind::Fixed
+            | ConstraintKind::Midpoint
+            | ConstraintKind::PointOnLine
+            | ConstraintKind::PointOnCircle
+            | ConstraintKind::PointDistance
+            | ConstraintKind::HDistance
+            | ConstraintKind::VDistance => {}
             ConstraintKind::Coincident => {
                 let (other, other_end, my_end) = if c.a == old {
                     let (Some(b), Some((ea, eb))) = (c.b, c.pts) else {
@@ -132,11 +142,16 @@ fn remap_constraints_to_pieces(
             }
             // LineDistance rides along here: trimming doesn't move the
             // carrier's infinite line, so the driving width still describes
-            // every piece (and, like Angle, it keeps its value).
+            // every piece (and, like Angle, it keeps its value). Collinear
+            // (same carrier), Concentric and EqualRadius (same center and
+            // radius on every arc piece) survive trimming the same way.
             ConstraintKind::Parallel
             | ConstraintKind::Perpendicular
             | ConstraintKind::Tangent
             | ConstraintKind::LineDistance
+            | ConstraintKind::Collinear
+            | ConstraintKind::Concentric
+            | ConstraintKind::EqualRadius
             | ConstraintKind::Angle => {
                 let Some(other) = (if c.a == old { c.b } else { Some(c.a) }) else {
                     continue;

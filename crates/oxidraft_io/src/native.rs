@@ -64,7 +64,32 @@ pub fn to_string(doc: &Document) -> String {
         match (c.b, c.pts) {
             (Some(b), Some((ea, eb))) => {
                 let Some(&ib) = index.get(&b) else { continue };
-                let _ = writeln!(s, "C {} {} {} {} {}", c.kind.code(), ia, ea, ib, eb);
+                // Anchored valued kinds (PointDistance, HDistance,
+                // VDistance) append their value and optional placement
+                // after the anchor tokens.
+                match (c.val, c.place) {
+                    (Some(v), Some((px, py))) => {
+                        let _ = writeln!(
+                            s,
+                            "C {} {} {} {} {} {} {} {}",
+                            c.kind.code(),
+                            ia,
+                            ea,
+                            ib,
+                            eb,
+                            v,
+                            px,
+                            py
+                        );
+                    }
+                    (Some(v), None) => {
+                        let _ =
+                            writeln!(s, "C {} {} {} {} {} {}", c.kind.code(), ia, ea, ib, eb, v);
+                    }
+                    (None, _) => {
+                        let _ = writeln!(s, "C {} {} {} {} {}", c.kind.code(), ia, ea, ib, eb);
+                    }
+                }
             }
             (Some(b), None) => {
                 let Some(&ib) = index.get(&b) else { continue };
@@ -428,23 +453,35 @@ pub fn from_string(text: &str) -> Result<Document, String> {
                 if let Some(kind) = tok.next().and_then(ConstraintKind::from_code)
                     && let Some(ia) = tok.next().and_then(|v| v.parse().ok())
                 {
-                    if kind == ConstraintKind::Coincident {
+                    if kind.has_anchors() {
                         let ea: Option<u8> = tok.next().and_then(|v| v.parse().ok());
                         let ib: Option<usize> = tok.next().and_then(|v| v.parse().ok());
                         let eb: Option<u8> = tok.next().and_then(|v| v.parse().ok());
+                        // Anchored valued kinds (PointDistance, HDistance,
+                        // VDistance) carry `val [px py]` after the anchors.
+                        let val: Option<f64> = tok.next().and_then(|v| v.parse().ok());
+                        let px: Option<f64> = tok.next().and_then(|v| v.parse().ok());
+                        let py: Option<f64> = tok.next().and_then(|v| v.parse().ok());
+                        let place = match (px, py) {
+                            (Some(x), Some(y)) if x.is_finite() && y.is_finite() => Some((x, y)),
+                            _ => None,
+                        };
+                        let val_ok =
+                            !kind.is_valued() || val.is_some_and(|v| v.is_finite() && v > 0.0);
                         // 0/1 are endpoints; ANCHOR_DERIVED (2) is a line's
                         // midpoint or an arc's center.
                         if let (Some(ea), Some(ib), Some(eb)) = (ea, ib, eb)
                             && ea <= ANCHOR_DERIVED
                             && eb <= ANCHOR_DERIVED
+                            && val_ok
                         {
                             pending_constraints.push((
                                 kind,
                                 ia,
                                 Some(ib),
                                 Some((ea, eb)),
-                                None,
-                                None,
+                                if kind.is_valued() { val } else { None },
+                                if kind.is_valued() { place } else { None },
                             ));
                         }
                     } else {
@@ -1088,6 +1125,117 @@ mod tests {
         assert_eq!(c.val, Some(4.0));
         let ids: Vec<_> = doc2.iter().map(|e| e.id).collect();
         assert_eq!((c.a, c.b), (ids[0], None));
+    }
+
+    #[test]
+    fn roundtrip_new_pair_kinds_survive() {
+        let mut doc = Document::new();
+        let c1 = doc.add(EntityKind::Curve(Curve::Arc(
+            oxidraft_geometry::CircularArc::new(pt_i(0, 0), 2.0, 0.0, std::f64::consts::TAU),
+        )));
+        let c2 = doc.add(EntityKind::Curve(Curve::Arc(
+            oxidraft_geometry::CircularArc::new(pt_i(5, 0), 1.0, 0.0, std::f64::consts::TAU),
+        )));
+        let l1 = doc.add(EntityKind::Curve(Curve::Line(LineSeg::from_endpoints(
+            pt_i(0, 3),
+            pt_i(4, 3),
+        ))));
+        let l2 = doc.add(EntityKind::Curve(Curve::Line(LineSeg::from_endpoints(
+            pt_i(5, 3),
+            pt_i(9, 3),
+        ))));
+        doc.add_constraint(SketchConstraint::pair(ConstraintKind::Concentric, c1, c2));
+        doc.add_constraint(SketchConstraint::pair(ConstraintKind::EqualRadius, c1, c2));
+        doc.add_constraint(SketchConstraint::pair(ConstraintKind::Collinear, l1, l2));
+
+        let doc2 = from_string(&to_string(&doc)).unwrap();
+        let kinds: Vec<_> = doc2.constraints.iter().map(|c| c.kind).collect();
+        assert_eq!(
+            kinds,
+            vec![
+                ConstraintKind::Concentric,
+                ConstraintKind::EqualRadius,
+                ConstraintKind::Collinear
+            ]
+        );
+    }
+
+    #[test]
+    fn roundtrip_anchored_kinds_keep_anchors_and_values() {
+        let mut doc = Document::new();
+        let l = doc.add(EntityKind::Curve(Curve::Line(LineSeg::from_endpoints(
+            pt_i(0, 0),
+            pt_i(4, 0),
+        ))));
+        let p = doc.add(EntityKind::Point(pt_i(2, 3)));
+        let c = doc.add(EntityKind::Curve(Curve::Arc(
+            oxidraft_geometry::CircularArc::new(pt_i(8, 0), 2.0, 0.0, std::f64::consts::TAU),
+        )));
+        doc.add_constraint(SketchConstraint::anchored(
+            ConstraintKind::Midpoint,
+            p,
+            0,
+            l,
+            ANCHOR_DERIVED,
+        ));
+        doc.add_constraint(SketchConstraint::anchored(
+            ConstraintKind::PointOnCircle,
+            p,
+            0,
+            c,
+            0,
+        ));
+        let mut pd =
+            SketchConstraint::point_distance(ConstraintKind::PointDistance, l, 0, p, 0, 5.5);
+        pd.place = Some((1.5, 2.5));
+        doc.add_constraint(pd);
+        doc.add_constraint(SketchConstraint::point_distance(
+            ConstraintKind::HDistance,
+            l,
+            1,
+            p,
+            0,
+            2.25,
+        ));
+
+        let doc2 = from_string(&to_string(&doc)).unwrap();
+        assert_eq!(doc2.constraints.len(), 4);
+        let ids: Vec<_> = doc2.iter().map(|e| e.id).collect();
+        let mid = doc2.constraints[0];
+        assert_eq!(
+            (mid.kind, mid.a, mid.b, mid.pts),
+            (
+                ConstraintKind::Midpoint,
+                ids[1],
+                Some(ids[0]),
+                Some((0, ANCHOR_DERIVED))
+            )
+        );
+        let poc = doc2.constraints[1];
+        assert_eq!(
+            (poc.kind, poc.a, poc.b, poc.pts),
+            (
+                ConstraintKind::PointOnCircle,
+                ids[1],
+                Some(ids[2]),
+                Some((0, 0))
+            )
+        );
+        let pd = doc2.constraints[2];
+        assert_eq!(
+            (pd.kind, pd.val, pd.place, pd.pts),
+            (
+                ConstraintKind::PointDistance,
+                Some(5.5),
+                Some((1.5, 2.5)),
+                Some((0, 0))
+            )
+        );
+        let hd = doc2.constraints[3];
+        assert_eq!(
+            (hd.kind, hd.val, hd.pts),
+            (ConstraintKind::HDistance, Some(2.25), Some((1, 0)))
+        );
     }
 
     #[test]

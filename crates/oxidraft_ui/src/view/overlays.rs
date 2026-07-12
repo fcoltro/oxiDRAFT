@@ -81,6 +81,12 @@ pub(super) enum BadgeGlyph {
     Equal,
     Tangent,
     Fixed,
+    Concentric,
+    Collinear,
+    Midpoint,
+    EqualRadius,
+    PointOnLine,
+    PointOnCircle,
 }
 
 /// A row of glyph chips: each glyph carries the constraints it stands for
@@ -274,7 +280,10 @@ pub(super) fn badge_model(doc: &Document) -> BadgeModel {
             ConstraintKind::Radius
             | ConstraintKind::Distance
             | ConstraintKind::LineDistance
-            | ConstraintKind::Angle => {
+            | ConstraintKind::Angle
+            | ConstraintKind::PointDistance
+            | ConstraintKind::HDistance
+            | ConstraintKind::VDistance => {
                 if c.val.is_some() {
                     dim_badges.push(*c);
                 }
@@ -284,6 +293,12 @@ pub(super) fn badge_model(doc: &Document) -> BadgeModel {
             ConstraintKind::Perpendicular => BadgeGlyph::Perpendicular,
             ConstraintKind::EqualLength => BadgeGlyph::Equal,
             ConstraintKind::Tangent => BadgeGlyph::Tangent,
+            ConstraintKind::Concentric => BadgeGlyph::Concentric,
+            ConstraintKind::Collinear => BadgeGlyph::Collinear,
+            ConstraintKind::EqualRadius => BadgeGlyph::EqualRadius,
+            ConstraintKind::Midpoint => BadgeGlyph::Midpoint,
+            ConstraintKind::PointOnLine => BadgeGlyph::PointOnLine,
+            ConstraintKind::PointOnCircle => BadgeGlyph::PointOnCircle,
             ConstraintKind::Coincident => {
                 // Resolve the weld position from either side — welds to a
                 // point entity (the origin) or a midpoint/center anchor
@@ -950,6 +965,13 @@ fn badge_icon(g: BadgeGlyph) -> crate::icons::Icon {
         BadgeGlyph::Equal => Icon::ConEqual,
         BadgeGlyph::Tangent => Icon::ConTangent,
         BadgeGlyph::Fixed => Icon::ConFix,
+        BadgeGlyph::Concentric => Icon::ConConcentric,
+        // Interim aliases until these kinds get their own icon assets.
+        BadgeGlyph::Collinear => Icon::ConParallel,
+        BadgeGlyph::Midpoint => Icon::ConCoincident,
+        BadgeGlyph::EqualRadius => Icon::ConEqual,
+        BadgeGlyph::PointOnLine => Icon::ConCoincident,
+        BadgeGlyph::PointOnCircle => Icon::ConCoincident,
     }
 }
 

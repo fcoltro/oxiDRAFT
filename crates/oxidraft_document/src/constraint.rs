@@ -26,6 +26,30 @@ pub enum ConstraintKind {
     /// automatically on structural anchors (the origin), never by a user
     /// command, so there's no bar/menu path that creates one.
     Fixed,
+    /// Two circular-arc entities sharing one center.
+    Concentric,
+    /// Two line entities lying on one infinite line.
+    Collinear,
+    /// A point anchor on `a` welded to the midpoint of line `b`. Anchor
+    /// indices in `pts`; `eb` is [`ANCHOR_DERIVED`] by construction.
+    Midpoint,
+    /// Two circular-arc entities holding equal radii.
+    EqualRadius,
+    /// A point anchor on `a` (index in `pts.0`) held on the infinite line
+    /// through line entity `b`.
+    PointOnLine,
+    /// A point anchor on `a` (index in `pts.0`) held on the rim of
+    /// circular-arc entity `b`.
+    PointOnCircle,
+    /// Two point anchors (one per entity, indices in `pts`) held at a
+    /// driving straight-line distance, stored in `val`.
+    PointDistance,
+    /// Like [`ConstraintKind::PointDistance`] but driving only the
+    /// horizontal separation of the two anchors.
+    HDistance,
+    /// Like [`ConstraintKind::PointDistance`] but driving only the
+    /// vertical separation of the two anchors.
+    VDistance,
 }
 
 impl ConstraintKind {
@@ -43,6 +67,15 @@ impl ConstraintKind {
             ConstraintKind::LineDistance => "distance",
             ConstraintKind::Angle => "angle",
             ConstraintKind::Fixed => "fixed",
+            ConstraintKind::Concentric => "concentric",
+            ConstraintKind::Collinear => "collinear",
+            ConstraintKind::Midpoint => "midpoint",
+            ConstraintKind::EqualRadius => "equal radius",
+            ConstraintKind::PointOnLine => "point on line",
+            ConstraintKind::PointOnCircle => "point on circle",
+            ConstraintKind::PointDistance => "distance",
+            ConstraintKind::HDistance => "horizontal distance",
+            ConstraintKind::VDistance => "vertical distance",
         }
     }
 
@@ -57,6 +90,15 @@ impl ConstraintKind {
                 | ConstraintKind::Tangent
                 | ConstraintKind::Angle
                 | ConstraintKind::LineDistance
+                | ConstraintKind::Concentric
+                | ConstraintKind::Collinear
+                | ConstraintKind::Midpoint
+                | ConstraintKind::EqualRadius
+                | ConstraintKind::PointOnLine
+                | ConstraintKind::PointOnCircle
+                | ConstraintKind::PointDistance
+                | ConstraintKind::HDistance
+                | ConstraintKind::VDistance
         )
     }
 
@@ -69,6 +111,26 @@ impl ConstraintKind {
                 | ConstraintKind::Distance
                 | ConstraintKind::LineDistance
                 | ConstraintKind::Angle
+                | ConstraintKind::PointDistance
+                | ConstraintKind::HDistance
+                | ConstraintKind::VDistance
+        )
+    }
+
+    /// Kinds whose record carries per-entity anchor indices in
+    /// [`SketchConstraint::pts`] (0/1 = endpoints, [`ANCHOR_DERIVED`] =
+    /// midpoint/center). The saver and loader serialize `pts` exactly for
+    /// these kinds.
+    pub fn has_anchors(&self) -> bool {
+        matches!(
+            self,
+            ConstraintKind::Coincident
+                | ConstraintKind::Midpoint
+                | ConstraintKind::PointOnLine
+                | ConstraintKind::PointOnCircle
+                | ConstraintKind::PointDistance
+                | ConstraintKind::HDistance
+                | ConstraintKind::VDistance
         )
     }
 
@@ -86,6 +148,15 @@ impl ConstraintKind {
             ConstraintKind::LineDistance => "LDIST",
             ConstraintKind::Angle => "ANG",
             ConstraintKind::Fixed => "FIX",
+            ConstraintKind::Concentric => "CONC",
+            ConstraintKind::Collinear => "COLL",
+            ConstraintKind::Midpoint => "MID",
+            ConstraintKind::EqualRadius => "EQR",
+            ConstraintKind::PointOnLine => "POL",
+            ConstraintKind::PointOnCircle => "POC",
+            ConstraintKind::PointDistance => "PDIST",
+            ConstraintKind::HDistance => "HDIST",
+            ConstraintKind::VDistance => "VDIST",
         }
     }
 
@@ -103,6 +174,15 @@ impl ConstraintKind {
             "LEN" => ConstraintKind::Distance,
             "LDIST" => ConstraintKind::LineDistance,
             "ANG" => ConstraintKind::Angle,
+            "CONC" => ConstraintKind::Concentric,
+            "COLL" => ConstraintKind::Collinear,
+            "MID" => ConstraintKind::Midpoint,
+            "EQR" => ConstraintKind::EqualRadius,
+            "POL" => ConstraintKind::PointOnLine,
+            "POC" => ConstraintKind::PointOnCircle,
+            "PDIST" => ConstraintKind::PointDistance,
+            "HDIST" => ConstraintKind::HDistance,
+            "VDIST" => ConstraintKind::VDistance,
             _ => return None,
         })
     }
@@ -176,6 +256,40 @@ impl SketchConstraint {
             b: Some(b),
             pts: Some((ea, eb)),
             val: None,
+            place: None,
+        }
+    }
+
+    /// A pair relation carrying per-entity anchor indices (Midpoint,
+    /// PointOnLine, PointOnCircle, and the anchored distance kinds before
+    /// their value is set).
+    pub fn anchored(kind: ConstraintKind, a: EntityId, ea: u8, b: EntityId, eb: u8) -> Self {
+        SketchConstraint {
+            kind,
+            a,
+            b: Some(b),
+            pts: Some((ea, eb)),
+            val: None,
+            place: None,
+        }
+    }
+
+    /// A driving distance between two point anchors: straight-line
+    /// (PointDistance) or axis-projected (HDistance / VDistance).
+    pub fn point_distance(
+        kind: ConstraintKind,
+        a: EntityId,
+        ea: u8,
+        b: EntityId,
+        eb: u8,
+        value: f64,
+    ) -> Self {
+        SketchConstraint {
+            kind,
+            a,
+            b: Some(b),
+            pts: Some((ea, eb)),
+            val: Some(value),
             place: None,
         }
     }

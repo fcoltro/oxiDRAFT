@@ -1774,7 +1774,7 @@ impl AppState {
                 self.document = doc;
                 self.command_log.push(msg);
             }
-            Err(e) => self.command_log.push(e),
+            Err(e) => self.command_log.push(e.message),
         }
     }
 
@@ -1786,7 +1786,7 @@ impl AppState {
                 self.document = doc;
                 self.command_log.push(msg);
             }
-            Err(e) => self.command_log.push(e),
+            Err(e) => self.command_log.push(e.message),
         }
     }
 
@@ -1798,7 +1798,7 @@ impl AppState {
                 self.document = doc;
                 self.command_log.push(msg);
             }
-            Err(e) => self.command_log.push(e),
+            Err(e) => self.command_log.push(e.message),
         }
     }
 
@@ -1810,7 +1810,7 @@ impl AppState {
                 self.document = doc;
                 self.command_log.push(msg);
             }
-            Err(e) => self.command_log.push(e),
+            Err(e) => self.command_log.push(e.message),
         }
     }
 
@@ -1822,7 +1822,7 @@ impl AppState {
                 self.document = doc;
                 self.command_log.push(msg);
             }
-            Err(e) => self.command_log.push(e),
+            Err(e) => self.command_log.push(e.message),
         }
     }
 
@@ -1853,7 +1853,7 @@ impl AppState {
                 self.document = doc;
                 self.command_log.push(msg);
             }
-            Err(e) => self.command_log.push(e),
+            Err(e) => self.command_log.push(e.message),
         }
     }
 
@@ -1871,7 +1871,7 @@ impl AppState {
                 self.document = doc;
                 self.command_log.push(msg);
             }
-            Err(e) => self.command_log.push(e),
+            Err(e) => self.command_log.push(e.message),
         }
     }
 
@@ -1882,7 +1882,7 @@ impl AppState {
         place: Option<(f64, f64)>,
     ) -> bool {
         let mut doc = self.document.clone();
-        let (res, kind): (Result<String, String>, ConstraintKind) = match b {
+        let (res, kind): (Result<String, oxidraft_cad::ConstrainError>, ConstraintKind) = match b {
             Some(b) if lines_parallel(&self.document, a, b) => (
                 oxidraft_cad::constrain_line_distance(&mut doc, &[a, b], None),
                 ConstraintKind::LineDistance,
@@ -1925,7 +1925,7 @@ impl AppState {
                 true
             }
             Err(e) => {
-                self.command_log.push(e);
+                self.command_log.push(e.message);
                 false
             }
         }
