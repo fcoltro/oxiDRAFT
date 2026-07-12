@@ -126,6 +126,17 @@ pub(super) fn tool_prompt(tool: &Tool) -> String {
                 "Pick the point to weld it to".into()
             }
         }
+        Tool::ConPick { kind, picks } => {
+            let plan = crate::tools::con_pick_plan(*kind);
+            match plan.get(picks.len()) {
+                Some(crate::tools::ConPickStep::Point) => {
+                    "Pick a point (endpoint, midpoint, center, or point)".into()
+                }
+                Some(crate::tools::ConPickStep::Line) => "Pick a line".into(),
+                Some(crate::tools::ConPickStep::Arc) => "Pick a circle or arc".into(),
+                None => "Applying…".into(),
+            }
+        }
         Tool::Ellipse { center, axis_end } => match (center, axis_end) {
             (None, _) => "Specify center of ellipse".into(),
             (Some(_), None) => "Specify end of first axis".into(),

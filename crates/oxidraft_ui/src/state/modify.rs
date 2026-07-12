@@ -180,6 +180,62 @@ impl AppState {
                 }
                 true
             }
+            Tool::ConPick { kind, mut picks } => {
+                let plan = crate::tools::con_pick_plan(kind);
+                let step = plan.get(picks.len()).copied();
+                let Some(step) = step else {
+                    // Shouldn't happen — a full pick set is applied below on
+                    // the click that completes it — but reset defensively.
+                    self.tool = Tool::ConPick {
+                        kind,
+                        picks: Vec::new(),
+                    };
+                    return true;
+                };
+                let Some(id) = pick_at(&self.document, px, py, tol) else {
+                    // Empty space cancels the in-progress pick set.
+                    self.tool = Tool::ConPick {
+                        kind,
+                        picks: Vec::new(),
+                    };
+                    return true;
+                };
+                let resolved = match step {
+                    crate::tools::ConPickStep::Point => {
+                        weld_anchor_at(self, id, px, py, tol).map(|(a, p)| (id, a, p))
+                    }
+                    crate::tools::ConPickStep::Line => line_endpoints_of(self, id)
+                        .is_some()
+                        .then(|| (id, 0u8, Point2d::from_f64(px, py))),
+                    crate::tools::ConPickStep::Arc => self
+                        .document
+                        .get(id)
+                        .and_then(|e| e.as_curve())
+                        .and_then(circle_center_radius)
+                        .map(|(c, _)| (id, 0u8, c)),
+                };
+                let Some(pick) = resolved else {
+                    self.command_log.push(match step {
+                        crate::tools::ConPickStep::Point => {
+                            "Pick an endpoint, midpoint, center, or point".into()
+                        }
+                        crate::tools::ConPickStep::Line => "Pick a line".into(),
+                        crate::tools::ConPickStep::Arc => "Pick a circle or arc".into(),
+                    });
+                    return true;
+                };
+                picks.push(pick);
+                if picks.len() == plan.len() {
+                    self.constrain_picked(kind, &picks);
+                    self.tool = Tool::ConPick {
+                        kind,
+                        picks: Vec::new(),
+                    };
+                } else {
+                    self.tool = Tool::ConPick { kind, picks };
+                }
+                true
+            }
             Tool::DimAngularLines { a, geom: None } => {
                 if let Some(id) = pick(self)
                     && line_endpoints_of(self, id).is_some()

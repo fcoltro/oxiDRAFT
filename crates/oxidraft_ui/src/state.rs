@@ -1749,7 +1749,8 @@ impl AppState {
     }
 
     pub fn constrain_selection(&mut self, kind: oxidraft_cad::ConstraintKind) {
-        if kind == oxidraft_cad::ConstraintKind::Coincident {
+        use oxidraft_cad::ConstraintKind as K;
+        if kind == K::Coincident {
             let lines = self
                 .selection
                 .iter()
@@ -1766,6 +1767,22 @@ impl AppState {
                     .push("WELD: pick two points to make them coincident".into());
                 return;
             }
+        }
+        // The point-anchored relations are pick-based: activate the pick
+        // tool with a prompt rather than acting on the current selection.
+        if !crate::tools::con_pick_plan(kind).is_empty() {
+            self.tool = Tool::ConPick {
+                kind,
+                picks: Vec::new(),
+            };
+            self.command_log.push(match kind {
+                K::Midpoint => "MIDPOINT: pick a point, then a line".into(),
+                K::PointOnLine => "POINT-ON-LINE: pick a point, then a line".into(),
+                K::PointOnCircle => "POINT-ON-CIRCLE: pick a point, then a circle/arc".into(),
+                K::Symmetric => "SYMMETRIC: pick two points, then the mirror line".into(),
+                _ => format!("{}: pick its points", kind.label()),
+            });
+            return;
         }
         let mut doc = self.document.clone();
         match oxidraft_cad::constrain_lines(&mut doc, &self.selection, kind) {
@@ -1785,6 +1802,40 @@ impl AppState {
                 self.history.snapshot(&self.document);
                 self.document = doc;
                 self.command_log.push(msg);
+            }
+            Err(e) => self.command_log.push(e.message),
+        }
+    }
+
+    /// Applies a completed pick set from the `ConPick` tool. Each pick is
+    /// (entity, anchor index, position); the count/roles match the kind's
+    /// `con_pick_plan`.
+    pub fn constrain_picked(
+        &mut self,
+        kind: ConstraintKind,
+        picks: &[(EntityId, u8, oxidraft_geometry::Point2d)],
+    ) {
+        let mut doc = self.document.clone();
+        let anchor = |i: usize| (picks[i].0, picks[i].1);
+        let res = match kind {
+            ConstraintKind::Midpoint
+            | ConstraintKind::PointOnLine
+            | ConstraintKind::PointOnCircle
+                if picks.len() == 2 =>
+            {
+                oxidraft_cad::constrain_point_pair(&mut doc, kind, anchor(0), anchor(1))
+            }
+            ConstraintKind::Symmetric if picks.len() == 3 => {
+                oxidraft_cad::constrain_symmetric_points(&mut doc, anchor(0), anchor(1), picks[2].0)
+            }
+            _ => return,
+        };
+        match res {
+            Ok(msg) => {
+                self.history.snapshot(&self.document);
+                self.document = doc;
+                self.command_log.push(msg);
+                self.show_constraints = true;
             }
             Err(e) => self.command_log.push(e.message),
         }

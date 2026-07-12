@@ -524,3 +524,86 @@ fn mirror_tool_reflects_selection() {
         panic!("expected a line")
     }
 }
+
+#[test]
+fn con_pick_midpoint_applies_through_the_pick_tool() {
+    use oxidraft_document::ConstraintKind;
+    let mut a = app();
+    let l = a.add_entity(line(0, 0, 4, 2));
+    let p = a.add_entity(EntityKind::Point(Point2d::from_i64(3, 3)));
+    // MID activates the pick tool; pick the point, then the line.
+    a.run_command("MID");
+    click(&mut a, 3.0, 3.0);
+    click(&mut a, 2.0, 1.0);
+    let mids = a
+        .document
+        .constraints
+        .iter()
+        .filter(|c| c.kind == ConstraintKind::Midpoint)
+        .count();
+    assert_eq!(mids, 1, "a Midpoint constraint was recorded");
+    // Both sides move minimally, so assert the relation (point on the
+    // solved line's midpoint) rather than an absolute position.
+    let (pt, lm) = match (
+        a.document.get(p).map(|e| &e.kind),
+        a.document.get(l).and_then(|e| e.as_curve()),
+    ) {
+        (Some(EntityKind::Point(pt)), Some(Curve::Line(ln))) => {
+            let (x0, y0) = ln.p0.to_f64();
+            let (x1, y1) = ln.p1.to_f64();
+            (pt.to_f64(), ((x0 + x1) * 0.5, (y0 + y1) * 0.5))
+        }
+        _ => panic!("expected a point and a line"),
+    };
+    assert!(
+        (pt.0 - lm.0).abs() < 1e-5 && (pt.1 - lm.1).abs() < 1e-5,
+        "point sits at the line's midpoint: {pt:?} vs {lm:?}"
+    );
+}
+
+#[test]
+fn con_pick_symmetric_needs_three_picks() {
+    use oxidraft_document::ConstraintKind;
+    let mut a = app();
+    let mirror = a.add_entity(line(0, 0, 10, 0));
+    let p1 = a.add_entity(EntityKind::Point(Point2d::from_i64(3, 2)));
+    let p2 = a.add_entity(EntityKind::Point(Point2d::from_i64(4, -1)));
+    // Pin the mirror and one point so the relation resolves by moving the
+    // other point — otherwise the free mirror just repositions itself.
+    a.selection = vec![mirror, p1];
+    a.run_command("FIX");
+    a.selection.clear();
+    a.run_command("SYM");
+    click(&mut a, 3.0, 2.0); // p1
+    click(&mut a, 4.0, -1.0); // p2
+    // Not applied yet after two picks.
+    assert_eq!(
+        a.document
+            .constraints
+            .iter()
+            .filter(|c| c.kind == ConstraintKind::Symmetric)
+            .count(),
+        0
+    );
+    click(&mut a, 5.0, 0.0); // mirror line
+    assert_eq!(
+        a.document
+            .constraints
+            .iter()
+            .filter(|c| c.kind == ConstraintKind::Symmetric)
+            .count(),
+        1,
+        "symmetric recorded after the mirror pick"
+    );
+    // p1 pinned at (3,2); p2 must land on its reflection (3,-2).
+    if let Some(EntityKind::Point(pt)) = a.document.get(p2).map(|e| &e.kind) {
+        let (x, y) = pt.to_f64();
+        assert!(
+            (x - 3.0).abs() < 1e-5 && (y + 2.0).abs() < 1e-5,
+            "p2 reflected to (3,-2): ({x},{y})"
+        );
+    } else {
+        panic!("expected a point");
+    }
+    let _ = (mirror, p1);
+}

@@ -279,6 +279,19 @@ pub fn parse_command(input: &str) -> Command {
                 .and_then(|v| parse_finite_f64(v))
                 .filter(|d| *d > 0.0),
         ),
+        // Geometric relations added to the catalogue. The pick-based ones
+        // (MID/POL/POC/SYM) activate a pick tool via constrain_selection;
+        // the selection-based ones act on the current selection.
+        "CONCENTRIC" | "CONC" | "GCCONCENTRIC" => Command::Constrain(ConstraintKind::Concentric),
+        "COLLINEAR" | "COLL" | "GCCOLLINEAR" => Command::Constrain(ConstraintKind::Collinear),
+        "EQUALRADIUS" | "EQR" | "GCEQUALRADIUS" => Command::Constrain(ConstraintKind::EqualRadius),
+        "MIDPOINT" | "MID" | "GCMID" => Command::Constrain(ConstraintKind::Midpoint),
+        "POINTONLINE" | "POL" | "GCPOL" => Command::Constrain(ConstraintKind::PointOnLine),
+        "POINTONCIRCLE" | "POC" | "GCPOC" => Command::Constrain(ConstraintKind::PointOnCircle),
+        "SYMMETRIC" | "SYM" | "GCSYM" | "GCSYMMETRIC" => {
+            Command::Constrain(ConstraintKind::Symmetric)
+        }
+        "BLOCK" | "GCBLOCK" | "RIGIDSET" => Command::Constrain(ConstraintKind::Block),
         "UNCONSTRAIN" | "UNCON" => Command::Unconstrain,
         // Pin the selected geometry in place.
         "FIX" | "FIXCON" | "GCFIX" | "ANCHOR" => Command::Fix,

@@ -1,8 +1,33 @@
-use oxidraft_document::{EntityId, EntityKind};
+use oxidraft_document::{ConstraintKind, EntityId, EntityKind};
 use oxidraft_geometry::{
     CircularArc, Continuity, Curve, EllipticalArc, LineSeg, NurbsCurve, Point2d, Transform2d,
     cv_spline_segments,
 };
+/// What a pick step of a `ConPick` tool expects: a point anchor (endpoint,
+/// midpoint, center, or point entity) or a whole curve entity of a kind.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum ConPickStep {
+    /// An endpoint / midpoint / center / point-entity anchor.
+    Point,
+    /// A line entity (its infinite carrier or midpoint is the target).
+    Line,
+    /// A circle/arc entity (its rim is the target).
+    Arc,
+}
+
+/// The ordered pick steps a pick-based constraint kind needs. Empty for
+/// kinds that aren't pick-based (they never open a `ConPick` tool).
+pub fn con_pick_plan(kind: ConstraintKind) -> &'static [ConPickStep] {
+    use ConPickStep::*;
+    match kind {
+        ConstraintKind::Midpoint => &[Point, Line],
+        ConstraintKind::PointOnLine => &[Point, Line],
+        ConstraintKind::PointOnCircle => &[Point, Arc],
+        ConstraintKind::Symmetric => &[Point, Point, Line],
+        _ => &[],
+    }
+}
+
 #[allow(clippy::large_enum_variant)]
 #[derive(Clone, Debug)]
 pub enum Tool {
@@ -71,6 +96,15 @@ pub enum Tool {
     /// band from it.
     Weld {
         first: Option<(EntityId, u8, Point2d)>,
+    },
+    /// Pick-based application of one of the point-anchored relations
+    /// (Midpoint, PointOnLine, PointOnCircle, Symmetric). `kind` chooses the
+    /// relation; `picks` accumulates the anchors/entities picked so far,
+    /// each as (entity, anchor index, world position). The number of picks
+    /// the relation needs is fixed per kind — see `con_pick_plan`.
+    ConPick {
+        kind: ConstraintKind,
+        picks: Vec<(EntityId, u8, Point2d)>,
     },
     Ellipse {
         center: Option<Point2d>,
@@ -199,6 +233,7 @@ impl Tool {
             Tool::DimRadial { .. } => "DIM RADIUS",
             Tool::DimConstraint { .. } => "SMART DIMENSION",
             Tool::Weld { .. } => "WELD",
+            Tool::ConPick { .. } => "CONSTRAIN (pick)",
             Tool::Ellipse { .. } => "ELLIPSE",
             Tool::Rectangle { .. } => "RECTANGLE",
             Tool::PlotWindow { .. } => "PLOT WINDOW",
@@ -242,6 +277,7 @@ impl Tool {
                 | Tool::DimAngularLines { geom: None, .. }
                 | Tool::DimConstraint { .. }
                 | Tool::Weld { .. }
+                | Tool::ConPick { .. }
         )
     }
 
@@ -674,6 +710,7 @@ impl Tool {
             | Tool::CircleTtt { .. }
             | Tool::DimConstraint { .. }
             | Tool::Weld { .. }
+            | Tool::ConPick { .. }
             | Tool::TangentLine { .. } => ToolEvent::Pending,
         }
     }
@@ -713,6 +750,7 @@ impl Tool {
                 *pending = None;
             }
             Tool::Weld { first } => *first = None,
+            Tool::ConPick { picks, .. } => picks.clear(),
             Tool::Ellipse { center, axis_end } => {
                 *center = None;
                 *axis_end = None;
@@ -771,6 +809,7 @@ impl Tool {
             Tool::DimRadial { center, .. } => center.is_some(),
             Tool::DimConstraint { first, pending } => first.is_some() || pending.is_some(),
             Tool::Weld { first } => first.is_some(),
+            Tool::ConPick { picks, .. } => !picks.is_empty(),
             Tool::Ellipse { center, .. } => center.is_some(),
             Tool::Rectangle { first } | Tool::PlotWindow { first } => first.is_some(),
             Tool::Move { base, .. } | Tool::Copy { base, .. } => base.is_some(),
@@ -961,6 +1000,7 @@ impl Tool {
             | Tool::CircleTtt { .. }
             | Tool::DimConstraint { .. } => None,
             Tool::Weld { first } => first.map(|(_, _, p)| p),
+            Tool::ConPick { picks, .. } => picks.last().map(|(_, _, p)| *p),
             Tool::TangentLine { first } => match first {
                 Some(TanAnchor::Point(p)) => Some(*p),
                 _ => None,

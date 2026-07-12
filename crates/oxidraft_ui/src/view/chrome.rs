@@ -1658,6 +1658,7 @@ fn tool_hotkey(tool: &Tool) -> &'static str {
         | Tool::DimRadial { .. }
         | Tool::DimConstraint { .. }
         | Tool::Weld { .. }
+        | Tool::ConPick { .. }
         | Tool::PlotWindow { .. }
         | Tool::Point => "",
     }
@@ -2524,86 +2525,173 @@ pub(super) fn constraint_bar(ctx: &Context, app: &mut AppState, canvas_rect: egu
                         "Smart Dimension (DIMCON) — click a line for length, \
                          a circle/arc for radius, or two lines for angle",
                         Icon::ConLengthLock,
-                    ) {
+                    )
+                    .clicked()
+                    {
                         app.execute(Command::Activate(Tool::DimConstraint {
                             first: None,
                             pending: None,
                         }));
                     }
                     bar_divider(ui);
-                    ui.add_enabled_ui(has_sel, |ui| {
-                        ui.set_width(30.0);
-                        ui.spacing_mut().item_spacing.y = 3.0;
-                        let mut cmd: Option<Command> = None;
-                        let mut geo = |ui: &mut egui::Ui, icon: Icon, tip: &str, k: K| {
-                            if con_glyph_button(ui, tip, icon) {
-                                cmd = Some(Command::Constrain(k));
-                            }
+                    ui.set_width(30.0);
+                    ui.spacing_mut().item_spacing.y = 3.0;
+                    let mut cmd: Option<Command> = None;
+                    // Selection-based relations: enabled only when the current
+                    // selection is a valid target, with the requirement shown
+                    // as a disabled-hover tooltip. Pick-based relations stay
+                    // enabled (they open a pick tool regardless of selection).
+                    let mut geo = |ui: &mut egui::Ui, icon: Icon, tip: &str, k: K| {
+                        let validity =
+                            oxidraft_cad::selection_validity(&app.document, &app.selection, k);
+                        let pick_based =
+                            !crate::tools::con_pick_plan(k).is_empty() || k == K::Coincident;
+                        let enabled = pick_based || validity.is_ok();
+                        let resp = ui
+                            .add_enabled_ui(enabled, |ui| con_glyph_button(ui, tip, icon))
+                            .inner;
+                        let resp = match validity {
+                            Err(why) if !enabled => resp.on_disabled_hover_text(why),
+                            _ => resp,
                         };
-                        geo(
-                            ui,
-                            Icon::ConHorizontal,
-                            "Horizontal (HOR) — level the selected line(s)",
-                            K::Horizontal,
-                        );
-                        geo(
-                            ui,
-                            Icon::ConVertical,
-                            "Vertical (VER) — plumb the selected line(s)",
-                            K::Vertical,
-                        );
-                        geo(
-                            ui,
-                            Icon::ConParallel,
-                            "Parallel (PAR) — align the 2nd line to the 1st",
-                            K::Parallel,
-                        );
-                        geo(
-                            ui,
-                            Icon::ConPerpendicular,
-                            "Perpendicular (PERP) — square the 2nd line to the 1st",
-                            K::Perpendicular,
-                        );
-                        geo(
-                            ui,
-                            Icon::ConEqual,
-                            "Equal length (EQL) — match the 2nd line to the 1st",
-                            K::EqualLength,
-                        );
-                        geo(
-                            ui,
-                            Icon::ConTangent,
-                            "Tangent (TANCON) — a line and an arc, or two arcs",
-                            K::Tangent,
-                        );
-                        if con_glyph_button(
-                            ui,
-                            "Coincident (COI/WELD) — with two lines selected, weld their \
-                             nearest endpoints; otherwise pick any two points (endpoint, \
-                             midpoint, center, the origin) to weld",
-                            Icon::ConCoincident,
-                        ) {
-                            cmd = Some(Command::Constrain(K::Coincident));
+                        if resp.clicked() {
+                            cmd = Some(Command::Constrain(k));
                         }
-                        bar_divider(ui);
+                    };
+                    geo(
+                        ui,
+                        Icon::ConHorizontal,
+                        "Horizontal (HOR) — level the selected line(s)",
+                        K::Horizontal,
+                    );
+                    geo(
+                        ui,
+                        Icon::ConVertical,
+                        "Vertical (VER) — plumb the selected line(s)",
+                        K::Vertical,
+                    );
+                    geo(
+                        ui,
+                        Icon::ConParallel,
+                        "Parallel (PAR) — align the 2nd line to the 1st",
+                        K::Parallel,
+                    );
+                    geo(
+                        ui,
+                        Icon::ConPerpendicular,
+                        "Perpendicular (PERP) — square the 2nd line to the 1st",
+                        K::Perpendicular,
+                    );
+                    geo(
+                        ui,
+                        Icon::ConParallel,
+                        "Collinear (COLL) — lay the 2nd line on the 1st's carrier",
+                        K::Collinear,
+                    );
+                    geo(
+                        ui,
+                        Icon::ConEqual,
+                        "Equal length (EQL) — match the 2nd line to the 1st",
+                        K::EqualLength,
+                    );
+                    geo(
+                        ui,
+                        Icon::ConTangent,
+                        "Tangent (TANCON) — a line and an arc, or two arcs",
+                        K::Tangent,
+                    );
+                    geo(
+                        ui,
+                        Icon::ConConcentric,
+                        "Concentric (CONC) — share the two circles'/arcs' center",
+                        K::Concentric,
+                    );
+                    geo(
+                        ui,
+                        Icon::ConEqual,
+                        "Equal radius (EQR) — match the 2nd circle/arc to the 1st",
+                        K::EqualRadius,
+                    );
+                    bar_divider(ui);
+                    // Pick-based relations.
+                    geo(
+                        ui,
+                        Icon::ConCoincident,
+                        "Coincident (COI/WELD) — with two lines selected, weld their \
+                         nearest endpoints; otherwise pick any two points to weld",
+                        K::Coincident,
+                    );
+                    geo(
+                        ui,
+                        Icon::ConCoincident,
+                        "Midpoint (MID) — hold a picked point at a line's midpoint",
+                        K::Midpoint,
+                    );
+                    geo(
+                        ui,
+                        Icon::ConCoincident,
+                        "Point on line (POL) — hold a picked point on a line",
+                        K::PointOnLine,
+                    );
+                    geo(
+                        ui,
+                        Icon::ConCoincident,
+                        "Point on circle (POC) — hold a picked point on a circle/arc",
+                        K::PointOnCircle,
+                    );
+                    geo(
+                        ui,
+                        Icon::ConEqual,
+                        "Symmetric (SYM) — mirror two picked points about a line",
+                        K::Symmetric,
+                    );
+                    bar_divider(ui);
+                    {
+                        let block_ok = oxidraft_cad::selection_validity(
+                            &app.document,
+                            &app.selection,
+                            K::Block,
+                        );
+                        let resp = ui
+                            .add_enabled_ui(block_ok.is_ok(), |ui| {
+                                con_glyph_button(
+                                    ui,
+                                    "Block (BLOCK) — lock the selection into a rigid group",
+                                    Icon::ConFix,
+                                )
+                            })
+                            .inner;
+                        let resp = match block_ok {
+                            Err(why) => resp.on_disabled_hover_text(why),
+                            _ => resp,
+                        };
+                        if resp.clicked() {
+                            cmd = Some(Command::Constrain(K::Block));
+                        }
+                    }
+                    ui.add_enabled_ui(has_sel, |ui| {
                         if con_glyph_button(
                             ui,
                             "Fix (GCFIX) — pin the selected geometry in place",
                             Icon::ConFix,
-                        ) {
+                        )
+                        .clicked()
+                        {
                             cmd = Some(Command::Fix);
                         }
                         if con_glyph_button(
                             ui,
                             "Remove (UNCON) — drop every constraint on the selection",
                             Icon::ConRemove,
-                        ) {
+                        )
+                        .clicked()
+                        {
                             cmd = Some(Command::Unconstrain);
                         }
-                        if let Some(c) = cmd {
-                            app.execute(c);
-                        }
                     });
+                    if let Some(c) = cmd {
+                        app.execute(c);
+                    }
                 });
         });
     egui::Area::new(egui::Id::new("constraint_bar_toggles"))
@@ -2714,9 +2802,10 @@ fn bar_toggle_onoff(
     resp.clicked()
 }
 
-fn con_glyph_button(ui: &mut egui::Ui, tooltip: &str, icon: crate::icons::Icon) -> bool {
+fn con_glyph_button(ui: &mut egui::Ui, tooltip: &str, icon: crate::icons::Icon) -> egui::Response {
     let (rect, mut resp) = ui.allocate_exact_size(egui::Vec2::splat(30.0), egui::Sense::click());
-    let hovered = resp.hovered();
+    let enabled = ui.is_enabled();
+    let hovered = resp.hovered() && enabled;
     let anim = ui.ctx().animate_bool(resp.id, hovered);
     let painter = ui.painter_at(rect);
     if anim > 0.001 {
@@ -2727,11 +2816,18 @@ fn con_glyph_button(ui: &mut egui::Ui, tooltip: &str, icon: crate::icons::Icon) 
         );
     }
     let area = egui::Rect::from_center_size(rect.center(), egui::Vec2::splat(20.0));
-    crate::icons::paint_icon(&painter, ui.ctx(), icon, area, egui::Color32::WHITE);
+    // Dim the glyph when the button is disabled, matching the app's other
+    // enabled/disabled icon buttons.
+    let tint = if enabled {
+        egui::Color32::WHITE
+    } else {
+        egui::Color32::WHITE.gamma_multiply(0.35)
+    };
+    crate::icons::paint_icon(&painter, ui.ctx(), icon, area, tint);
     if hovered {
         resp = resp.on_hover_ui(|ui| crate::icons::rich_tooltip(ui, tooltip));
     }
-    resp.clicked()
+    resp
 }
 
 fn bar_divider(ui: &mut egui::Ui) {
