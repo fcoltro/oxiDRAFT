@@ -44,7 +44,6 @@ fn faces() -> &'static [FaceEntry] {
             };
             let w = weight_name(face.weight.0);
             let italic = !matches!(face.style, fontdb::Style::Normal);
-
             let mut label =
                 if w == "Regular" || fam.to_ascii_lowercase().contains(&w.to_ascii_lowercase()) {
                     fam.clone()
@@ -101,7 +100,7 @@ fn initialized_id() -> egui::Id {
     egui::Id::new("fonts_initialized")
 }
 
-const ROBOTO_REGULAR: &[u8] = include_bytes!("../assets/Roboto-Regular.ttf");
+const ROBOTO_LIGHT: &[u8] = include_bytes!("../assets/Roboto-Light.ttf");
 
 pub fn ensure_fonts(ctx: &Context, needed: &BTreeSet<String>) {
     let want: Vec<String> = needed.iter().cloned().collect();
@@ -115,7 +114,7 @@ pub fn ensure_fonts(ctx: &Context, needed: &BTreeSet<String>) {
     let mut fonts = egui::FontDefinitions::default();
     fonts.font_data.insert(
         "Roboto".to_owned(),
-        std::sync::Arc::new(egui::FontData::from_static(ROBOTO_REGULAR)),
+        std::sync::Arc::new(egui::FontData::from_static(ROBOTO_LIGHT)),
     );
     if let Some(prop) = fonts.families.get_mut(&FontFamily::Proportional) {
         prop.insert(0, "Roboto".to_owned());
@@ -176,6 +175,7 @@ impl ttf_parser::OutlineBuilder for ContourBuilder {
         self.pen = (self.ox + x as f64 * self.scale, y as f64 * self.scale);
         self.start = self.pen;
     }
+
     fn line_to(&mut self, x: f32, y: f32) {
         let p1 = self.map(x, y);
         self.cur.push(Curve::Line(LineSeg::from_endpoints(
@@ -184,6 +184,7 @@ impl ttf_parser::OutlineBuilder for ContourBuilder {
         )));
         self.pen = (p1.x, p1.y);
     }
+
     fn quad_to(&mut self, x1: f32, y1: f32, x: f32, y: f32) {
         let p0 = Point2d::from_f64(self.pen.0, self.pen.1);
         let c = self.map(x1, y1);
@@ -200,6 +201,7 @@ impl ttf_parser::OutlineBuilder for ContourBuilder {
             .push(Curve::Bezier(CubicBezier::new(p0, c1, c2, p1)));
         self.pen = (p1.x, p1.y);
     }
+
     fn curve_to(&mut self, x1: f32, y1: f32, x2: f32, y2: f32, x: f32, y: f32) {
         let p0 = Point2d::from_f64(self.pen.0, self.pen.1);
         let c1 = self.map(x1, y1);
@@ -209,6 +211,7 @@ impl ttf_parser::OutlineBuilder for ContourBuilder {
             .push(Curve::Bezier(CubicBezier::new(p0, c1, c2, p1)));
         self.pen = (p1.x, p1.y);
     }
+
     fn close(&mut self) {
         if (self.pen.0 - self.start.0).hypot(self.pen.1 - self.start.1) > 1e-9 {
             self.cur.push(Curve::Line(LineSeg::from_endpoints(

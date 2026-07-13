@@ -1,8 +1,33 @@
-use oxidraft_document::{EntityId, EntityKind};
+use oxidraft_document::{ConstraintKind, EntityId, EntityKind};
 use oxidraft_geometry::{
-    CircularArc, Continuity, Curve, EllipticalArc, LineSeg, NurbsCurve, Point2d, PolyCurve,
-    Transform2d, cv_spline_segments,
+    CircularArc, Continuity, Curve, EllipticalArc, LineSeg, NurbsCurve, Point2d, Transform2d,
+    cv_spline_segments,
 };
+/// What a pick step of a `ConPick` tool expects: a point anchor (endpoint,
+/// midpoint, center, or point entity) or a whole curve entity of a kind.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum ConPickStep {
+    /// An endpoint / midpoint / center / point-entity anchor.
+    Point,
+    /// A line entity (its infinite carrier or midpoint is the target).
+    Line,
+    /// A circle/arc entity (its rim is the target).
+    Arc,
+}
+
+/// The ordered pick steps a pick-based constraint kind needs. Empty for
+/// kinds that aren't pick-based (they never open a `ConPick` tool).
+pub fn con_pick_plan(kind: ConstraintKind) -> &'static [ConPickStep] {
+    use ConPickStep::*;
+    match kind {
+        ConstraintKind::Midpoint => &[Point, Line],
+        ConstraintKind::PointOnLine => &[Point, Line],
+        ConstraintKind::PointOnCircle => &[Point, Arc],
+        ConstraintKind::Symmetric => &[Point, Point, Line],
+        _ => &[],
+    }
+}
+
 #[allow(clippy::large_enum_variant)]
 #[derive(Clone, Debug)]
 pub enum Tool {
@@ -53,6 +78,33 @@ pub enum Tool {
         diameter: bool,
         center: Option<Point2d>,
         radius: f64,
+    },
+    /// Smart dimensioning that adds *driving* constraints (not drafting
+    /// annotations): click a line for a driving length, a circle/arc for a
+    /// radius, two parallel lines for a width, or two crossing lines for an
+    /// angle. `first` holds a line picked so far (it may still pair with a
+    /// second line); `pending` holds fully picked geometry whose dimension
+    /// preview follows the cursor until the placement click drops it.
+    DimConstraint {
+        first: Option<EntityId>,
+        pending: Option<(EntityId, Option<EntityId>)>,
+    },
+    /// Pick-based coincident weld: click two points — a line endpoint or
+    /// midpoint, an arc/circle center, or a point entity like the origin —
+    /// and they are welded coincident. `first` holds the first pick as
+    /// (entity, anchor index, anchor position) so the second pick can rubber-
+    /// band from it.
+    Weld {
+        first: Option<(EntityId, u8, Point2d)>,
+    },
+    /// Pick-based application of one of the point-anchored relations
+    /// (Midpoint, PointOnLine, PointOnCircle, Symmetric). `kind` chooses the
+    /// relation; `picks` accumulates the anchors/entities picked so far,
+    /// each as (entity, anchor index, world position). The number of picks
+    /// the relation needs is fixed per kind — see `con_pick_plan`.
+    ConPick {
+        kind: ConstraintKind,
+        picks: Vec<(EntityId, u8, Point2d)>,
     },
     Ellipse {
         center: Option<Point2d>,
@@ -179,6 +231,9 @@ impl Tool {
             Tool::DimAngularLines { .. } => "DIM ANGULAR (2 lines)",
             Tool::DimRadial { diameter: true, .. } => "DIM DIAMETER",
             Tool::DimRadial { .. } => "DIM RADIUS",
+            Tool::DimConstraint { .. } => "SMART DIMENSION",
+            Tool::Weld { .. } => "WELD",
+            Tool::ConPick { .. } => "CONSTRAIN (pick)",
             Tool::Ellipse { .. } => "ELLIPSE",
             Tool::Rectangle { .. } => "RECTANGLE",
             Tool::PlotWindow { .. } => "PLOT WINDOW",
@@ -220,6 +275,9 @@ impl Tool {
                 | Tool::TangentLine { .. }
                 | Tool::DimRadial { center: None, .. }
                 | Tool::DimAngularLines { geom: None, .. }
+                | Tool::DimConstraint { .. }
+                | Tool::Weld { .. }
+                | Tool::ConPick { .. }
         )
     }
 
@@ -236,6 +294,7 @@ impl Tool {
                 | Tool::Blend { .. }
                 | Tool::CircleTtr { .. }
                 | Tool::CircleTtt { .. }
+                | Tool::DimConstraint { .. }
         )
     }
 
@@ -487,8 +546,23 @@ impl Tool {
                     ToolEvent::Pending
                 }
                 Some(c0) => {
+                    // A zero-area pick can't make a rectangle; keep waiting.
+                    if c0.dist_f64(&p) < 1e-9 {
+                        *first = Some(c0);
+                        return ToolEvent::Pending;
+                    }
                     *self = Tool::Rectangle { first: None };
-                    ToolEvent::Create(vec![closed_polycurve(rectangle_curves(&c0, &p))])
+                    // Four individual welded lines, not one PolyCurve — the
+                    // constraint system only sees Line/Arc/Point entities, so
+                    // this is what makes a rectangle's sides dimensionable.
+                    // The corner welds are recorded post-create in
+                    // `AppState::apply_tool_event`.
+                    ToolEvent::Create(
+                        rectangle_curves(&c0, &p)
+                            .into_iter()
+                            .map(EntityKind::Curve)
+                            .collect(),
+                    )
                 }
             },
 
@@ -634,6 +708,9 @@ impl Tool {
             | Tool::Stretch { .. }
             | Tool::CircleTtr { .. }
             | Tool::CircleTtt { .. }
+            | Tool::DimConstraint { .. }
+            | Tool::Weld { .. }
+            | Tool::ConPick { .. }
             | Tool::TangentLine { .. } => ToolEvent::Pending,
         }
     }
@@ -668,6 +745,12 @@ impl Tool {
                 *center = None;
                 *radius = 0.0;
             }
+            Tool::DimConstraint { first, pending } => {
+                *first = None;
+                *pending = None;
+            }
+            Tool::Weld { first } => *first = None,
+            Tool::ConPick { picks, .. } => picks.clear(),
             Tool::Ellipse { center, axis_end } => {
                 *center = None;
                 *axis_end = None;
@@ -724,6 +807,9 @@ impl Tool {
             Tool::Dimension { p1, .. } => p1.is_some(),
             Tool::DimAngularLines { a, geom } => a.is_some() || geom.is_some(),
             Tool::DimRadial { center, .. } => center.is_some(),
+            Tool::DimConstraint { first, pending } => first.is_some() || pending.is_some(),
+            Tool::Weld { first } => first.is_some(),
+            Tool::ConPick { picks, .. } => !picks.is_empty(),
             Tool::Ellipse { center, .. } => center.is_some(),
             Tool::Rectangle { first } | Tool::PlotWindow { first } => first.is_some(),
             Tool::Move { base, .. } | Tool::Copy { base, .. } => base.is_some(),
@@ -911,7 +997,10 @@ impl Tool {
             | Tool::Chamfer { .. }
             | Tool::Blend { .. }
             | Tool::CircleTtr { .. }
-            | Tool::CircleTtt { .. } => None,
+            | Tool::CircleTtt { .. }
+            | Tool::DimConstraint { .. } => None,
+            Tool::Weld { first } => first.map(|(_, _, p)| p),
+            Tool::ConPick { picks, .. } => picks.last().map(|(_, _, p)| *p),
             Tool::TangentLine { first } => match first {
                 Some(TanAnchor::Point(p)) => Some(*p),
                 _ => None,
@@ -939,10 +1028,14 @@ impl Tool {
     pub fn commit(&mut self) -> ToolEvent {
         match self {
             Tool::Polyline { pts } => {
+                // Individual welded lines, not one PolyCurve, so every
+                // segment can carry constraints (welds recorded post-create
+                // in `AppState::apply_tool_event`); JOIN reassembles a
+                // single outline entity when one is wanted.
                 if pts.len() >= 2 {
-                    let poly = PolyCurve::new(line_chain(pts));
+                    let lines = line_chain(pts);
                     *self = Tool::Polyline { pts: Vec::new() };
-                    ToolEvent::Create(vec![EntityKind::Curve(Curve::Poly(Box::new(poly)))])
+                    ToolEvent::Create(lines.into_iter().map(EntityKind::Curve).collect())
                 } else {
                     *self = Tool::Polyline { pts: Vec::new() };
                     ToolEvent::Pending
@@ -971,8 +1064,15 @@ impl Tool {
                 }
                 let start_angle = dy.atan2(dx);
                 let verts = polygon_vertices(c.x, c.y, r, start_angle, n);
-                let segments = closed_chain(&verts);
-                ToolEvent::Create(vec![closed_polycurve(segments)])
+                // n individual welded lines, not one PolyCurve, so each side
+                // can carry constraints (welds recorded post-create in
+                // `AppState::apply_tool_event`).
+                ToolEvent::Create(
+                    closed_chain(&verts)
+                        .into_iter()
+                        .map(EntityKind::Curve)
+                        .collect(),
+                )
             }
             _ => ToolEvent::Pending,
         }
@@ -987,9 +1087,9 @@ impl Tool {
                         *pts.last().unwrap(),
                         pts[0],
                     )));
-                    let poly = PolyCurve::new(segments);
                     *self = Tool::Polyline { pts: Vec::new() };
-                    ToolEvent::Create(vec![EntityKind::Curve(Curve::Poly(Box::new(poly)))])
+                    // Welded lines, closing corner included — see `commit`.
+                    ToolEvent::Create(segments.into_iter().map(EntityKind::Curve).collect())
                 } else {
                     *self = Tool::Polyline { pts: Vec::new() };
                     ToolEvent::Pending
@@ -1049,10 +1149,6 @@ fn rectangle_curves(c0: &Point2d, c1: &Point2d) -> Vec<Curve> {
     let corners = [p(x0, y0), p(x1, y0), p(x1, y1), p(x0, y1)];
     closed_chain(&corners)
 }
-fn closed_polycurve(curves: Vec<Curve>) -> EntityKind {
-    EntityKind::Curve(Curve::Poly(Box::new(PolyCurve::new(curves))))
-}
-
 /// Line segments joining each consecutive pair of points (open chain).
 fn line_chain(pts: &[Point2d]) -> Vec<Curve> {
     pts.windows(2)
@@ -1178,20 +1274,30 @@ mod tests {
     }
 
     #[test]
-    fn rectangle_tool_makes_four_sides() {
+    fn rectangle_tool_makes_four_individual_lines() {
         let mut t = Tool::Rectangle { first: None };
         assert!(matches!(t.on_point(pt(0, 0)), ToolEvent::Pending));
         match t.on_point(pt(4, 3)) {
             ToolEvent::Create(es) => {
-                assert_eq!(es.len(), 1, "one entity, not four loose lines");
-                if let EntityKind::Curve(Curve::Poly(poly)) = &es[0] {
-                    assert_eq!(poly.segments.len(), 4);
-                } else {
-                    panic!("expected PolyCurve, got {:?}", es[0]);
-                }
+                // Four Line entities (welded post-create), not one PolyCurve —
+                // that's what lets each side carry constraints.
+                assert_eq!(es.len(), 4, "four individual sides");
+                assert!(
+                    es.iter()
+                        .all(|k| matches!(k, EntityKind::Curve(Curve::Line(_)))),
+                    "every side is a Line entity"
+                );
             }
             o => panic!("{:?}", o),
         }
+    }
+
+    #[test]
+    fn rectangle_tool_ignores_a_zero_area_second_corner() {
+        let mut t = Tool::Rectangle { first: None };
+        t.on_point(pt(2, 2));
+        assert!(matches!(t.on_point(pt(2, 2)), ToolEvent::Pending));
+        assert!(t.has_pending_input(), "still waiting for a real corner");
     }
 
     #[test]
@@ -1299,20 +1405,22 @@ mod tests {
 
         match t.commit() {
             ToolEvent::Create(es) => {
-                assert_eq!(es.len(), 1, "one entity, not five loose lines");
-                if let EntityKind::Curve(Curve::Poly(poly)) = &es[0] {
-                    assert_eq!(poly.segments.len(), 5);
-                    if let Curve::Line(l) = &poly.segments[0] {
-                        assert!(
-                            (l.p0.x - 10.0).abs() < 1e-6 && l.p0.y.abs() < 1e-6,
-                            "first vertex on the cursor ray"
-                        );
-                    } else {
-                        panic!("expected Line segment");
-                    }
+                // Five individual side lines (welded post-create), so each
+                // side is a constraint target.
+                assert_eq!(es.len(), 5, "five individual sides");
+                if let EntityKind::Curve(Curve::Line(l)) = &es[0] {
+                    assert!(
+                        (l.p0.x - 10.0).abs() < 1e-6 && l.p0.y.abs() < 1e-6,
+                        "first vertex on the cursor ray"
+                    );
                 } else {
-                    panic!("expected PolyCurve, got {:?}", es[0]);
+                    panic!("expected a Line, got {:?}", es[0]);
                 }
+                assert!(
+                    es.iter()
+                        .all(|k| matches!(k, EntityKind::Curve(Curve::Line(_)))),
+                    "every side is a Line entity"
+                );
             }
             o => panic!("{:?}", o),
         }
@@ -1456,7 +1564,7 @@ mod tests {
     }
 
     #[test]
-    fn polyline_accumulates_and_commits() {
+    fn polyline_accumulates_and_commits_individual_lines() {
         let mut t = Tool::Polyline { pts: vec![] };
         assert!(matches!(t.on_point(pt(0, 0)), ToolEvent::Pending));
         assert!(matches!(t.on_point(pt(5, 5)), ToolEvent::Pending));
@@ -1464,19 +1572,21 @@ mod tests {
 
         match t.commit() {
             ToolEvent::Create(es) => {
-                assert_eq!(es.len(), 1);
-                if let EntityKind::Curve(Curve::Poly(poly)) = &es[0] {
-                    assert_eq!(poly.segments.len(), 2);
-                } else {
-                    panic!("expected PolyCurve");
-                }
+                // Two individual welded lines, not one PolyCurve — JOIN
+                // reassembles a single entity when one is wanted.
+                assert_eq!(es.len(), 2);
+                assert!(
+                    es.iter()
+                        .all(|k| matches!(k, EntityKind::Curve(Curve::Line(_)))),
+                    "every segment is a Line entity"
+                );
             }
             o => panic!("{:?}", o),
         }
     }
 
     #[test]
-    fn polyline_accumulates_and_closes() {
+    fn polyline_closes_into_individual_lines_with_the_closing_segment() {
         let mut t = Tool::Polyline { pts: vec![] };
         assert!(matches!(t.on_point(pt(0, 0)), ToolEvent::Pending));
         assert!(matches!(t.on_point(pt(5, 5)), ToolEvent::Pending));
@@ -1484,12 +1594,15 @@ mod tests {
 
         match t.close_and_commit() {
             ToolEvent::Create(es) => {
-                assert_eq!(es.len(), 1);
-                if let EntityKind::Curve(Curve::Poly(poly)) = &es[0] {
-                    assert_eq!(poly.segments.len(), 3);
-                } else {
-                    panic!("expected PolyCurve");
-                }
+                assert_eq!(es.len(), 3, "two drawn segments plus the closer");
+                let EntityKind::Curve(Curve::Line(last)) = &es[2] else {
+                    panic!("expected a Line, got {:?}", es[2]);
+                };
+                assert_eq!(
+                    (last.p1.x, last.p1.y),
+                    (0.0, 0.0),
+                    "closing segment lands back on the start"
+                );
             }
             o => panic!("{:?}", o),
         }

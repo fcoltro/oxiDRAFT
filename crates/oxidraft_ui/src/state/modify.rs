@@ -1,8 +1,8 @@
 use super::AppState;
 use crate::tools::Tool;
 use oxidraft_cad::pick_at;
-use oxidraft_document::EntityId;
-use oxidraft_geometry::Point2d;
+use oxidraft_document::{ANCHOR_DERIVED, EntityId, EntityKind};
+use oxidraft_geometry::{Curve, Point2d};
 
 impl AppState {
     pub(crate) fn handle_modify_click(&mut self, p: &Point2d) -> bool {
@@ -89,6 +89,150 @@ impl AppState {
                         center: Some(c),
                         radius: r,
                     };
+                }
+                true
+            }
+            Tool::DimConstraint { first, pending } => {
+                let hit = pick(self);
+                match (first, pending, hit) {
+                    // A fully picked dimension is following the cursor —
+                    // this click drops it wherever it lands, entity or not.
+                    (_, Some((a, b)), _) => {
+                        self.smart_dimension(a, b, Some((px, py)));
+                        self.tool = Tool::DimConstraint {
+                            first: None,
+                            pending: None,
+                        };
+                    }
+                    // First pick: a line may still pair with a second line,
+                    // so it waits in `first`; a circle/arc pairs with
+                    // nothing, so its radius preview starts following the
+                    // cursor right away.
+                    (None, None, Some(id)) if is_dimensionable(self, id) => {
+                        self.tool = if line_endpoints_of(self, id).is_some() {
+                            Tool::DimConstraint {
+                                first: Some(id),
+                                pending: None,
+                            }
+                        } else {
+                            Tool::DimConstraint {
+                                first: None,
+                                pending: Some((id, None)),
+                            }
+                        };
+                    }
+                    // A polyline pick is a dead end today — say how to fix
+                    // it instead of silently ignoring the click.
+                    (None, None, Some(id)) if is_polycurve(self, id) => {
+                        self.command_log.push(
+                            "Polylines can't take dimensions — EXPLODE (X) into welded \
+                             lines first"
+                                .into(),
+                        );
+                    }
+                    // A second line → the pair (angle, or width when
+                    // parallel) follows the cursor until placed.
+                    (Some(a), None, Some(id))
+                        if id != a && line_endpoints_of(self, id).is_some() =>
+                    {
+                        self.tool = Tool::DimConstraint {
+                            first: None,
+                            pending: Some((a, Some(id))),
+                        };
+                    }
+                    // Empty space, the same line, or a non-line second pick
+                    // → place the held line's length here.
+                    (Some(a), None, _) => {
+                        self.smart_dimension(a, None, Some((px, py)));
+                        self.tool = Tool::DimConstraint {
+                            first: None,
+                            pending: None,
+                        };
+                    }
+                    (None, None, _) => {}
+                }
+                true
+            }
+            Tool::Weld { first } => {
+                // Welds happily target the origin, so no origin filter here.
+                let Some(id) = pick_at(&self.document, px, py, tol) else {
+                    // Empty space drops a held first pick.
+                    self.tool = Tool::Weld { first: None };
+                    return true;
+                };
+                let Some((anchor, pos)) = weld_anchor_at(self, id, px, py, tol) else {
+                    self.command_log.push(
+                        "No weldable point there — pick an endpoint, midpoint, center, or point"
+                            .into(),
+                    );
+                    return true;
+                };
+                match first {
+                    None => {
+                        self.tool = Tool::Weld {
+                            first: Some((id, anchor, pos)),
+                        };
+                    }
+                    Some((fid, fa, _)) => {
+                        self.weld_points((fid, fa), (id, anchor));
+                        self.tool = Tool::Weld { first: None };
+                    }
+                }
+                true
+            }
+            Tool::ConPick { kind, mut picks } => {
+                let plan = crate::tools::con_pick_plan(kind);
+                let step = plan.get(picks.len()).copied();
+                let Some(step) = step else {
+                    // Shouldn't happen — a full pick set is applied below on
+                    // the click that completes it — but reset defensively.
+                    self.tool = Tool::ConPick {
+                        kind,
+                        picks: Vec::new(),
+                    };
+                    return true;
+                };
+                let Some(id) = pick_at(&self.document, px, py, tol) else {
+                    // Empty space cancels the in-progress pick set.
+                    self.tool = Tool::ConPick {
+                        kind,
+                        picks: Vec::new(),
+                    };
+                    return true;
+                };
+                let resolved = match step {
+                    crate::tools::ConPickStep::Point => {
+                        weld_anchor_at(self, id, px, py, tol).map(|(a, p)| (id, a, p))
+                    }
+                    crate::tools::ConPickStep::Line => line_endpoints_of(self, id)
+                        .is_some()
+                        .then(|| (id, 0u8, Point2d::from_f64(px, py))),
+                    crate::tools::ConPickStep::Arc => self
+                        .document
+                        .get(id)
+                        .and_then(|e| e.as_curve())
+                        .and_then(circle_center_radius)
+                        .map(|(c, _)| (id, 0u8, c)),
+                };
+                let Some(pick) = resolved else {
+                    self.command_log.push(match step {
+                        crate::tools::ConPickStep::Point => {
+                            "Pick an endpoint, midpoint, center, or point".into()
+                        }
+                        crate::tools::ConPickStep::Line => "Pick a line".into(),
+                        crate::tools::ConPickStep::Arc => "Pick a circle or arc".into(),
+                    });
+                    return true;
+                };
+                picks.push(pick);
+                if picks.len() == plan.len() {
+                    self.constrain_picked(kind, &picks);
+                    self.tool = Tool::ConPick {
+                        kind,
+                        picks: Vec::new(),
+                    };
+                } else {
+                    self.tool = Tool::ConPick { kind, picks };
                 }
                 true
             }
@@ -520,11 +664,72 @@ pub enum TrimExtendPreview {
     Extension(oxidraft_geometry::Curve),
 }
 
+/// Nearest weldable anchor on `id` to the click, within `tol`: 0/1 an
+/// endpoint, ANCHOR_DERIVED a line's midpoint or an arc's center; a point
+/// entity is anchor 0 at its own position. With snapping on, the click
+/// arrives exactly on the snapped anchor, so "nearest" is exact.
+fn weld_anchor_at(
+    app: &AppState,
+    id: EntityId,
+    px: f64,
+    py: f64,
+    tol: f64,
+) -> Option<(u8, Point2d)> {
+    let mut cands: Vec<(u8, (f64, f64))> = Vec::new();
+    match &app.document.get(id)?.kind {
+        EntityKind::Point(p) => cands.push((0, p.to_f64())),
+        EntityKind::Curve(Curve::Line(l)) => {
+            let (x0, y0) = l.p0.to_f64();
+            let (x1, y1) = l.p1.to_f64();
+            cands.push((0, (x0, y0)));
+            cands.push((1, (x1, y1)));
+            cands.push((ANCHOR_DERIVED, ((x0 + x1) * 0.5, (y0 + y1) * 0.5)));
+        }
+        EntityKind::Curve(Curve::Arc(a)) => {
+            let full = (a.end_angle - a.start_angle).abs() >= std::f64::consts::TAU - 1e-9;
+            if !full {
+                let (cx, cy) = a.center.to_f64();
+                let at = |th: f64| (cx + a.radius * th.cos(), cy + a.radius * th.sin());
+                cands.push((0, at(a.start_angle)));
+                cands.push((1, at(a.end_angle)));
+            }
+            cands.push((ANCHOR_DERIVED, a.center.to_f64()));
+        }
+        _ => return None,
+    }
+    let mut best: Option<(f64, u8, (f64, f64))> = None;
+    for (i, (x, y)) in cands {
+        let d = (x - px).hypot(y - py);
+        if d <= tol && best.is_none_or(|(bd, _, _)| d < bd) {
+            best = Some((d, i, (x, y)));
+        }
+    }
+    best.map(|(_, i, (x, y))| (i, Point2d::from_f64(x, y)))
+}
+
 fn circle_center_radius(c: &oxidraft_geometry::Curve) -> Option<(Point2d, f64)> {
     match c {
         oxidraft_geometry::Curve::Arc(a) => Some((a.center, a.radius)),
         _ => None,
     }
+}
+
+/// Whether the entity can carry a driving dimension the smart-dimension tool
+/// understands: a line (length or, paired, angle) or a circle/arc (radius).
+fn is_dimensionable(app: &AppState, id: EntityId) -> bool {
+    matches!(
+        app.document.get(id).and_then(|e| e.as_curve()),
+        Some(oxidraft_geometry::Curve::Line(_)) | Some(oxidraft_geometry::Curve::Arc(_))
+    )
+}
+
+/// Whether the entity is a multi-segment polyline — undimensionable as-is,
+/// but one EXPLODE away from welded, dimensionable lines.
+fn is_polycurve(app: &AppState, id: EntityId) -> bool {
+    matches!(
+        app.document.get(id).and_then(|e| e.as_curve()),
+        Some(oxidraft_geometry::Curve::Poly(_))
+    )
 }
 
 fn line_endpoints_of(app: &AppState, id: EntityId) -> Option<(Point2d, Point2d)> {

@@ -91,9 +91,6 @@ pub(super) fn top_bar(ctx: &Context, app: &mut AppState, canvas_rect: egui::Rect
                         }
                         ui.add_space(6.0);
                         ui.scope(|ui| {
-                            // Dimmer than the app-wide TEXT override — the
-                            // File/Edit/View/… row reads as chrome, not
-                            // content, so it doesn't need full brightness.
                             ui.style_mut().visuals.override_text_color =
                                 Some(Color32::from_rgb(203, 212, 226));
                             menu_items(ui, app);
@@ -128,7 +125,6 @@ pub(super) fn top_bar(ctx: &Context, app: &mut AppState, canvas_rect: egui::Rect
                                 }
                             });
                         });
-
                         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                             ui.add_space(2.0);
                             if ui
@@ -150,7 +146,6 @@ pub(super) fn top_bar(ctx: &Context, app: &mut AppState, canvas_rect: egui::Rect
                     });
                 });
         });
-
     export_menu(ctx, app);
 }
 
@@ -287,26 +282,22 @@ fn export_menu(ctx: &Context, app: &mut AppState) {
     }
 }
 
-/// Purely-local Plot dialog form state (paper preset, custom size,
-/// orientation) lives in ctx temp-data — no second reader, same idiom as
-/// `unit_dropdown`/`snap_master` elsewhere. The dialog's open flag and its
-/// area mode instead live on `AppState`, since the canvas overlay reads
-/// them too (see `view.rs`).
 const PLOT_PRESET_ID: &str = "plot_paper_preset";
+
 const PLOT_CUSTOM_W_ID: &str = "plot_custom_w_mm";
+
 const PLOT_CUSTOM_H_ID: &str = "plot_custom_h_mm";
+
 const PLOT_LANDSCAPE_ID: &str = "plot_landscape";
 
 pub(super) fn plot_dialog(ctx: &Context, app: &mut AppState) {
     if !app.plot_dialog_open {
         return;
     }
-
     let preset_id = egui::Id::new(PLOT_PRESET_ID);
     let custom_w_id = egui::Id::new(PLOT_CUSTOM_W_ID);
     let custom_h_id = egui::Id::new(PLOT_CUSTOM_H_ID);
     let landscape_id = egui::Id::new(PLOT_LANDSCAPE_ID);
-
     let mut window_mode = app.plot_window_mode;
     let mut preset = ctx.data(|d| d.get_temp::<usize>(preset_id)).unwrap_or(0);
     let mut custom_w = ctx
@@ -319,7 +310,6 @@ pub(super) fn plot_dialog(ctx: &Context, app: &mut AppState) {
         .data(|d| d.get_temp::<bool>(landscape_id))
         .unwrap_or(false);
     let is_custom = preset == oxidraft_io::PAPER_PRESETS.len();
-
     let mut open = true;
     let mut close_after_plot = false;
     let mut start_pick = false;
@@ -336,7 +326,6 @@ pub(super) fn plot_dialog(ctx: &Context, app: &mut AppState) {
                     .color(crate::theme::TEXT_DIM),
             );
             ui.add_space(8.0);
-
             setting_row(ui, "Plot area", |ui| {
                 ui.selectable_value(&mut window_mode, false, "Extents");
                 ui.selectable_value(&mut window_mode, true, "Window");
@@ -369,7 +358,6 @@ pub(super) fn plot_dialog(ctx: &Context, app: &mut AppState) {
                     }
                 });
             }
-
             setting_row(ui, "Paper size", |ui| {
                 let selected_text = if is_custom {
                     "Custom".to_string()
@@ -389,7 +377,6 @@ pub(super) fn plot_dialog(ctx: &Context, app: &mut AppState) {
                         );
                     });
             });
-
             if is_custom {
                 setting_row(ui, "Width (mm)", |ui| {
                     ui.add(
@@ -408,12 +395,10 @@ pub(super) fn plot_dialog(ctx: &Context, app: &mut AppState) {
                     );
                 });
             }
-
             setting_row(ui, "Orientation", |ui| {
                 ui.selectable_value(&mut landscape, false, "Portrait");
                 ui.selectable_value(&mut landscape, true, "Landscape");
             });
-
             ui.add_space(10.0);
             let ready = !window_mode || app.plot_window.is_some();
             let plot_clicked = ui
@@ -452,7 +437,6 @@ pub(super) fn plot_dialog(ctx: &Context, app: &mut AppState) {
                 close_after_plot = true;
             }
         });
-
     ctx.data_mut(|d| {
         d.insert_temp(preset_id, preset);
         d.insert_temp(custom_w_id, custom_w);
@@ -946,7 +930,6 @@ pub(super) fn about_window(ctx: &Context, ui_state: &mut UiState) {
     if !ui_state.about_open {
         return;
     }
-
     let backdrop = egui::Area::new(egui::Id::new("about_backdrop"))
         .order(egui::Order::Middle)
         .fixed_pos(ctx.content_rect().min)
@@ -957,7 +940,6 @@ pub(super) fn about_window(ctx: &Context, ui_state: &mut UiState) {
             ui.allocate_rect(r, egui::Sense::click())
         });
     let mut close = backdrop.inner.clicked();
-
     egui::Window::new("about_dialog")
         .title_bar(false)
         .collapsible(false)
@@ -993,7 +975,6 @@ pub(super) fn about_window(ctx: &Context, ui_state: &mut UiState) {
                 ui.add_space(6.0);
             });
         });
-
     if close || ctx.input(|i| i.key_pressed(egui::Key::Escape)) {
         ui_state.about_open = false;
     }
@@ -1010,7 +991,6 @@ pub(super) fn line_props_dialog(ctx: &Context, app: &mut AppState, ui_state: &mu
     if !ui_state.line_props_open {
         return;
     }
-
     let backdrop = egui::Area::new(egui::Id::new("line_props_backdrop"))
         .order(egui::Order::Middle)
         .fixed_pos(ctx.content_rect().min)
@@ -1022,7 +1002,6 @@ pub(super) fn line_props_dialog(ctx: &Context, app: &mut AppState, ui_state: &mu
         });
     let mut close = backdrop.inner.clicked();
     let sel = app.selection.clone();
-
     egui::Window::new("line_props_dialog")
         .title_bar(false)
         .collapsible(false)
@@ -1038,7 +1017,6 @@ pub(super) fn line_props_dialog(ctx: &Context, app: &mut AppState, ui_state: &mu
                     .strong()
                     .color(crate::theme::TEXT),
             );
-
             prop_section(ui, "NEW OBJECTS");
             ui.push_id("line_props_new", |ui| {
                 let dw = app.default_line_weight.clone();
@@ -1060,7 +1038,6 @@ pub(super) fn line_props_dialog(ctx: &Context, app: &mut AppState, ui_state: &mu
                     }
                 });
             });
-
             if !sel.is_empty() {
                 prop_section(ui, &format!("SELECTION ({})", sel.len()));
                 ui.push_id("line_props_sel", |ui| {
@@ -1102,7 +1079,6 @@ pub(super) fn line_props_dialog(ctx: &Context, app: &mut AppState, ui_state: &mu
                     });
                 });
             }
-
             ui.add_space(12.0);
             ui.vertical_centered(|ui| {
                 if ui.button("Close").clicked() {
@@ -1111,7 +1087,6 @@ pub(super) fn line_props_dialog(ctx: &Context, app: &mut AppState, ui_state: &mu
             });
             ui.add_space(6.0);
         });
-
     if close || ctx.input(|i| i.key_pressed(egui::Key::Escape)) {
         ui_state.line_props_open = false;
     }
@@ -1129,7 +1104,6 @@ pub(super) fn settings_dialog(ctx: &Context, app: &mut AppState, ui_state: &mut 
     if !ui_state.settings_open {
         return;
     }
-
     let backdrop = egui::Area::new(egui::Id::new("settings_backdrop"))
         .order(egui::Order::Middle)
         .fixed_pos(ctx.content_rect().min)
@@ -1140,7 +1114,6 @@ pub(super) fn settings_dialog(ctx: &Context, app: &mut AppState, ui_state: &mut 
             ui.allocate_rect(r, egui::Sense::click())
         });
     let mut close = backdrop.inner.clicked();
-
     let screen_h = ctx.content_rect().height();
     egui::Window::new("settings_dialog")
         .title_bar(false)
@@ -1151,294 +1124,407 @@ pub(super) fn settings_dialog(ctx: &Context, app: &mut AppState, ui_state: &mut 
         .default_height((screen_h * 0.7).clamp(360.0, 680.0))
         .min_height(300.0)
         .max_height(screen_h - 24.0)
-        .show(ctx, |ui| {
-            ui.set_width(416.0);
-            ui.add_space(4.0);
-            ui.label(
-                egui::RichText::new("Settings")
-                    .size(16.0)
-                    .strong()
-                    .color(crate::theme::TEXT),
-            );
-            ui.label(
-                egui::RichText::new("Preferences, drawing aids & document defaults — drag the bottom edge to resize")
-                    .size(11.5)
-                    .color(crate::theme::TEXT_DIM),
-            );
-            ui.add_space(8.0);
-            settings_rule(ui);
-
-            let footer_h = 60.0;
-            let scroll_h = (ui.available_height() - footer_h).max(120.0);
-            egui::ScrollArea::vertical()
-                .max_height(scroll_h)
-                .auto_shrink([false, false])
-                .show(ui, |ui| {
-                    ui.set_width(ui.available_width());
-
-                    settings_card(ui, "UNITS", |ui| {
-                        setting_row(ui, "Drawing units", |ui| {
-                            egui::ComboBox::from_id_salt("settings_units")
-                                .selected_text(units_label(app.document.settings.units))
-                                .width(200.0)
-                                .show_ui(ui, |ui| {
-                                    for units in [
-                                        Units::Millimeters,
-                                        Units::Centimeters,
-                                        Units::Meters,
-                                        Units::Kilometers,
-                                        Units::Inches,
-                                        Units::Feet,
-                                        Units::Unitless,
-                                    ] {
-                                        if ui
-                                            .selectable_label(
-                                                app.document.settings.units == units,
-                                                units_label(units),
-                                            )
-                                            .clicked()
-                                            && app.document.settings.units != units
-                                        {
-                                            app.document.settings.units = units;
-                                            app.sync_zoom_limits();
-                                        }
-                                    }
-                                });
-                        });
-                    });
-
-                    settings_card(ui, "DRAWING AIDS", |ui| {
-                        ui.columns(2, |c| {
-                            c[0].checkbox(&mut app.snap_on, "Object snap");
-                            c[0].checkbox(&mut app.grid_on, "Grid");
-                            c[0].checkbox(&mut app.grid_snap_on, "Snap to grid");
-                            c[0].checkbox(&mut app.track_on, "Extension tracking");
-                            let mut polar = app.polar_on;
-                            if c[1].checkbox(&mut polar, "Polar tracking").changed() {
-                                app.polar_on = polar;
-                                if polar {
-                                    app.ortho_on = false;
-                                }
-                            }
-                            let mut ortho = app.ortho_on;
-                            if c[1].checkbox(&mut ortho, "Ortho").changed() {
-                                app.ortho_on = ortho;
-                                if ortho {
-                                    app.polar_on = false;
-                                }
-                            }
-                            c[1].checkbox(&mut app.dyn_on, "Dynamic input");
-                            c[1].checkbox(&mut app.infer_constraints, "Infer constraints")
-                                .on_hover_text(
-                                    "Record coincident constraints when line endpoints \
+        .show(
+            ctx,
+            |ui| {
+                ui.set_width(416.0);
+                ui.add_space(4.0);
+                ui.label(
+                    egui::RichText::new("Settings")
+                        .size(16.0)
+                        .strong()
+                        .color(crate::theme::TEXT),
+                );
+                ui.label(
+                    egui::RichText::new(
+                            "Preferences, drawing aids & document defaults — drag the bottom edge to resize",
+                        )
+                        .size(11.5)
+                        .color(crate::theme::TEXT_DIM),
+                );
+                ui.add_space(8.0);
+                settings_rule(ui);
+                let footer_h = 60.0;
+                let scroll_h = (ui.available_height() - footer_h).max(120.0);
+                egui::ScrollArea::vertical()
+                    .max_height(scroll_h)
+                    .auto_shrink([false, false])
+                    .show(
+                        ui,
+                        |ui| {
+                            ui.set_width(ui.available_width());
+                            settings_card(
+                                ui,
+                                "UNITS",
+                                |ui| {
+                                    setting_row(
+                                        ui,
+                                        "Drawing units",
+                                        |ui| {
+                                            egui::ComboBox::from_id_salt("settings_units")
+                                                .selected_text(units_label(app.document.settings.units))
+                                                .width(200.0)
+                                                .show_ui(
+                                                    ui,
+                                                    |ui| {
+                                                        for units in [
+                                                            Units::Millimeters,
+                                                            Units::Centimeters,
+                                                            Units::Meters,
+                                                            Units::Kilometers,
+                                                            Units::Inches,
+                                                            Units::Feet,
+                                                            Units::Unitless,
+                                                        ] {
+                                                            if ui
+                                                                .selectable_label(
+                                                                    app.document.settings.units == units,
+                                                                    units_label(units),
+                                                                )
+                                                                .clicked() && app.document.settings.units != units
+                                                            {
+                                                                app.document.settings.units = units;
+                                                                app.sync_zoom_limits();
+                                                            }
+                                                        }
+                                                    },
+                                                );
+                                        },
+                                    );
+                                },
+                            );
+                            settings_card(
+                                ui,
+                                "DRAWING AIDS",
+                                |ui| {
+                                    ui.columns(
+                                        2,
+                                        |c| {
+                                            c[0].checkbox(&mut app.snap_on, "Object snap");
+                                            c[0].checkbox(&mut app.grid_on, "Grid");
+                                            c[0].checkbox(&mut app.grid_snap_on, "Snap to grid");
+                                            c[0].checkbox(&mut app.track_on, "Extension tracking");
+                                            let mut polar = app.polar_on;
+                                            if c[1].checkbox(&mut polar, "Polar tracking").changed() {
+                                                app.polar_on = polar;
+                                                if polar {
+                                                    app.ortho_on = false;
+                                                }
+                                            }
+                                            let mut ortho = app.ortho_on;
+                                            if c[1].checkbox(&mut ortho, "Ortho").changed() {
+                                                app.ortho_on = ortho;
+                                                if ortho {
+                                                    app.polar_on = false;
+                                                }
+                                            }
+                                            c[1].checkbox(&mut app.dyn_on, "Dynamic input");
+                                            c[1]
+                                                .checkbox(&mut app.infer_constraints, "Infer constraints")
+                                                .on_hover_text(
+                                                    "Record coincident constraints when line endpoints \
                                      are drawn with endpoint snaps or chained, and \
                                      horizontal/vertical on near-axis lines",
-                                );
-                            c[1].checkbox(&mut app.show_constraints, "Constraint badges")
-                                .on_hover_text(
-                                    "Show glyphs on the canvas next to constrained \
+                                                );
+                                            c[1]
+                                                .checkbox(&mut app.show_constraints, "Constraint badges")
+                                                .on_hover_text(
+                                                    "Show glyphs on the canvas next to constrained \
                                      lines and welded corners",
-                                );
-                        });
-                    });
-
-                    settings_card(ui, "POINTER & GUIDES", |ui| {
-                        setting_row(ui, "Snap sensitivity", |ui| {
-                            ui.add(
-                                egui::Slider::new(&mut app.snap_px, 4.0..=24.0)
-                                    .suffix(" px")
-                                    .fixed_decimals(0),
-                            )
-                            .on_hover_text("How close (in screen pixels) the cursor must be to snap");
-                        });
-                        setting_row(ui, "Polar angle step", |ui| {
-                            egui::ComboBox::from_id_salt("settings_polar_step")
-                                .selected_text(format!("{}°", app.polar_step as i32))
-                                .width(120.0)
-                                .show_ui(ui, |ui| {
-                                    for step in [5.0, 10.0, 15.0, 22.5, 30.0, 45.0, 90.0] {
-                                        if ui
-                                            .selectable_label(
-                                                (app.polar_step - step).abs() < 1e-6,
-                                                format!("{step}°"),
-                                            )
-                                            .clicked()
-                                        {
-                                            app.polar_step = step;
-                                        }
-                                    }
-                                });
-                        });
-                        ui.checkbox(&mut app.crosshair, "Full-screen crosshair cursor");
-                        setting_row(ui, "Pick-box size", |ui| {
-                            ui.add(
-                                egui::Slider::new(&mut app.pick_box, 6.0..=24.0)
-                                    .suffix(" px")
-                                    .fixed_decimals(0),
+                                                );
+                                        },
+                                    );
+                                },
                             );
-                        });
-                    });
-
-                    settings_card(ui, "ZOOM", |ui| {
-                        setting_row(ui, "Wheel speed", |ui| {
-                            ui.add(
-                                egui::Slider::new(&mut app.zoom_speed, 0.25..=3.0)
-                                    .fixed_decimals(2),
+                            settings_card(
+                                ui,
+                                "POINTER & GUIDES",
+                                |ui| {
+                                    setting_row(
+                                        ui,
+                                        "Snap sensitivity",
+                                        |ui| {
+                                            ui.add(
+                                                    egui::Slider::new(&mut app.snap_px, 4.0..=24.0)
+                                                        .suffix(" px")
+                                                        .fixed_decimals(0),
+                                                )
+                                                .on_hover_text(
+                                                    "How close (in screen pixels) the cursor must be to snap",
+                                                );
+                                        },
+                                    );
+                                    setting_row(
+                                        ui,
+                                        "Polar angle step",
+                                        |ui| {
+                                            egui::ComboBox::from_id_salt("settings_polar_step")
+                                                .selected_text(format!("{}°", app.polar_step as i32))
+                                                .width(120.0)
+                                                .show_ui(
+                                                    ui,
+                                                    |ui| {
+                                                        for step in [5.0, 10.0, 15.0, 22.5, 30.0, 45.0, 90.0] {
+                                                            if ui
+                                                                .selectable_label(
+                                                                    (app.polar_step - step).abs() < 1e-6,
+                                                                    format!("{step}°"),
+                                                                )
+                                                                .clicked()
+                                                            {
+                                                                app.polar_step = step;
+                                                            }
+                                                        }
+                                                    },
+                                                );
+                                        },
+                                    );
+                                    ui.checkbox(
+                                        &mut app.crosshair,
+                                        "Full-screen crosshair cursor",
+                                    );
+                                    setting_row(
+                                        ui,
+                                        "Pick-box size",
+                                        |ui| {
+                                            ui.add(
+                                                egui::Slider::new(&mut app.pick_box, 6.0..=24.0)
+                                                    .suffix(" px")
+                                                    .fixed_decimals(0),
+                                            );
+                                        },
+                                    );
+                                },
                             );
-                        });
-                        ui.checkbox(&mut app.zoom_to_cursor, "Zoom toward cursor");
-                        ui.checkbox(&mut app.invert_zoom, "Invert wheel direction");
-                    });
-
-                    settings_card(ui, "DISPLAY", |ui| {
-                        ui.checkbox(&mut app.show_lineweights, "Show line weights");
-                        ui.add_space(2.0);
-                        setting_row(ui, "Line weight scale", |ui| {
-                            ui.add_enabled(
-                                app.show_lineweights,
-                                egui::Slider::new(&mut app.lineweight_scale, 1.0..=12.0)
-                                    .suffix(" px/mm")
-                                    .fixed_decimals(1),
+                            settings_card(
+                                ui,
+                                "ZOOM",
+                                |ui| {
+                                    setting_row(
+                                        ui,
+                                        "Wheel speed",
+                                        |ui| {
+                                            ui.add(
+                                                egui::Slider::new(&mut app.zoom_speed, 0.25..=3.0)
+                                                    .fixed_decimals(2),
+                                            );
+                                        },
+                                    );
+                                    ui.checkbox(&mut app.zoom_to_cursor, "Zoom toward cursor");
+                                    ui.checkbox(&mut app.invert_zoom, "Invert wheel direction");
+                                },
                             );
-                        });
-                    });
-
-                    settings_card(ui, "GRID", |ui| {
-                        ui.checkbox(&mut app.grid_dots, "Dotted grid (vs. lines)");
-                        ui.add_space(2.0);
-                        setting_row(ui, "Major line every", |ui| {
-                            let mut n = app.grid_major_every;
-                            if ui
-                                .add(egui::DragValue::new(&mut n).speed(0.1).range(2..=20))
-                                .changed()
-                            {
-                                app.grid_major_every = n;
-                            }
-                            ui.label(
-                                egui::RichText::new("lines")
-                                    .size(11.0)
-                                    .color(crate::theme::TEXT_DIM),
+                            settings_card(
+                                ui,
+                                "DISPLAY",
+                                |ui| {
+                                    ui.checkbox(&mut app.show_lineweights, "Show line weights");
+                                    ui.add_space(2.0);
+                                    setting_row(
+                                        ui,
+                                        "Line weight scale",
+                                        |ui| {
+                                            ui.add_enabled(
+                                                app.show_lineweights,
+                                                egui::Slider::new(&mut app.lineweight_scale, 1.0..=12.0)
+                                                    .suffix(" px/mm")
+                                                    .fixed_decimals(1),
+                                            );
+                                        },
+                                    );
+                                },
                             );
-                        });
-                        setting_row(ui, "Minor colour", |ui| {
-                            let mut c = [
-                                app.grid_minor_rgb.0,
-                                app.grid_minor_rgb.1,
-                                app.grid_minor_rgb.2,
-                            ];
-                            if ui.color_edit_button_srgb(&mut c).changed() {
-                                app.grid_minor_rgb = (c[0], c[1], c[2]);
-                            }
-                            let mut m = [
-                                app.grid_major_rgb.0,
-                                app.grid_major_rgb.1,
-                                app.grid_major_rgb.2,
-                            ];
-                            ui.label(
-                                egui::RichText::new("Major")
-                                    .size(11.0)
-                                    .color(crate::theme::TEXT_DIM),
+                            settings_card(
+                                ui,
+                                "GRID",
+                                |ui| {
+                                    ui.checkbox(&mut app.grid_dots, "Dotted grid (vs. lines)");
+                                    ui.add_space(2.0);
+                                    setting_row(
+                                        ui,
+                                        "Major line every",
+                                        |ui| {
+                                            let mut n = app.grid_major_every;
+                                            if ui
+                                                .add(egui::DragValue::new(&mut n).speed(0.1).range(2..=20))
+                                                .changed()
+                                            {
+                                                app.grid_major_every = n;
+                                            }
+                                            ui.label(
+                                                egui::RichText::new("lines")
+                                                    .size(11.0)
+                                                    .color(crate::theme::TEXT_DIM),
+                                            );
+                                        },
+                                    );
+                                    setting_row(
+                                        ui,
+                                        "Minor colour",
+                                        |ui| {
+                                            let mut c = [
+                                                app.grid_minor_rgb.0,
+                                                app.grid_minor_rgb.1,
+                                                app.grid_minor_rgb.2,
+                                            ];
+                                            if ui.color_edit_button_srgb(&mut c).changed() {
+                                                app.grid_minor_rgb = (c[0], c[1], c[2]);
+                                            }
+                                            let mut m = [
+                                                app.grid_major_rgb.0,
+                                                app.grid_major_rgb.1,
+                                                app.grid_major_rgb.2,
+                                            ];
+                                            ui.label(
+                                                egui::RichText::new("Major")
+                                                    .size(11.0)
+                                                    .color(crate::theme::TEXT_DIM),
+                                            );
+                                            if ui.color_edit_button_srgb(&mut m).changed() {
+                                                app.grid_major_rgb = (m[0], m[1], m[2]);
+                                            }
+                                        },
+                                    );
+                                },
                             );
-                            if ui.color_edit_button_srgb(&mut m).changed() {
-                                app.grid_major_rgb = (m[0], m[1], m[2]);
-                            }
-                        });
-                    });
-
-                    settings_card(ui, "OBJECT SNAPS", |ui| {
-                        let kinds = oxidraft_cad::SNAP_KINDS;
-                        ui.columns(2, |cols| {
-                            for (i, (kind, label)) in kinds.into_iter().enumerate() {
-                                let ui = &mut cols[i % 2];
-                                let mut on = app.snap.enabled.contains(&kind);
-                                if ui.checkbox(&mut on, label).changed() {
-                                    if on {
-                                        app.snap.enabled.push(kind);
-                                    } else {
-                                        app.snap.enabled.retain(|&k| k != kind);
-                                    }
-                                }
-                            }
-                        });
-                    });
-
-                    settings_card(ui, "DIMENSIONS", |ui| {
-                        let ds = &mut app.document.settings.dim_style;
-                        setting_row(ui, "Text height", |ui| {
-                            ui.add(
-                                egui::DragValue::new(&mut ds.text_height)
-                                    .speed(0.1)
-                                    .range(0.1..=1000.0)
-                                    .max_decimals(3),
+                            settings_card(
+                                ui,
+                                "OBJECT SNAPS",
+                                |ui| {
+                                    let kinds = oxidraft_cad::SNAP_KINDS;
+                                    ui.columns(
+                                        2,
+                                        |cols| {
+                                            for (i, (kind, label)) in kinds.into_iter().enumerate() {
+                                                let ui = &mut cols[i % 2];
+                                                let mut on = app.snap.enabled.contains(&kind);
+                                                if ui.checkbox(&mut on, label).changed() {
+                                                    if on {
+                                                        app.snap.enabled.push(kind);
+                                                    } else {
+                                                        app.snap.enabled.retain(|&k| k != kind);
+                                                    }
+                                                }
+                                            }
+                                        },
+                                    );
+                                },
                             );
-                        });
-                        setting_row(ui, "Arrow size", |ui| {
-                            ui.add(
-                                egui::DragValue::new(&mut ds.arrow_size)
-                                    .speed(0.1)
-                                    .range(0.1..=1000.0)
-                                    .max_decimals(3),
+                            settings_card(
+                                ui,
+                                "DIMENSIONS",
+                                |ui| {
+                                    let ds = &mut app.document.settings.dim_style;
+                                    setting_row(
+                                        ui,
+                                        "Text height",
+                                        |ui| {
+                                            ui.add(
+                                                egui::DragValue::new(&mut ds.text_height)
+                                                    .speed(0.1)
+                                                    .range(0.1..=1000.0)
+                                                    .max_decimals(3),
+                                            );
+                                        },
+                                    );
+                                    setting_row(
+                                        ui,
+                                        "Arrow size",
+                                        |ui| {
+                                            ui.add(
+                                                egui::DragValue::new(&mut ds.arrow_size)
+                                                    .speed(0.1)
+                                                    .range(0.1..=1000.0)
+                                                    .max_decimals(3),
+                                            );
+                                        },
+                                    );
+                                    setting_row(
+                                        ui,
+                                        "Precision",
+                                        |ui| {
+                                            let mut prec = ds.precision as u32;
+                                            if ui
+                                                .add(
+                                                    egui::DragValue::new(&mut prec).speed(0.1).range(0..=8),
+                                                )
+                                                .changed()
+                                            {
+                                                ds.precision = prec as usize;
+                                            }
+                                            ui.label(
+                                                egui::RichText::new("decimals")
+                                                    .size(11.0)
+                                                    .color(crate::theme::TEXT_DIM),
+                                            );
+                                        },
+                                    );
+                                    setting_row(
+                                        ui,
+                                        "Font",
+                                        |ui| {
+                                            font_combo(ui, "settings_dim_font", &mut ds.font);
+                                        },
+                                    );
+                                },
                             );
-                        });
-                        setting_row(ui, "Precision", |ui| {
-                            let mut prec = ds.precision as u32;
-                            if ui
-                                .add(egui::DragValue::new(&mut prec).speed(0.1).range(0..=8))
-                                .changed()
-                            {
-                                ds.precision = prec as usize;
-                            }
-                            ui.label(
-                                egui::RichText::new("decimals")
-                                    .size(11.0)
-                                    .color(crate::theme::TEXT_DIM),
+                            settings_card(
+                                ui,
+                                "TEXT",
+                                |ui| {
+                                    setting_row(
+                                        ui,
+                                        "Default font",
+                                        |ui| {
+                                            font_combo(ui, "settings_font", &mut app.text_font);
+                                        },
+                                    );
+                                },
                             );
-                        });
-                        setting_row(ui, "Font", |ui| {
-                            font_combo(ui, "settings_dim_font", &mut ds.font);
-                        });
-                    });
-
-                    settings_card(ui, "TEXT", |ui| {
-                        setting_row(ui, "Default font", |ui| {
-                            font_combo(ui, "settings_font", &mut app.text_font);
-                        });
-                    });
-
-                    settings_card(ui, "CURVATURE COMB", |ui| {
-                        ui.checkbox(&mut app.comb_on, "Show on selected curves");
-                        ui.add_space(4.0);
-                        ui.add_enabled(
-                            app.comb_on,
-                            egui::Slider::new(&mut app.comb_scale, 1.0..=20.0).text("Tooth scale"),
-                        );
-                    });
-                    ui.add_space(8.0);
-                });
-
-            settings_rule(ui);
-            ui.add_space(8.0);
-            ui.horizontal(|ui| {
-                if ui.button("Reset aids").clicked() {
-                    app.apply_prefs(&crate::state::UiPrefs::default());
-                }
-                if ui.button("Line weight & type…").clicked() {
-                    ui.ctx()
-                        .data_mut(|d| d.insert_temp(egui::Id::new("open_line_props"), true));
-                }
-                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    let close_btn = egui::Button::new(
-                        egui::RichText::new("Close").color(egui::Color32::WHITE),
-                    )
-                    .fill(crate::theme::ACCENT);
-                    if ui.add(close_btn).clicked() {
-                        close = true;
+                            settings_card(
+                                ui,
+                                "CURVATURE COMB",
+                                |ui| {
+                                    ui.checkbox(&mut app.comb_on, "Show on selected curves");
+                                    ui.add_space(4.0);
+                                    ui.add_enabled(
+                                        app.comb_on,
+                                        egui::Slider::new(&mut app.comb_scale, 1.0..=20.0)
+                                            .text("Tooth scale"),
+                                    );
+                                },
+                            );
+                            ui.add_space(8.0);
+                        },
+                    );
+                settings_rule(ui);
+                ui.add_space(8.0);
+                ui.horizontal(|ui| {
+                    if ui.button("Reset aids").clicked() {
+                        app.apply_prefs(&crate::state::UiPrefs::default());
                     }
+                    if ui.button("Line weight & type…").clicked() {
+                        ui.ctx()
+                            .data_mut(|d| {
+                                d.insert_temp(egui::Id::new("open_line_props"), true)
+                            });
+                    }
+                    ui.with_layout(
+                        egui::Layout::right_to_left(egui::Align::Center),
+                        |ui| {
+                            let close_btn = egui::Button::new(
+                                    egui::RichText::new("Close").color(egui::Color32::WHITE),
+                                )
+                                .fill(crate::theme::ACCENT);
+                            if ui.add(close_btn).clicked() {
+                                close = true;
+                            }
+                        },
+                    );
                 });
-            });
-            ui.add_space(4.0);
-        });
-
+                ui.add_space(4.0);
+            },
+        );
     if close || ctx.input(|i| i.key_pressed(egui::Key::Escape)) {
         ui_state.settings_open = false;
     }
@@ -1534,6 +1620,7 @@ pub(super) fn font_combo(ui: &mut egui::Ui, salt: &str, font: &mut Option<String
         });
     changed
 }
+
 fn tool_hotkey(tool: &Tool) -> &'static str {
     match tool {
         Tool::Select => "Esc",
@@ -1569,6 +1656,9 @@ fn tool_hotkey(tool: &Tool) -> &'static str {
         | Tool::Dimension { .. }
         | Tool::DimAngularLines { .. }
         | Tool::DimRadial { .. }
+        | Tool::DimConstraint { .. }
+        | Tool::Weld { .. }
+        | Tool::ConPick { .. }
         | Tool::PlotWindow { .. }
         | Tool::Point => "",
     }
@@ -1586,19 +1676,19 @@ fn tool_menu_item(ui: &mut egui::Ui, app: &mut AppState, label: &str, tool: Tool
 }
 
 #[derive(Clone)]
-enum Act {
+pub(super) enum Act {
     Tool(Tool),
     Cmd(Command),
 }
 
-fn run_act(app: &mut AppState, act: &Act) {
+pub(super) fn run_act(app: &mut AppState, act: &Act) {
     match act {
         Act::Tool(t) => app.execute(Command::Activate(t.clone())),
         Act::Cmd(c) => app.execute(c.clone()),
     }
 }
 
-fn draw_entries() -> Vec<(crate::icons::Icon, &'static str, Act)> {
+pub(super) fn draw_entries() -> Vec<(crate::icons::Icon, &'static str, Act)> {
     use crate::icons::Icon;
     vec![
         (Icon::Select, "Select  (Esc)", Act::Tool(Tool::Select)),
@@ -1681,7 +1771,7 @@ fn draw_entries() -> Vec<(crate::icons::Icon, &'static str, Act)> {
     ]
 }
 
-fn modify_entries() -> Vec<(crate::icons::Icon, &'static str, Act)> {
+pub(super) fn modify_entries() -> Vec<(crate::icons::Icon, &'static str, Act)> {
     use crate::icons::Icon;
     vec![
         (
@@ -1782,22 +1872,24 @@ fn modify_entries() -> Vec<(crate::icons::Icon, &'static str, Act)> {
     ]
 }
 
-fn act_needs_selection(act: &Act) -> bool {
+pub(super) fn act_needs_selection(act: &Act) -> bool {
     match act {
-        Act::Tool(t) => matches!(
-            t,
-            Tool::Move { .. }
-                | Tool::Copy { .. }
-                | Tool::Rotate { .. }
-                | Tool::Scale { .. }
-                | Tool::Mirror { .. }
-                | Tool::Stretch { .. }
-        ),
+        Act::Tool(t) => {
+            matches!(
+                t,
+                Tool::Move { .. }
+                    | Tool::Copy { .. }
+                    | Tool::Rotate { .. }
+                    | Tool::Scale { .. }
+                    | Tool::Mirror { .. }
+                    | Tool::Stretch { .. }
+            )
+        }
         Act::Cmd(c) => matches!(c, Command::Explode | Command::Join),
     }
 }
 
-fn group_id(act: &Act) -> Option<u8> {
+pub(super) fn group_id(act: &Act) -> Option<u8> {
     match act {
         Act::Tool(Tool::Line { .. }) => Some(0),
         Act::Tool(Tool::Circle { .. }) => Some(1),
@@ -1807,284 +1899,114 @@ fn group_id(act: &Act) -> Option<u8> {
     }
 }
 
-fn group_entries(id: u8) -> Vec<(crate::icons::Icon, &'static str, Act)> {
+pub(super) fn group_entries(id: u8) -> Vec<(crate::icons::Icon, &'static str, Act)> {
     use crate::icons::Icon;
     match id {
-        0 => vec![
-            (Icon::Line, "Line", Act::Tool(Tool::Line { last: None })),
-            (
-                Icon::Line,
-                "Tangent line",
-                Act::Tool(Tool::TangentLine { first: None }),
-            ),
-        ],
-        1 => vec![
-            (
-                Icon::Circle,
-                "Center, radius",
-                Act::Tool(Tool::Circle { center: None }),
-            ),
-            (
-                Icon::Circle2P,
-                "2 points (diameter)",
-                Act::Tool(Tool::CircleTwoPoint { first: None }),
-            ),
-            (
-                Icon::Circle3P,
-                "3 points",
-                Act::Tool(Tool::CircleThreePoint { pts: vec![] }),
-            ),
-            (
-                Icon::CircleTtr,
-                "Tangent, tangent, radius",
-                Act::Tool(Tool::CircleTtr {
-                    radius: 1.0,
-                    first: None,
-                }),
-            ),
-            (
-                Icon::CircleTtt,
-                "Tangent, tangent, tangent",
-                Act::Tool(Tool::CircleTtt { picks: vec![] }),
-            ),
-        ],
-        2 => vec![
-            (Icon::Arc, "3 points", Act::Tool(Tool::Arc3 { pts: vec![] })),
-            (
-                Icon::ArcStartCenterEnd,
-                "Start, center, end",
-                Act::Tool(Tool::ArcStartCenterEnd {
-                    start: None,
-                    center: None,
-                }),
-            ),
-            (
-                Icon::ArcCenterStartEnd,
-                "Center, start, end",
-                Act::Tool(Tool::ArcCenterStartEnd {
-                    center: None,
-                    start: None,
-                }),
-            ),
-        ],
-        _ => vec![
-            (
-                Icon::Dimension,
-                "Linear (aligned)",
-                Act::Tool(Tool::Dimension { p1: None, p2: None }),
-            ),
-            (
-                Icon::DimAngle,
-                "Angular (2 lines)",
-                Act::Tool(Tool::DimAngularLines {
-                    a: None,
-                    geom: None,
-                }),
-            ),
-            (
-                Icon::DimRadius,
-                "Radius",
-                Act::Tool(Tool::DimRadial {
-                    diameter: false,
-                    center: None,
-                    radius: 0.0,
-                }),
-            ),
-            (
-                Icon::DimDiameter,
-                "Diameter",
-                Act::Tool(Tool::DimRadial {
-                    diameter: true,
-                    center: None,
-                    radius: 0.0,
-                }),
-            ),
-        ],
-    }
-}
-
-fn flyout_marker(ui: &egui::Ui, rect: egui::Rect) {
-    let c = rect.right_bottom() + egui::vec2(-3.0, -3.0);
-    let p = ui.painter();
-    p.add(egui::Shape::convex_polygon(
-        vec![c, c + egui::vec2(-5.0, 0.0), c + egui::vec2(0.0, -5.0)],
-        crate::theme::TEXT_DIM,
-        egui::Stroke::NONE,
-    ));
-}
-
-fn dock_column(
-    ui: &mut egui::Ui,
-    app: &mut AppState,
-    entries: &[(crate::icons::Icon, &'static str, Act)],
-    icon_px: f32,
-    divider_after_first: bool,
-    hover: &mut Option<(u8, egui::Rect)>,
-) {
-    let has_sel = app.has_selection();
-    ui.vertical(|ui| {
-        ui.set_width(icon_px);
-        ui.spacing_mut().item_spacing = egui::vec2(0.0, 3.0);
-        for (i, (icon, tip, act)) in entries.iter().enumerate() {
-            if divider_after_first && i == 1 {
-                dock_divider(ui);
-            }
-            let active = matches!(act, Act::Tool(t) if app.tool.name() == t.name());
-            let enabled = has_sel || !act_needs_selection(act);
-            let resp = ui
-                .add_enabled_ui(enabled, |ui| {
-                    crate::icons::icon_button_sized(ui, *icon, tip, active, icon_px)
-                })
-                .inner;
-            if resp.hovered() {
-                if let Act::Tool(t) = act {
-                    app.hint_tool = Some(t.clone());
-                }
-                if let Some(gid) = group_id(act) {
-                    *hover = Some((gid, resp.rect));
-                }
-            }
-            if group_id(act).is_some() {
-                flyout_marker(ui, resp.rect);
-            }
-            if resp.clicked() {
-                run_act(app, act);
-            }
+        0 => {
+            vec![
+                (Icon::Line, "Line", Act::Tool(Tool::Line { last: None })),
+                (
+                    Icon::Line,
+                    "Tangent line",
+                    Act::Tool(Tool::TangentLine { first: None }),
+                ),
+            ]
         }
-    });
-}
-
-pub(super) fn ribbon(ctx: &Context, app: &mut AppState, canvas_rect: egui::Rect) {
-    app.hint_tool = None;
-    let draw = draw_entries();
-    let modify = modify_entries();
-    let avail = canvas_rect;
-    let icon_px = 36.0;
-    let row_h = icon_px + 3.0;
-    let rows = draw.len().max(modify.len());
-    let est_h = rows as f32 * row_h + 24.0;
-    let y = (avail.center().y - est_h / 2.0).max(avail.top() + 76.0);
-
-    let flyout_id = egui::Id::new("dock_flyout_open");
-    let prev: Option<(u8, egui::Rect)> = ctx.data(|d| d.get_temp(flyout_id));
-
-    let hover = egui::Area::new(egui::Id::new("tool_ribbon"))
-        .fixed_pos(egui::pos2(avail.left() + 12.0, y))
-        .order(egui::Order::Foreground)
-        .show(ctx, |ui| {
-            crate::theme::glass(crate::theme::tok::R_LG)
-                .inner_margin(egui::Margin::same(6))
-                .show(ui, |ui| {
-                    let mut hover = None;
-                    ui.horizontal_top(|ui| {
-                        dock_column(ui, app, &draw, icon_px, true, &mut hover);
-                        dock_vsep(ui, est_h.min(rows as f32 * row_h));
-                        dock_column(ui, app, &modify, icon_px, false, &mut hover);
-                    });
-                    hover
-                })
-                .inner
-        })
-        .inner;
-
-    let next = dock_flyout(ctx, app, hover.or(prev), hover);
-    if let Some(v) = next {
-        ctx.data_mut(|d| d.insert_temp(flyout_id, v));
-    } else {
-        ctx.data_mut(|d| {
-            d.remove::<(u8, egui::Rect)>(flyout_id);
-        });
+        1 => {
+            vec![
+                (
+                    Icon::Circle,
+                    "Center, radius",
+                    Act::Tool(Tool::Circle { center: None }),
+                ),
+                (
+                    Icon::Circle2P,
+                    "2 points (diameter)",
+                    Act::Tool(Tool::CircleTwoPoint { first: None }),
+                ),
+                (
+                    Icon::Circle3P,
+                    "3 points",
+                    Act::Tool(Tool::CircleThreePoint { pts: vec![] }),
+                ),
+                (
+                    Icon::CircleTtr,
+                    "Tangent, tangent, radius",
+                    Act::Tool(Tool::CircleTtr {
+                        radius: 1.0,
+                        first: None,
+                    }),
+                ),
+                (
+                    Icon::CircleTtt,
+                    "Tangent, tangent, tangent",
+                    Act::Tool(Tool::CircleTtt { picks: vec![] }),
+                ),
+            ]
+        }
+        2 => {
+            vec![
+                (Icon::Arc, "3 points", Act::Tool(Tool::Arc3 { pts: vec![] })),
+                (
+                    Icon::ArcStartCenterEnd,
+                    "Start, center, end",
+                    Act::Tool(Tool::ArcStartCenterEnd {
+                        start: None,
+                        center: None,
+                    }),
+                ),
+                (
+                    Icon::ArcCenterStartEnd,
+                    "Center, start, end",
+                    Act::Tool(Tool::ArcCenterStartEnd {
+                        center: None,
+                        start: None,
+                    }),
+                ),
+            ]
+        }
+        _ => {
+            vec![
+                (
+                    Icon::Dimension,
+                    "Linear (aligned)",
+                    Act::Tool(Tool::Dimension { p1: None, p2: None }),
+                ),
+                (
+                    Icon::DimAngle,
+                    "Angular (2 lines)",
+                    Act::Tool(Tool::DimAngularLines {
+                        a: None,
+                        geom: None,
+                    }),
+                ),
+                (
+                    Icon::DimRadius,
+                    "Radius",
+                    Act::Tool(Tool::DimRadial {
+                        diameter: false,
+                        center: None,
+                        radius: 0.0,
+                    }),
+                ),
+                (
+                    Icon::DimDiameter,
+                    "Diameter",
+                    Act::Tool(Tool::DimRadial {
+                        diameter: true,
+                        center: None,
+                        radius: 0.0,
+                    }),
+                ),
+            ]
+        }
     }
 }
 
-fn dock_flyout(
-    ctx: &Context,
-    app: &mut AppState,
-    show: Option<(u8, egui::Rect)>,
-    hover: Option<(u8, egui::Rect)>,
-) -> Option<(u8, egui::Rect)> {
-    let (gid, anchor) = show?;
-    let entries = group_entries(gid);
-    let mut clicked: Option<Act> = None;
-    let mut hovered_sub: Option<Tool> = None;
-    let active_name = app.tool.name();
-    let area = egui::Area::new(egui::Id::new("dock_flyout"))
-        .fixed_pos(anchor.right_top() + egui::vec2(8.0, -6.0))
-        .order(egui::Order::Foreground)
-        .show(ctx, |ui| {
-            crate::theme::glass(crate::theme::tok::R_MD)
-                .inner_margin(egui::Margin::same(6))
-                .show(ui, |ui| {
-                    ui.horizontal(|ui| {
-                        ui.spacing_mut().item_spacing.x = 2.0;
-                        for (icon, label, act) in &entries {
-                            let active = matches!(act, Act::Tool(t) if active_name == t.name());
-                            let r = crate::icons::icon_button_sized(ui, *icon, label, active, 34.0);
-                            if r.hovered()
-                                && let Act::Tool(t) = act
-                            {
-                                hovered_sub = Some(t.clone());
-                            }
-                            if r.clicked() {
-                                clicked = Some(act.clone());
-                            }
-                        }
-                    });
-                });
-        });
-    if let Some(t) = hovered_sub {
-        app.hint_tool = Some(t);
-    }
-    if let Some(a) = clicked {
-        run_act(app, &a);
-        return None;
-    }
-    let flyout_hovered = ctx
-        .pointer_latest_pos()
-        .is_some_and(|p| area.response.rect.expand(6.0).contains(p));
-    if hover.is_some() {
-        hover
-    } else if flyout_hovered {
-        Some((gid, anchor))
-    } else {
-        None
-    }
-}
-
-fn dock_vsep(ui: &mut egui::Ui, height: f32) {
-    ui.add_space(3.0);
-    let (rect, _) = ui.allocate_exact_size(egui::vec2(1.0, height), egui::Sense::hover());
-    ui.painter().vline(
-        rect.center().x,
-        rect.y_range(),
-        egui::Stroke::new(1.0, crate::theme::OUTLINE),
-    );
-    ui.add_space(3.0);
-}
-
-fn dock_divider(ui: &mut egui::Ui) {
-    ui.add_space(2.0);
-    let w = ui.available_width();
-    let (rect, _) = ui.allocate_exact_size(egui::vec2(w, 1.0), egui::Sense::hover());
-    ui.painter().hline(
-        rect.x_range(),
-        rect.center().y,
-        egui::Stroke::new(1.0, crate::theme::OUTLINE),
-    );
-    ui.add_space(2.0);
-}
-
-/// A small auto-fading glass toast showing the last `command_log` entry —
-/// success/failure feedback from commands, constraint operations, exports,
-/// etc. `command_log` itself is otherwise write-only (nothing else renders
-/// it), so without this every one of those messages was silently swallowed.
-/// Tracks the log's length in egui's own temp storage (no `AppState` field
-/// needed) so a new push resets the fade timer; the message itself is read
-/// straight from `app.command_log.last()` each frame.
 pub(super) fn command_toast(ctx: &Context, app: &AppState, canvas_rect: egui::Rect) {
     const HOLD_SECS: f64 = 2.5;
-    const FADE_SECS: f64 = 0.6;
 
+    const FADE_SECS: f64 = 0.6;
     let len_id = egui::Id::new("command_toast_len");
     let shown_id = egui::Id::new("command_toast_shown_at");
     let len = app.command_log.len();
@@ -2116,11 +2038,6 @@ pub(super) fn command_toast(ctx: &Context, app: &AppState, canvas_rect: egui::Re
     if alpha <= 0.0 {
         return;
     }
-    // Center the toast in the empty space to the left of the status pill,
-    // vertically aligned with it, rather than floating above it. The pill's
-    // own rect is only known after it lays itself out (it runs first each
-    // frame and stashes its rect here); before that first frame, fall back
-    // to sitting just above the pill so nothing panics on a missing rect.
     let pill_rect = ctx.data(|d| d.get_temp::<egui::Rect>(egui::Id::new("status_pill_rect")));
     let (anchor_pos, pivot) = match pill_rect {
         Some(pill) if pill.left() - canvas_rect.left() > 60.0 => (
@@ -2136,27 +2053,11 @@ pub(super) fn command_toast(ctx: &Context, app: &AppState, canvas_rect: egui::Re
             )
         }
     };
-
     egui::Area::new(egui::Id::new("command_toast"))
         .fixed_pos(anchor_pos)
         .pivot(pivot)
         .order(egui::Order::Foreground)
-        // A passive notification must never intercept clicks. `interactable
-        // (false)` alone doesn't cover it: egui's hit-test walks layers
-        // front-to-back and stops entirely once a layer's rect fully covers
-        // the pointer's small search radius — even a non-interactable
-        // (Sense::hover()) widget does this, so on this Area id's first-ever
-        // frame, before it knows the real (small) content size, egui's
-        // default 600x400 sizing-pass box would fully cover any click under
-        // it and hide every layer behind, canvas included. Capping the
-        // sizing-pass guess near the real content size keeps that box small
-        // enough to never reach past the toast's own corner.
         .default_size(egui::vec2(480.0, 32.0))
-        // A wrapped Label never reports a width wider than the one it was
-        // given, so once egui's persisted area size narrows for a short
-        // message, longer messages afterward stay wrapped in that same
-        // narrow column instead of widening back out. Force a fresh sizing
-        // pass exactly on the frame a new message replaces the old one.
         .sizing_pass(is_new_message)
         .interactable(false)
         .show(ctx, |ui| {
@@ -2175,6 +2076,21 @@ pub(super) fn command_toast(ctx: &Context, app: &AppState, canvas_rect: egui::Re
 }
 
 pub(super) fn status_pill(ctx: &Context, app: &mut AppState, canvas_rect: egui::Rect) {
+    // DoF chip content, computed up front (dof_status borrows app mutably,
+    // and the pill's own closure borrows it too). `None` when there are no
+    // constraints to report on.
+    let dof_chip: Option<(String, egui::Color32)> = app.dof_status().map(|s| {
+        if s.dof == 0 {
+            ("Fully constrained".to_string(), crate::theme::STATUS_GREEN)
+        } else if !s.redundant.is_empty() {
+            (
+                format!("{} DOF · redundant", s.dof),
+                crate::theme::STATUS_AMBER,
+            )
+        } else {
+            (format!("{} DOF", s.dof), crate::theme::TEXT_DIM)
+        }
+    });
     let area = egui::Area::new(egui::Id::new("status_pill"))
         .anchor(
             egui::Align2::CENTER_BOTTOM,
@@ -2228,7 +2144,6 @@ pub(super) fn status_pill(ctx: &Context, app: &mut AppState, canvas_rect: egui::
                             );
                         });
                         pill_sep(ui);
-
                         snap_master(ui, app);
                         ui.add_space(6.0);
                         snap_chip(ui, &mut app.grid_on, "Grid");
@@ -2243,7 +2158,6 @@ pub(super) fn status_pill(ctx: &Context, app: &mut AppState, canvas_rect: egui::
                         snap_chip(ui, &mut app.track_on, "Track");
                         snap_chip(ui, &mut app.dyn_on, "Dyn");
                         pill_sep(ui);
-
                         let (wx, wy) = app
                             .view
                             .screen_to_world(app.view.width / 2.0, app.view.height / 2.0);
@@ -2271,8 +2185,16 @@ pub(super) fn status_pill(ctx: &Context, app: &mut AppState, canvas_rect: egui::
                             app.zoom_extents();
                         }
                         pill_sep(ui);
-
                         unit_dropdown(ui, app);
+                        if let Some((text, color)) = &dof_chip {
+                            pill_sep(ui);
+                            ui.label(egui::RichText::new(text).size(11.5).color(*color))
+                                .on_hover_text(
+                                    "Degrees of freedom left in the selected \
+                                     constraint group (or the whole sketch when \
+                                     nothing is selected)",
+                                );
+                        }
                     });
                 });
         });
@@ -2285,7 +2207,6 @@ fn unit_dropdown(ui: &mut egui::Ui, app: &mut AppState) {
     let mut open = ui
         .ctx()
         .data(|d| d.get_temp::<bool>(open_id).unwrap_or(false));
-
     let label = app.units_label();
     let galley = ui.painter().layout_no_wrap(
         label.to_string(),
@@ -2336,7 +2257,6 @@ fn unit_dropdown(ui: &mut egui::Ui, app: &mut AppState) {
     if resp.clicked() {
         open = !open;
     }
-
     if open {
         let popup = egui::Area::new(egui::Id::new("unit_menu_popup"))
             .order(egui::Order::Foreground)
@@ -2369,7 +2289,6 @@ fn unit_dropdown(ui: &mut egui::Ui, app: &mut AppState) {
             open = false;
         }
     }
-
     ui.ctx().data_mut(|d| d.insert_temp(open_id, open));
 }
 
@@ -2394,7 +2313,6 @@ fn snap_master(ui: &mut egui::Ui, app: &mut AppState) {
     let mut open = ui
         .ctx()
         .data(|d| d.get_temp::<bool>(open_id).unwrap_or(false));
-
     let h = 26.0;
     let saved_sp = ui.spacing().item_spacing.x;
     ui.spacing_mut().item_spacing.x = 0.0;
@@ -2402,7 +2320,6 @@ fn snap_master(ui: &mut egui::Ui, app: &mut AppState) {
     let (arect, aresp) = ui.allocate_exact_size(egui::vec2(24.0, h), egui::Sense::click());
     ui.spacing_mut().item_spacing.x = saved_sp;
     let on = app.snap_on;
-
     let union = srect.union(arect);
     let p = ui.painter();
     p.rect(
@@ -2436,8 +2353,6 @@ fn snap_master(ui: &mut egui::Ui, app: &mut AppState) {
     if open || aresp.hovered() {
         p.rect_filled(arect.shrink(1.0), 7.0, crate::theme::WIDGET_HOVER);
     }
-    // A plain "▲" glyph isn't in the bundled Roboto subset and renders as
-    // a tofu box — drawn as a small filled triangle instead.
     let tc = arect.center();
     let (tdx, tdy) = (3.5, 2.6);
     p.add(egui::Shape::convex_polygon(
@@ -2453,7 +2368,6 @@ fn snap_master(ui: &mut egui::Ui, app: &mut AppState) {
         },
         egui::Stroke::NONE,
     ));
-
     if sresp.clicked() {
         app.snap_on = !app.snap_on;
     }
@@ -2461,7 +2375,6 @@ fn snap_master(ui: &mut egui::Ui, app: &mut AppState) {
         open = !open;
     }
     let trigger_hovered = sresp.hovered() || aresp.hovered();
-
     if open {
         let kinds = oxidraft_cad::SNAP_KINDS;
         let popup = egui::Area::new(egui::Id::new("snap_kinds_popup_area"))
@@ -2498,7 +2411,6 @@ fn snap_master(ui: &mut egui::Ui, app: &mut AppState) {
             open = false;
         }
     }
-
     ui.ctx().data_mut(|d| d.insert_temp(open_id, open));
 }
 
@@ -2559,11 +2471,11 @@ fn snap_chip(ui: &mut egui::Ui, on: &mut bool, label: &str) -> bool {
 
 pub(super) fn inspector(ctx: &Context, app: &mut AppState, canvas_rect: egui::Rect) {
     const RIGHT_M: f32 = 12.0;
+
     const WIDTH: f32 = 292.0;
     let screen = ctx.content_rect();
     let top_off = (canvas_rect.top() - screen.top()) + 76.0;
     let avail_h = (canvas_rect.height() - 76.0 - 80.0).max(160.0);
-
     egui::Area::new(egui::Id::new("inspector"))
         .anchor(egui::Align2::RIGHT_TOP, egui::vec2(-RIGHT_M, top_off))
         .order(egui::Order::Foreground)
@@ -2606,23 +2518,18 @@ pub(super) fn inspector(ctx: &Context, app: &mut AppState, canvas_rect: egui::Re
         });
 }
 
-/// A vertical bar of constraint actions docked just left of the inspector,
-/// shown while something is selected. Each glyph mirrors the on-canvas badge
-/// it produces, so the bar and the badges teach each other; clicking applies
-/// the constraint to the current selection (commands self-validate and log).
 pub(super) fn constraint_bar(ctx: &Context, app: &mut AppState, canvas_rect: egui::Rect) {
-    // Always docked, not just while something's selected — the buttons
-    // themselves gray out below instead of the whole bar vanishing, so its
-    // position on screen stays predictable.
     let has_sel = !app.selection.is_empty();
+
     const RIGHT_M: f32 = 12.0;
+
     const INSPECTOR_W: f32 = 292.0;
+
     const GAP: f32 = 8.0;
-    // Glass bar width: the 30 px glyph column plus its 5 px side margins.
+
     const BAR_W: f32 = 40.0;
     let screen = ctx.content_rect();
     let top_off = (canvas_rect.top() - screen.top()) + 76.0;
-
     egui::Area::new(egui::Id::new("constraint_bar"))
         .anchor(
             egui::Align2::RIGHT_TOP,
@@ -2635,101 +2542,182 @@ pub(super) fn constraint_bar(ctx: &Context, app: &mut AppState, canvas_rect: egu
                 .show(ui, |ui| {
                     use crate::icons::Icon;
                     use oxidraft_cad::ConstraintKind as K;
-                    ui.add_enabled_ui(has_sel, |ui| {
-                        // Pin to the glyph-button width; otherwise `bar_divider`'s
-                        // `available_width()` rule stretches to the Area's full max
-                        // width and blows the whole bar out sideways.
-                        ui.set_width(30.0);
-                        ui.spacing_mut().item_spacing.y = 3.0;
-                        let mut cmd: Option<Command> = None;
-                        let mut geo = |ui: &mut egui::Ui, icon: Icon, tip: &str, k: K| {
-                            if con_glyph_button(ui, tip, icon) {
-                                cmd = Some(Command::Constrain(k));
-                            }
+                    ui.set_width(30.0);
+                    ui.spacing_mut().item_spacing.y = 3.0;
+                    if con_glyph_button(
+                        ui,
+                        "Smart Dimension (DIMCON) — click a line for length, \
+                         a circle/arc for radius, or two lines for angle",
+                        Icon::ConLengthLock,
+                    )
+                    .clicked()
+                    {
+                        app.execute(Command::Activate(Tool::DimConstraint {
+                            first: None,
+                            pending: None,
+                        }));
+                    }
+                    bar_divider(ui);
+                    ui.set_width(30.0);
+                    ui.spacing_mut().item_spacing.y = 3.0;
+                    let mut cmd: Option<Command> = None;
+                    // Selection-based relations: enabled only when the current
+                    // selection is a valid target, with the requirement shown
+                    // as a disabled-hover tooltip. Pick-based relations stay
+                    // enabled (they open a pick tool regardless of selection).
+                    let mut geo = |ui: &mut egui::Ui, icon: Icon, tip: &str, k: K| {
+                        let validity =
+                            oxidraft_cad::selection_validity(&app.document, &app.selection, k);
+                        let pick_based =
+                            !crate::tools::con_pick_plan(k).is_empty() || k == K::Coincident;
+                        let enabled = pick_based || validity.is_ok();
+                        let resp = ui
+                            .add_enabled_ui(enabled, |ui| con_glyph_button(ui, tip, icon))
+                            .inner;
+                        let resp = match validity {
+                            Err(why) if !enabled => resp.on_disabled_hover_text(why),
+                            _ => resp,
                         };
-                        geo(
-                            ui,
-                            Icon::ConHorizontal,
-                            "Horizontal (HOR) — level the selected line(s)",
-                            K::Horizontal,
+                        if resp.clicked() {
+                            cmd = Some(Command::Constrain(k));
+                        }
+                    };
+                    geo(
+                        ui,
+                        Icon::ConHorizontal,
+                        "Horizontal (HOR) — level the selected line(s)",
+                        K::Horizontal,
+                    );
+                    geo(
+                        ui,
+                        Icon::ConVertical,
+                        "Vertical (VER) — plumb the selected line(s)",
+                        K::Vertical,
+                    );
+                    geo(
+                        ui,
+                        Icon::ConParallel,
+                        "Parallel (PAR) — align the 2nd line to the 1st",
+                        K::Parallel,
+                    );
+                    geo(
+                        ui,
+                        Icon::ConPerpendicular,
+                        "Perpendicular (PERP) — square the 2nd line to the 1st",
+                        K::Perpendicular,
+                    );
+                    geo(
+                        ui,
+                        Icon::ConParallel,
+                        "Collinear (COLL) — lay the 2nd line on the 1st's carrier",
+                        K::Collinear,
+                    );
+                    geo(
+                        ui,
+                        Icon::ConEqual,
+                        "Equal length (EQL) — match the 2nd line to the 1st",
+                        K::EqualLength,
+                    );
+                    geo(
+                        ui,
+                        Icon::ConTangent,
+                        "Tangent (TANCON) — a line and an arc, or two arcs",
+                        K::Tangent,
+                    );
+                    geo(
+                        ui,
+                        Icon::ConConcentric,
+                        "Concentric (CONC) — share the two circles'/arcs' center",
+                        K::Concentric,
+                    );
+                    geo(
+                        ui,
+                        Icon::ConEqual,
+                        "Equal radius (EQR) — match the 2nd circle/arc to the 1st",
+                        K::EqualRadius,
+                    );
+                    bar_divider(ui);
+                    // Pick-based relations.
+                    geo(
+                        ui,
+                        Icon::ConCoincident,
+                        "Coincident (COI/WELD) — with two lines selected, weld their \
+                         nearest endpoints; otherwise pick any two points to weld",
+                        K::Coincident,
+                    );
+                    geo(
+                        ui,
+                        Icon::ConCoincident,
+                        "Midpoint (MID) — hold a picked point at a line's midpoint",
+                        K::Midpoint,
+                    );
+                    geo(
+                        ui,
+                        Icon::ConCoincident,
+                        "Point on line (POL) — hold a picked point on a line",
+                        K::PointOnLine,
+                    );
+                    geo(
+                        ui,
+                        Icon::ConCoincident,
+                        "Point on circle (POC) — hold a picked point on a circle/arc",
+                        K::PointOnCircle,
+                    );
+                    geo(
+                        ui,
+                        Icon::ConEqual,
+                        "Symmetric (SYM) — mirror two picked points about a line",
+                        K::Symmetric,
+                    );
+                    bar_divider(ui);
+                    {
+                        let block_ok = oxidraft_cad::selection_validity(
+                            &app.document,
+                            &app.selection,
+                            K::Block,
                         );
-                        geo(
-                            ui,
-                            Icon::ConVertical,
-                            "Vertical (VER) — plumb the selected line(s)",
-                            K::Vertical,
-                        );
-                        geo(
-                            ui,
-                            Icon::ConParallel,
-                            "Parallel (PAR) — align the 2nd line to the 1st",
-                            K::Parallel,
-                        );
-                        geo(
-                            ui,
-                            Icon::ConPerpendicular,
-                            "Perpendicular (PERP) — square the 2nd line to the 1st",
-                            K::Perpendicular,
-                        );
-                        geo(
-                            ui,
-                            Icon::ConEqual,
-                            "Equal length (EQL) — match the 2nd line to the 1st",
-                            K::EqualLength,
-                        );
-                        geo(
-                            ui,
-                            Icon::ConTangent,
-                            "Tangent (TANCON) — a line and an arc, or two arcs",
-                            K::Tangent,
-                        );
+                        let resp = ui
+                            .add_enabled_ui(block_ok.is_ok(), |ui| {
+                                con_glyph_button(
+                                    ui,
+                                    "Block (BLOCK) — lock the selection into a rigid group",
+                                    Icon::ConFix,
+                                )
+                            })
+                            .inner;
+                        let resp = match block_ok {
+                            Err(why) => resp.on_disabled_hover_text(why),
+                            _ => resp,
+                        };
+                        if resp.clicked() {
+                            cmd = Some(Command::Constrain(K::Block));
+                        }
+                    }
+                    ui.add_enabled_ui(has_sel, |ui| {
                         if con_glyph_button(
                             ui,
-                            "Coincident (COI) — weld the nearest endpoints of two lines",
-                            Icon::ConCoincident,
-                        ) {
-                            cmd = Some(Command::Constrain(K::Coincident));
+                            "Fix (GCFIX) — pin the selected geometry in place",
+                            Icon::ConFix,
+                        )
+                        .clicked()
+                        {
+                            cmd = Some(Command::Fix);
                         }
-                        bar_divider(ui);
-                        if con_glyph_button(
-                            ui,
-                            "Lock Radius (RADCON) — hold a circle/arc's current radius",
-                            Icon::ConRadiusLock,
-                        ) {
-                            cmd = Some(Command::ConstrainRadius(None));
-                        }
-                        if con_glyph_button(
-                            ui,
-                            "Lock Length (LENCON) — hold a line's current length",
-                            Icon::ConLengthLock,
-                        ) {
-                            cmd = Some(Command::ConstrainDistance(None));
-                        }
-                        if con_glyph_button(
-                            ui,
-                            "Angle (ANGCON) — hold the angle between two lines",
-                            Icon::ConAngle,
-                        ) {
-                            cmd = Some(Command::ConstrainAngle(None));
-                        }
-                        bar_divider(ui);
                         if con_glyph_button(
                             ui,
                             "Remove (UNCON) — drop every constraint on the selection",
                             Icon::ConRemove,
-                        ) {
+                        )
+                        .clicked()
+                        {
                             cmd = Some(Command::Unconstrain);
                         }
-                        if let Some(c) = cmd {
-                            app.execute(c);
-                        }
                     });
+                    if let Some(c) = cmd {
+                        app.execute(c);
+                    }
                 });
         });
-
-    // Two bare (frameless) toggles floating just left of the bar's top: the
-    // auto-constrain mode switch, and under it the badge show/hide eye. No
-    // glass behind them — they read as plain icons over the canvas.
     egui::Area::new(egui::Id::new("constraint_bar_toggles"))
         .anchor(
             egui::Align2::RIGHT_TOP,
@@ -2740,29 +2728,28 @@ pub(super) fn constraint_bar(ctx: &Context, app: &mut AppState, canvas_rect: egu
             ui.vertical(|ui| {
                 ui.set_width(28.0);
                 ui.spacing_mut().item_spacing.y = 4.0;
-                if bar_toggle(
+                if bar_toggle_onoff(
                     ui,
                     app.infer_constraints,
                     "Auto-constrain — infer coincident, horizontal / vertical \
                      and tangent constraints as you draw",
                     crate::icons::Icon::ConstAuto,
+                    crate::icons::Icon::ConstAutoOff,
                 ) {
                     app.infer_constraints = !app.infer_constraints;
                 }
-                if bar_toggle(
+                if bar_toggle_onoff(
                     ui,
                     app.show_constraints,
                     "Show / hide constraint badges",
                     crate::icons::Icon::ConstShowHide,
+                    crate::icons::Icon::ConstShowHideOff,
                 ) {
                     app.show_constraints = !app.show_constraints;
                 }
             });
         });
 
-    // Curvature Comb lives well clear of the constraint toggles — it isn't
-    // a constraint control, and sitting right next to them read as if it
-    // was one.
     const COMB_GAP: f32 = 28.0;
     egui::Area::new(egui::Id::new("curvature_comb_toggle"))
         .anchor(
@@ -2785,10 +2772,6 @@ pub(super) fn constraint_bar(ctx: &Context, app: &mut AppState, canvas_rect: egu
         });
 }
 
-/// A bare, frameless toggle button for the constraint bar's side icons: no
-/// persistent background, only a soft hover wash. `icon` paints at its own
-/// colours; `on` is full opacity, off is faded (see `icon_button_sized`'s
-/// disabled fade for the same convention). Returns whether it was clicked.
 fn bar_toggle(ui: &mut egui::Ui, on: bool, tooltip: &str, icon: crate::icons::Icon) -> bool {
     let (rect, mut resp) = ui.allocate_exact_size(egui::Vec2::splat(28.0), egui::Sense::click());
     let hovered = resp.hovered();
@@ -2801,7 +2784,6 @@ fn bar_toggle(ui: &mut egui::Ui, on: bool, tooltip: &str, icon: crate::icons::Ic
             crate::theme::WIDGET_HOVER.gamma_multiply(anim * 0.8),
         );
     }
-    // Colours stay the icon's own — on/hover/off is conveyed by opacity only.
     let alpha = if on {
         255
     } else if hovered {
@@ -2817,12 +2799,37 @@ fn bar_toggle(ui: &mut egui::Ui, on: bool, tooltip: &str, icon: crate::icons::Ic
     resp.clicked()
 }
 
-/// One square icon button for [`constraint_bar`]: hover-lit, painting
-/// `icon` at its own colours (no tint), with a rich tooltip. Returns
-/// whether it was clicked.
-fn con_glyph_button(ui: &mut egui::Ui, tooltip: &str, icon: crate::icons::Icon) -> bool {
-    let (rect, mut resp) = ui.allocate_exact_size(egui::Vec2::splat(30.0), egui::Sense::click());
+fn bar_toggle_onoff(
+    ui: &mut egui::Ui,
+    on: bool,
+    tooltip: &str,
+    on_icon: crate::icons::Icon,
+    off_icon: crate::icons::Icon,
+) -> bool {
+    let (rect, mut resp) = ui.allocate_exact_size(egui::Vec2::splat(28.0), egui::Sense::click());
     let hovered = resp.hovered();
+    let anim = ui.ctx().animate_bool(resp.id, hovered);
+    let painter = ui.painter_at(rect);
+    if anim > 0.001 {
+        painter.rect_filled(
+            rect,
+            7.0,
+            crate::theme::WIDGET_HOVER.gamma_multiply(anim * 0.8),
+        );
+    }
+    let icon = if on { on_icon } else { off_icon };
+    let tint = egui::Color32::from_white_alpha(if on || hovered { 255 } else { 210 });
+    crate::icons::paint_icon(&painter, ui.ctx(), icon, rect.shrink(5.0), tint);
+    if hovered {
+        resp = resp.on_hover_ui(|ui| crate::icons::rich_tooltip(ui, tooltip));
+    }
+    resp.clicked()
+}
+
+fn con_glyph_button(ui: &mut egui::Ui, tooltip: &str, icon: crate::icons::Icon) -> egui::Response {
+    let (rect, mut resp) = ui.allocate_exact_size(egui::Vec2::splat(30.0), egui::Sense::click());
+    let enabled = ui.is_enabled();
+    let hovered = resp.hovered() && enabled;
     let anim = ui.ctx().animate_bool(resp.id, hovered);
     let painter = ui.painter_at(rect);
     if anim > 0.001 {
@@ -2833,14 +2840,20 @@ fn con_glyph_button(ui: &mut egui::Ui, tooltip: &str, icon: crate::icons::Icon) 
         );
     }
     let area = egui::Rect::from_center_size(rect.center(), egui::Vec2::splat(20.0));
-    crate::icons::paint_icon(&painter, ui.ctx(), icon, area, egui::Color32::WHITE);
+    // Dim the glyph when the button is disabled, matching the app's other
+    // enabled/disabled icon buttons.
+    let tint = if enabled {
+        egui::Color32::WHITE
+    } else {
+        egui::Color32::WHITE.gamma_multiply(0.35)
+    };
+    crate::icons::paint_icon(&painter, ui.ctx(), icon, area, tint);
     if hovered {
         resp = resp.on_hover_ui(|ui| crate::icons::rich_tooltip(ui, tooltip));
     }
-    resp.clicked()
+    resp
 }
 
-/// A short horizontal rule between constraint-bar groups.
 fn bar_divider(ui: &mut egui::Ui) {
     ui.add_space(2.0);
     let (rect, _) =
@@ -2929,7 +2942,6 @@ fn layers_section(ui: &mut egui::Ui, app: &mut AppState) {
         });
     });
     ui.add_space(4.0);
-
     let current = app.document.layers.current;
     let n_layers = app.document.layers.layers.len();
     let mut counts = vec![0usize; n_layers];
@@ -2954,14 +2966,12 @@ fn layers_section(ui: &mut egui::Ui, app: &mut AppState) {
             )
         })
         .collect();
-
     let mut delete_layer: Option<usize> = None;
     for (i, name, rgb, on, count) in rows {
         let is_cur = i == current;
         ui.horizontal(|ui| {
             ui.spacing_mut().item_spacing.x = 7.0;
             ui.set_height(38.0);
-
             let (dr, dresp) = ui.allocate_exact_size(egui::vec2(5.0, 18.0), egui::Sense::click());
             let bar = egui::Rect::from_center_size(dr.center(), egui::vec2(3.0, 16.0));
             let col = if is_cur {
@@ -2978,7 +2988,6 @@ fn layers_section(ui: &mut egui::Ui, app: &mut AppState) {
             {
                 app.document.layers.current = i;
             }
-
             let mut c = rgb;
             let changed = ui
                 .scope(|ui| {
@@ -2989,7 +2998,6 @@ fn layers_section(ui: &mut egui::Ui, app: &mut AppState) {
             if changed && let Some(l) = app.document.layers.get_mut(i) {
                 l.color = (c[0], c[1], c[2]);
             }
-
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                 ui.spacing_mut().item_spacing.x = 0.0;
                 use crate::icons::{Icon, icon_button_sized};
@@ -3063,7 +3071,6 @@ fn layers_section(ui: &mut egui::Ui, app: &mut AppState) {
 
 fn layer_appearance_menus(ui: &mut egui::Ui, app: &mut AppState, i: usize) {
     use oxidraft_document::LineTypeRef;
-
     let cur_lt = app
         .document
         .layers
@@ -3095,7 +3102,6 @@ fn layer_appearance_menus(ui: &mut egui::Ui, app: &mut AppState, i: usize) {
     })
     .response
     .on_hover_text("Layer line type");
-
     let cur_w = app
         .document
         .layers
@@ -3138,7 +3144,6 @@ pub(super) fn tool_hint_panel(ctx: &Context, app: &AppState, canvas_rect: egui::
     if rows.is_empty() {
         return;
     }
-
     let painter = ctx.layer_painter(egui::LayerId::new(
         egui::Order::Foreground,
         egui::Id::new("tool_hint_panel"),
@@ -3152,7 +3157,6 @@ pub(super) fn tool_hint_panel(ctx: &Context, app: &AppState, canvas_rect: egui::
     let row_gap = 6.0;
     let line_gap = 5.0;
     let cell_min = 46.0;
-
     let title_g = painter.layout_no_wrap(title.to_string(), title_font, title_col);
     let row_g: Vec<(std::sync::Arc<egui::Galley>, std::sync::Arc<egui::Galley>)> = rows
         .iter()
@@ -3163,7 +3167,6 @@ pub(super) fn tool_hint_panel(ctx: &Context, app: &AppState, canvas_rect: egui::
             )
         })
         .collect();
-
     let mut width = title_g.size().x;
     let mut height = title_g.size().y;
     for (kg, dg) in &row_g {
@@ -3171,14 +3174,12 @@ pub(super) fn tool_hint_panel(ctx: &Context, app: &AppState, canvas_rect: egui::
         width = width.max(cell_w + row_gap + dg.size().x);
         height += line_gap + kg.size().y.max(16.0).max(dg.size().y);
     }
-
     let screen = ctx.content_rect();
     let right = screen.right() - (12.0 + 292.0 + 12.0);
     let left = right - width;
     let inspector_bottom =
         canvas_rect.top() + 76.0 + (canvas_rect.height() - 76.0 - 80.0).max(160.0);
     let mut y = inspector_bottom - height;
-
     painter.galley(egui::pos2(left, y), title_g.clone(), title_col);
     y += title_g.size().y + line_gap;
     for (kg, dg) in row_g {
@@ -3199,6 +3200,7 @@ fn tool_hints(app: &AppState) -> (&'static str, Vec<(&'static str, &'static str)
                     ("L", "draw a line"),
                     ("C", "draw a circle"),
                     ("R", "draw a rectangle"),
+                    ("Q", "tool wheel"),
                     ("Ctrl+F", "all commands"),
                 ],
             );
@@ -3211,6 +3213,7 @@ fn tool_hints(app: &AppState) -> (&'static str, Vec<(&'static str, &'static str)
                     ("Ctrl+C / V", "copy / paste"),
                     ("Del", "delete"),
                     ("Esc", "deselect"),
+                    ("Q", "modify wheel"),
                 ],
             );
         }
@@ -3406,7 +3409,6 @@ pub(super) fn contextual_toolbar(ctx: &Context, app: &mut AppState, canvas_rect:
             .y
             .clamp(canvas_rect.top() + 70.0, canvas_rect.bottom() - 60.0),
     );
-
     egui::Area::new(egui::Id::new("contextual_toolbar"))
         .fixed_pos(anchor)
         .order(egui::Order::Foreground)
@@ -3800,7 +3802,6 @@ fn appearance_row(
                 });
             });
         });
-
     let rect = inner.response.rect;
     let resp = ui.interact(rect, id, egui::Sense::click());
     if resp.hovered() {
@@ -3861,7 +3862,6 @@ fn lt_label(t: &oxidraft_document::LineTypeRef) -> String {
 
 fn appearance_section(ui: &mut egui::Ui, app: &mut AppState, sel: &[oxidraft_document::EntityId]) {
     prop_section(ui, "APPEARANCE");
-
     let first_lw = sel
         .first()
         .and_then(|&id| app.document.get(id))
@@ -3886,7 +3886,6 @@ fn appearance_section(ui: &mut egui::Ui, app: &mut AppState, sel: &[oxidraft_doc
             }
         }
     });
-
     let first_lt = sel
         .first()
         .and_then(|&id| app.document.get(id))
@@ -3911,7 +3910,6 @@ fn appearance_section(ui: &mut egui::Ui, app: &mut AppState, sel: &[oxidraft_doc
             }
         }
     });
-
     let layer_names: Vec<String> = app
         .document
         .layers
@@ -3965,7 +3963,6 @@ fn selection_properties(ui: &mut egui::Ui, app: &mut AppState) {
         ));
         return;
     }
-
     if sel.len() == 1 {
         let id = sel[0];
         if let Some(kind) = app.document.get(id).map(|e| e.kind.clone()) {
@@ -3995,7 +3992,6 @@ fn selection_properties(ui: &mut egui::Ui, app: &mut AppState) {
                 .strong(),
         ));
     }
-
     constraints_section(ui, app, &sel);
     appearance_section(ui, app, &sel);
 }
@@ -4085,7 +4081,6 @@ fn edit_entity_geometry(ui: &mut egui::Ui, app: &mut AppState, id: oxidraft_docu
             let mut p1x = line.p1.x;
             let mut p1y = line.p1.y;
             let mut length = (line.p1.x - line.p0.x).hypot(line.p1.y - line.p0.y);
-
             let mut endpoints_changed = false;
             prop_caption(ui, "Start");
             endpoints_changed |= xy_fields(ui, "X", &mut p0x, "Y", &mut p0y, 0.01);
@@ -4094,10 +4089,6 @@ fn edit_entity_geometry(ui: &mut egui::Ui, app: &mut AppState, id: oxidraft_docu
             endpoints_changed |= xy_fields(ui, "X", &mut p1x, "Y", &mut p1y, 0.01);
             ui.add_space(4.0);
             let length_changed = num_field(ui, "Length", &mut length, 0.01);
-
-            // Endpoint fields set exact coordinates; the length field scales
-            // the line about its midpoint (the anchor a driven length resolves
-            // against). Only one field changes per frame.
             if endpoints_changed || (length_changed && length > 1e-6) {
                 app.history.snapshot(&app.document);
                 if let Some(e) = app.document.get_mut(id)
@@ -4118,9 +4109,6 @@ fn edit_entity_geometry(ui: &mut egui::Ui, app: &mut AppState, id: oxidraft_docu
                         }
                     }
                 }
-                // Either edit redefines the length, so retarget a recorded
-                // Distance constraint to the new length before re-solving:
-                // the typed geometry drives, welded neighbours follow.
                 let new_len =
                     app.document
                         .get(id)
@@ -4150,19 +4138,16 @@ fn edit_entity_geometry(ui: &mut egui::Ui, app: &mut AppState, id: oxidraft_docu
             let span = (arc.end_angle - arc.start_angle).abs();
             let is_circle = (span - 2.0 * std::f64::consts::PI).abs() < 1e-9;
             prop_section(ui, "GEOMETRY");
-
             let mut cx = arc.center.x;
             let mut cy = arc.center.y;
             let mut r = arc.radius;
             let mut sa = arc.start_angle.to_degrees();
             let mut ea = arc.end_angle.to_degrees();
-
             let mut changed = false;
             prop_caption(ui, "Centre");
             changed |= xy_fields(ui, "X", &mut cx, "Y", &mut cy, 0.01);
             ui.add_space(4.0);
             changed |= num_field(ui, "Radius", &mut r, 0.01);
-
             if !is_circle {
                 ui.add_space(4.0);
                 ui.columns(2, |c| {
@@ -4170,7 +4155,6 @@ fn edit_entity_geometry(ui: &mut egui::Ui, app: &mut AppState, id: oxidraft_docu
                     changed |= num_field(&mut c[1], "End °", &mut ea, 0.5);
                 });
             }
-
             if changed {
                 app.history.snapshot(&app.document);
                 if let Some(e) = app.document.get_mut(id)
@@ -4183,9 +4167,6 @@ fn edit_entity_geometry(ui: &mut egui::Ui, app: &mut AppState, id: oxidraft_docu
                         a.end_angle = ea.to_radians();
                     }
                 }
-                // A typed radius is a driving edit: retarget the recorded
-                // Radius constraint before re-solving, so the constraint
-                // follows the field instead of fighting it.
                 if app
                     .document
                     .constraints
@@ -4219,7 +4200,6 @@ fn edit_entity_geometry(ui: &mut egui::Ui, app: &mut AppState, id: oxidraft_docu
             let mut rot = rotation.to_degrees();
             let mut txt = content.clone();
             let mut chosen_font = font.clone();
-
             let mut changed = false;
             prop_caption(ui, "Font");
             changed |= font_combo(ui, "prop_font", &mut chosen_font);
@@ -4239,7 +4219,6 @@ fn edit_entity_geometry(ui: &mut egui::Ui, app: &mut AppState, id: oxidraft_docu
                     egui::TextEdit::multiline(&mut txt),
                 )
                 .changed();
-
             if changed {
                 app.history.snapshot(&app.document);
                 if let Some(e) = app.document.get_mut(id)
@@ -4263,11 +4242,9 @@ fn edit_entity_geometry(ui: &mut egui::Ui, app: &mut AppState, id: oxidraft_docu
             prop_section(ui, "GEOMETRY");
             let mut px = pt.x;
             let mut py = pt.y;
-
             let mut changed = false;
             prop_caption(ui, "Position");
             changed |= xy_fields(ui, "X", &mut px, "Y", &mut py, 0.01);
-
             if changed {
                 app.history.snapshot(&app.document);
                 if let Some(e) = app.document.get_mut(id)
@@ -4281,7 +4258,6 @@ fn edit_entity_geometry(ui: &mut egui::Ui, app: &mut AppState, id: oxidraft_docu
             let span = (el.end_angle - el.start_angle).abs();
             let is_full = (span - std::f64::consts::TAU).abs() < 1e-9;
             prop_section(ui, "GEOMETRY");
-
             let mut cx = el.center.x;
             let mut cy = el.center.y;
             let mut major = el.semi_major;
@@ -4289,7 +4265,6 @@ fn edit_entity_geometry(ui: &mut egui::Ui, app: &mut AppState, id: oxidraft_docu
             let mut rot = el.rotation.to_degrees();
             let mut sa = el.start_angle.to_degrees();
             let mut ea = el.end_angle.to_degrees();
-
             let mut changed = false;
             prop_caption(ui, "Centre");
             changed |= xy_fields(ui, "X", &mut cx, "Y", &mut cy, 0.01);
@@ -4307,7 +4282,6 @@ fn edit_entity_geometry(ui: &mut egui::Ui, app: &mut AppState, id: oxidraft_docu
                     changed |= num_field(&mut c[1], "End °", &mut ea, 0.5);
                 });
             }
-
             if changed {
                 app.history.snapshot(&app.document);
                 if let Some(e) = app.document.get_mut(id)
@@ -4351,7 +4325,6 @@ fn edit_entity_geometry(ui: &mut egui::Ui, app: &mut AppState, id: oxidraft_docu
                 if closed {
                     verts.pop();
                 }
-
                 let mut changed = false;
                 egui::ScrollArea::vertical()
                     .max_height(220.0)
@@ -4362,7 +4335,6 @@ fn edit_entity_geometry(ui: &mut egui::Ui, app: &mut AppState, id: oxidraft_docu
                             ui.add_space(2.0);
                         }
                     });
-
                 if changed {
                     app.history.snapshot(&app.document);
                     let n = verts.len();
@@ -4410,6 +4382,7 @@ fn edit_entity_geometry(ui: &mut egui::Ui, app: &mut AppState, id: oxidraft_docu
         }
     }
 }
+
 fn hatch_pattern_editor(ui: &mut egui::Ui, pattern: &mut oxidraft_document::HatchPattern) -> bool {
     use oxidraft_document::HatchPattern as HP;
     let mut changed = false;
@@ -4502,9 +4475,6 @@ fn maybe_save(app: &mut AppState) -> bool {
             !app.is_dirty()
         }
         rfd::MessageDialogResult::No => {
-            // Explicitly discarding unsaved work also retires its recovery
-            // copy — otherwise the next launch would offer to restore what
-            // the user just chose to throw away.
             crate::autosave::discard_recovery();
             true
         }
@@ -4513,9 +4483,6 @@ fn maybe_save(app: &mut AppState) -> bool {
 }
 
 fn file_open(app: &mut AppState) {
-    // .e2d (this format's old name, from eiderFLAT) is still listed so files
-    // saved before the rename to oxiDRAFT are still pickable — native.rs's
-    // loader accepts both magics.
     if let Some(path) = FileDialog::new()
         .add_filter(
             "All supported (o2d, e2d, dxf, svg)",

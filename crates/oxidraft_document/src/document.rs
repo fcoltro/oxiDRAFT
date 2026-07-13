@@ -198,11 +198,19 @@ impl Document {
             c.val = Some(crate::constraint::normalize_angle_deg(v));
         }
         if let Some(existing) = self.constraints.iter_mut().find(|e| e.same_relation(&c)) {
+            let mut changed = false;
             if existing.val != c.val {
                 existing.val = c.val;
-                return true;
+                changed = true;
             }
-            return false;
+            // A record carrying a placement moves the annotation; one
+            // without (solver retargets, file loads) leaves it where the
+            // user put it.
+            if c.place.is_some() && existing.place != c.place {
+                existing.place = c.place;
+                changed = true;
+            }
+            return changed;
         }
         self.constraints.push(c);
         true

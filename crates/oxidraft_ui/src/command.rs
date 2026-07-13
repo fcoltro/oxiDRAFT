@@ -28,6 +28,8 @@ pub enum Command {
     /// curve; `None` means the interval was missing/invalid.
     Measure(Option<f64>),
     Unconstrain,
+    /// Pins the selected geometry in place (a driving Fix constraint).
+    Fix,
     LayerSet(String),
     LayerNew(String),
     SelectAll,
@@ -241,7 +243,9 @@ pub fn parse_command(input: &str) -> Command {
         "PARALLEL" | "PAR" => Command::Constrain(ConstraintKind::Parallel),
         "PERPENDICULAR" | "PERP" => Command::Constrain(ConstraintKind::Perpendicular),
         "EQUALLENGTH" | "EQL" => Command::Constrain(ConstraintKind::EqualLength),
-        "COINCIDENT" | "COI" => Command::Constrain(ConstraintKind::Coincident),
+        // With two lines selected this welds their nearest endpoints
+        // directly; otherwise it activates the pick-based WELD tool.
+        "COINCIDENT" | "COI" | "WELD" => Command::Constrain(ConstraintKind::Coincident),
         // TAN is the tangent-line drawing tool, so the constraint follows
         // AutoCAD's GC* naming.
         "TANCON" | "GCTAN" | "GCTANGENT" => Command::Constrain(ConstraintKind::Tangent),
@@ -275,7 +279,27 @@ pub fn parse_command(input: &str) -> Command {
                 .and_then(|v| parse_finite_f64(v))
                 .filter(|d| *d > 0.0),
         ),
+        // Geometric relations added to the catalogue. The pick-based ones
+        // (MID/POL/POC/SYM) activate a pick tool via constrain_selection;
+        // the selection-based ones act on the current selection.
+        "CONCENTRIC" | "CONC" | "GCCONCENTRIC" => Command::Constrain(ConstraintKind::Concentric),
+        "COLLINEAR" | "COLL" | "GCCOLLINEAR" => Command::Constrain(ConstraintKind::Collinear),
+        "EQUALRADIUS" | "EQR" | "GCEQUALRADIUS" => Command::Constrain(ConstraintKind::EqualRadius),
+        "MIDPOINT" | "MID" | "GCMID" => Command::Constrain(ConstraintKind::Midpoint),
+        "POINTONLINE" | "POL" | "GCPOL" => Command::Constrain(ConstraintKind::PointOnLine),
+        "POINTONCIRCLE" | "POC" | "GCPOC" => Command::Constrain(ConstraintKind::PointOnCircle),
+        "SYMMETRIC" | "SYM" | "GCSYM" | "GCSYMMETRIC" => {
+            Command::Constrain(ConstraintKind::Symmetric)
+        }
+        "BLOCK" | "GCBLOCK" | "RIGIDSET" => Command::Constrain(ConstraintKind::Block),
         "UNCONSTRAIN" | "UNCON" => Command::Unconstrain,
+        // Pin the selected geometry in place.
+        "FIX" | "FIXCON" | "GCFIX" | "ANCHOR" => Command::Fix,
+        // Smart dimension: pick geometry to add a driving length/radius/angle.
+        "DIMCON" | "SMARTDIM" | "GCDIM" | "SD" => Command::Activate(Tool::DimConstraint {
+            first: None,
+            pending: None,
+        }),
         "ERASE" | "E" | "DELETE" => Command::Erase,
         "DISJOINT" | "EXPLODE" | "X" => Command::Explode,
         "JOIN" | "J" => Command::Join,

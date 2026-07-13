@@ -1,6 +1,6 @@
 use oxidraft_document::{
-    Color, ConstraintKind, Document, Entity, EntityId, EntityKind, HatchPattern, Layer,
-    LineTypeDef, LineTypeRef, LineWeight, SketchConstraint, Units,
+    ANCHOR_DERIVED, Color, ConstraintKind, Document, Entity, EntityId, EntityKind, HatchPattern,
+    Layer, LineTypeDef, LineTypeRef, LineWeight, SketchConstraint, Units,
 };
 use oxidraft_geometry::{
     CircularArc, CubicBezier, Curve, EllipticalArc, LineSeg, NurbsCurve, Point2d, PolyCurve,
@@ -64,28 +64,72 @@ pub fn to_string(doc: &Document) -> String {
         match (c.b, c.pts) {
             (Some(b), Some((ea, eb))) => {
                 let Some(&ib) = index.get(&b) else { continue };
-                let _ = writeln!(s, "C {} {} {} {} {}", c.kind.code(), ia, ea, ib, eb);
+                // Symmetric appends its mirror line's ordinal after the
+                // anchors; the record is dropped when the mirror wasn't
+                // serialized, same as any dangling reference.
+                if c.kind == ConstraintKind::Symmetric {
+                    let Some(&im) = c.c.and_then(|m| index.get(&m)) else {
+                        continue;
+                    };
+                    let _ = writeln!(s, "C {} {} {} {} {} {}", c.kind.code(), ia, ea, ib, eb, im);
+                    continue;
+                }
+                // Anchored valued kinds (PointDistance, HDistance,
+                // VDistance) append their value and optional placement
+                // after the anchor tokens.
+                match (c.val, c.place) {
+                    (Some(v), Some((px, py))) => {
+                        let _ = writeln!(
+                            s,
+                            "C {} {} {} {} {} {} {} {}",
+                            c.kind.code(),
+                            ia,
+                            ea,
+                            ib,
+                            eb,
+                            v,
+                            px,
+                            py
+                        );
+                    }
+                    (Some(v), None) => {
+                        let _ =
+                            writeln!(s, "C {} {} {} {} {} {}", c.kind.code(), ia, ea, ib, eb, v);
+                    }
+                    (None, _) => {
+                        let _ = writeln!(s, "C {} {} {} {} {}", c.kind.code(), ia, ea, ib, eb);
+                    }
+                }
             }
             (Some(b), None) => {
                 let Some(&ib) = index.get(&b) else { continue };
-                // Valued pair kinds (Angle) append their value; the loader
-                // reads the pair token first, then an optional value.
-                match c.val {
-                    Some(v) => {
+                // Valued pair kinds (Angle, LineDistance) append their value
+                // and, when the user placed the annotation, its world point;
+                // the loader reads the pair token first, then the optionals.
+                match (c.val, c.place) {
+                    (Some(v), Some((px, py))) => {
+                        let _ =
+                            writeln!(s, "C {} {} {} {} {} {}", c.kind.code(), ia, ib, v, px, py);
+                    }
+                    (Some(v), None) => {
                         let _ = writeln!(s, "C {} {} {} {}", c.kind.code(), ia, ib, v);
                     }
-                    None => {
+                    (None, _) => {
                         let _ = writeln!(s, "C {} {} {}", c.kind.code(), ia, ib);
                     }
                 }
             }
             (None, _) => {
-                // Valued single kinds (Radius, Distance) append their value.
-                match c.val {
-                    Some(v) => {
+                // Valued single kinds (Radius, Distance) append their value
+                // and optional placement.
+                match (c.val, c.place) {
+                    (Some(v), Some((px, py))) => {
+                        let _ = writeln!(s, "C {} {} {} {} {}", c.kind.code(), ia, v, px, py);
+                    }
+                    (Some(v), None) => {
                         let _ = writeln!(s, "C {} {} {}", c.kind.code(), ia, v);
                     }
-                    None => {
+                    (None, _) => {
                         let _ = writeln!(s, "C {} {}", c.kind.code(), ia);
                     }
                 }
@@ -375,8 +419,10 @@ pub fn from_string(text: &str) -> Result<Document, String> {
         ConstraintKind,
         usize,
         Option<usize>,
+        Option<usize>,
         Option<(u8, u8)>,
         Option<f64>,
+        Option<(f64, f64)>,
     );
     let mut pending_constraints: Vec<PendingConstraint> = Vec::new();
     // Constraints reference entities by ordinal in the file's write order.
@@ -418,15 +464,46 @@ pub fn from_string(text: &str) -> Result<Document, String> {
                 if let Some(kind) = tok.next().and_then(ConstraintKind::from_code)
                     && let Some(ia) = tok.next().and_then(|v| v.parse().ok())
                 {
-                    if kind == ConstraintKind::Coincident {
+                    if kind.has_anchors() {
                         let ea: Option<u8> = tok.next().and_then(|v| v.parse().ok());
                         let ib: Option<usize> = tok.next().and_then(|v| v.parse().ok());
                         let eb: Option<u8> = tok.next().and_then(|v| v.parse().ok());
+                        // Symmetric carries its mirror line's ordinal after
+                        // the anchors; the anchored valued kinds
+                        // (PointDistance, HDistance, VDistance) carry
+                        // `val [px py]` there instead.
+                        let ic: Option<usize> = if kind == ConstraintKind::Symmetric {
+                            tok.next().and_then(|v| v.parse().ok())
+                        } else {
+                            None
+                        };
+                        let val: Option<f64> = tok.next().and_then(|v| v.parse().ok());
+                        let px: Option<f64> = tok.next().and_then(|v| v.parse().ok());
+                        let py: Option<f64> = tok.next().and_then(|v| v.parse().ok());
+                        let place = match (px, py) {
+                            (Some(x), Some(y)) if x.is_finite() && y.is_finite() => Some((x, y)),
+                            _ => None,
+                        };
+                        let val_ok =
+                            !kind.is_valued() || val.is_some_and(|v| v.is_finite() && v > 0.0);
+                        let mirror_ok = kind != ConstraintKind::Symmetric || ic.is_some();
+                        // 0/1 are endpoints; ANCHOR_DERIVED (2) is a line's
+                        // midpoint or an arc's center.
                         if let (Some(ea), Some(ib), Some(eb)) = (ea, ib, eb)
-                            && ea <= 1
-                            && eb <= 1
+                            && ea <= ANCHOR_DERIVED
+                            && eb <= ANCHOR_DERIVED
+                            && val_ok
+                            && mirror_ok
                         {
-                            pending_constraints.push((kind, ia, Some(ib), Some((ea, eb)), None));
+                            pending_constraints.push((
+                                kind,
+                                ia,
+                                Some(ib),
+                                ic,
+                                Some((ea, eb)),
+                                if kind.is_valued() { val } else { None },
+                                if kind.is_valued() { place } else { None },
+                            ));
                         }
                     } else {
                         let ib = if kind.is_pair() {
@@ -435,11 +512,20 @@ pub fn from_string(text: &str) -> Result<Document, String> {
                             None
                         };
                         let val: Option<f64> = tok.next().and_then(|v| v.parse().ok());
+                        // Optional annotation placement follows the value;
+                        // both coordinates must parse finite or it's dropped
+                        // (the record itself stays valid without one).
+                        let px: Option<f64> = tok.next().and_then(|v| v.parse().ok());
+                        let py: Option<f64> = tok.next().and_then(|v| v.parse().ok());
+                        let place = match (px, py) {
+                            (Some(x), Some(y)) if x.is_finite() && y.is_finite() => Some((x, y)),
+                            _ => None,
+                        };
                         // A valued kind without a sane value is corrupt.
                         let val_ok =
                             !kind.is_valued() || val.is_some_and(|v| v.is_finite() && v > 0.0);
                         if (!kind.is_pair() || ib.is_some()) && val_ok {
-                            pending_constraints.push((kind, ia, ib, None, val));
+                            pending_constraints.push((kind, ia, ib, None, None, val, place));
                         }
                     }
                 }
@@ -450,7 +536,7 @@ pub fn from_string(text: &str) -> Result<Document, String> {
 
     // Out-of-range references (truncated or hand-edited files) and references
     // to dropped records are discarded rather than mis-attached.
-    for (kind, ia, ib, pts, val) in pending_constraints {
+    for (kind, ia, ib, ic, pts, val, place) in pending_constraints {
         let Some(&Some(a)) = entity_ids.get(ia) else {
             continue;
         };
@@ -461,12 +547,21 @@ pub fn from_string(text: &str) -> Result<Document, String> {
             },
             None => None,
         };
+        let c = match ic {
+            Some(i) => match entity_ids.get(i) {
+                Some(&Some(m)) => Some(m),
+                _ => continue,
+            },
+            None => None,
+        };
         doc.add_constraint(SketchConstraint {
             kind,
             a,
             b,
+            c,
             pts,
             val,
+            place,
         });
     }
 
@@ -1062,6 +1157,167 @@ mod tests {
     }
 
     #[test]
+    fn roundtrip_new_pair_kinds_survive() {
+        let mut doc = Document::new();
+        let c1 = doc.add(EntityKind::Curve(Curve::Arc(
+            oxidraft_geometry::CircularArc::new(pt_i(0, 0), 2.0, 0.0, std::f64::consts::TAU),
+        )));
+        let c2 = doc.add(EntityKind::Curve(Curve::Arc(
+            oxidraft_geometry::CircularArc::new(pt_i(5, 0), 1.0, 0.0, std::f64::consts::TAU),
+        )));
+        let l1 = doc.add(EntityKind::Curve(Curve::Line(LineSeg::from_endpoints(
+            pt_i(0, 3),
+            pt_i(4, 3),
+        ))));
+        let l2 = doc.add(EntityKind::Curve(Curve::Line(LineSeg::from_endpoints(
+            pt_i(5, 3),
+            pt_i(9, 3),
+        ))));
+        doc.add_constraint(SketchConstraint::pair(ConstraintKind::Concentric, c1, c2));
+        doc.add_constraint(SketchConstraint::pair(ConstraintKind::EqualRadius, c1, c2));
+        doc.add_constraint(SketchConstraint::pair(ConstraintKind::Collinear, l1, l2));
+
+        let doc2 = from_string(&to_string(&doc)).unwrap();
+        let kinds: Vec<_> = doc2.constraints.iter().map(|c| c.kind).collect();
+        assert_eq!(
+            kinds,
+            vec![
+                ConstraintKind::Concentric,
+                ConstraintKind::EqualRadius,
+                ConstraintKind::Collinear
+            ]
+        );
+    }
+
+    #[test]
+    fn roundtrip_anchored_kinds_keep_anchors_and_values() {
+        let mut doc = Document::new();
+        let l = doc.add(EntityKind::Curve(Curve::Line(LineSeg::from_endpoints(
+            pt_i(0, 0),
+            pt_i(4, 0),
+        ))));
+        let p = doc.add(EntityKind::Point(pt_i(2, 3)));
+        let c = doc.add(EntityKind::Curve(Curve::Arc(
+            oxidraft_geometry::CircularArc::new(pt_i(8, 0), 2.0, 0.0, std::f64::consts::TAU),
+        )));
+        doc.add_constraint(SketchConstraint::anchored(
+            ConstraintKind::Midpoint,
+            p,
+            0,
+            l,
+            ANCHOR_DERIVED,
+        ));
+        doc.add_constraint(SketchConstraint::anchored(
+            ConstraintKind::PointOnCircle,
+            p,
+            0,
+            c,
+            0,
+        ));
+        let mut pd =
+            SketchConstraint::point_distance(ConstraintKind::PointDistance, l, 0, p, 0, 5.5);
+        pd.place = Some((1.5, 2.5));
+        doc.add_constraint(pd);
+        doc.add_constraint(SketchConstraint::point_distance(
+            ConstraintKind::HDistance,
+            l,
+            1,
+            p,
+            0,
+            2.25,
+        ));
+
+        let doc2 = from_string(&to_string(&doc)).unwrap();
+        assert_eq!(doc2.constraints.len(), 4);
+        let ids: Vec<_> = doc2.iter().map(|e| e.id).collect();
+        let mid = doc2.constraints[0];
+        assert_eq!(
+            (mid.kind, mid.a, mid.b, mid.pts),
+            (
+                ConstraintKind::Midpoint,
+                ids[1],
+                Some(ids[0]),
+                Some((0, ANCHOR_DERIVED))
+            )
+        );
+        let poc = doc2.constraints[1];
+        assert_eq!(
+            (poc.kind, poc.a, poc.b, poc.pts),
+            (
+                ConstraintKind::PointOnCircle,
+                ids[1],
+                Some(ids[2]),
+                Some((0, 0))
+            )
+        );
+        let pd = doc2.constraints[2];
+        assert_eq!(
+            (pd.kind, pd.val, pd.place, pd.pts),
+            (
+                ConstraintKind::PointDistance,
+                Some(5.5),
+                Some((1.5, 2.5)),
+                Some((0, 0))
+            )
+        );
+        let hd = doc2.constraints[3];
+        assert_eq!(
+            (hd.kind, hd.val, hd.pts),
+            (ConstraintKind::HDistance, Some(2.25), Some((1, 0)))
+        );
+    }
+
+    #[test]
+    fn roundtrip_symmetric_keeps_its_mirror_line() {
+        let mut doc = Document::new();
+        let mirror = doc.add(EntityKind::Curve(Curve::Line(LineSeg::from_endpoints(
+            pt_i(0, 0),
+            pt_i(10, 0),
+        ))));
+        let p1 = doc.add(EntityKind::Point(pt_i(3, 2)));
+        let p2 = doc.add(EntityKind::Point(pt_i(3, -2)));
+        doc.add_constraint(SketchConstraint::symmetric(p1, 0, p2, 0, mirror));
+
+        let doc2 = from_string(&to_string(&doc)).unwrap();
+        assert_eq!(doc2.constraints.len(), 1);
+        let c = doc2.constraints[0];
+        let ids: Vec<_> = doc2.iter().map(|e| e.id).collect();
+        assert_eq!(
+            (c.kind, c.a, c.b, c.c, c.pts),
+            (
+                ConstraintKind::Symmetric,
+                ids[1],
+                Some(ids[2]),
+                Some(ids[0]),
+                Some((0, 0))
+            )
+        );
+    }
+
+    #[test]
+    fn roundtrip_block_keeps_its_member_records() {
+        let mut doc = Document::new();
+        let a = doc.add(EntityKind::Curve(Curve::Line(LineSeg::from_endpoints(
+            pt_i(0, 0),
+            pt_i(4, 0),
+        ))));
+        let b = doc.add(EntityKind::Curve(Curve::Line(LineSeg::from_endpoints(
+            pt_i(4, 0),
+            pt_i(4, 3),
+        ))));
+        doc.add_constraint(SketchConstraint::block(b, a));
+
+        let doc2 = from_string(&to_string(&doc)).unwrap();
+        assert_eq!(doc2.constraints.len(), 1);
+        let c = doc2.constraints[0];
+        let ids: Vec<_> = doc2.iter().map(|e| e.id).collect();
+        assert_eq!(
+            (c.kind, c.a, c.b),
+            (ConstraintKind::Block, ids[1], Some(ids[0]))
+        );
+    }
+
+    #[test]
     fn roundtrip_angle_keeps_the_driving_value_and_both_lines() {
         let mut doc = Document::new();
         let a = doc.add(EntityKind::Curve(Curve::Line(LineSeg::from_endpoints(
@@ -1082,6 +1338,108 @@ mod tests {
             (c.kind, c.a, c.b, c.val),
             (ConstraintKind::Angle, ids[0], Some(ids[1]), Some(72.5))
         );
+    }
+
+    #[test]
+    fn roundtrip_line_distance_keeps_value_placement_and_both_lines() {
+        let mut doc = Document::new();
+        let a = doc.add(EntityKind::Curve(Curve::Line(LineSeg::from_endpoints(
+            pt_i(0, 0),
+            pt_i(4, 0),
+        ))));
+        let b = doc.add(EntityKind::Curve(Curve::Line(LineSeg::from_endpoints(
+            pt_i(0, 3),
+            pt_i(4, 3),
+        ))));
+        let mut c = SketchConstraint::line_distance(a, b, 3.0);
+        c.place = Some((2.0, 1.5));
+        doc.add_constraint(c);
+
+        let doc2 = from_string(&to_string(&doc)).unwrap();
+        assert_eq!(doc2.constraints.len(), 1);
+        let c = doc2.constraints[0];
+        let ids: Vec<_> = doc2.iter().map(|e| e.id).collect();
+        assert_eq!(
+            (c.kind, c.a, c.b, c.val),
+            (
+                ConstraintKind::LineDistance,
+                ids[0],
+                Some(ids[1]),
+                Some(3.0)
+            )
+        );
+        assert_eq!(c.place, Some((2.0, 1.5)));
+    }
+
+    #[test]
+    fn roundtrip_single_kind_placement_survives_and_absence_stays_none() {
+        let mut doc = Document::new();
+        let a = doc.add(EntityKind::Curve(Curve::Line(LineSeg::from_endpoints(
+            pt_i(0, 0),
+            pt_i(4, 0),
+        ))));
+        let mut placed = SketchConstraint::distance(a, 4.0);
+        placed.place = Some((1.0, -2.5));
+        doc.add_constraint(placed);
+
+        let doc2 = from_string(&to_string(&doc)).unwrap();
+        assert_eq!(doc2.constraints.len(), 1);
+        assert_eq!(doc2.constraints[0].place, Some((1.0, -2.5)));
+
+        // Un-placed records must round-trip with `place` still None so the
+        // automatic layout keeps handling them.
+        let mut doc = Document::new();
+        let a = doc.add(EntityKind::Curve(Curve::Line(LineSeg::from_endpoints(
+            pt_i(0, 0),
+            pt_i(4, 0),
+        ))));
+        doc.add_constraint(SketchConstraint::distance(a, 4.0));
+        let doc2 = from_string(&to_string(&doc)).unwrap();
+        assert_eq!(doc2.constraints[0].place, None);
+    }
+
+    #[test]
+    fn bad_placement_tokens_are_dropped_but_the_record_survives() {
+        let mut doc = Document::new();
+        doc.add(EntityKind::Curve(Curve::Line(LineSeg::from_endpoints(
+            pt_i(0, 0),
+            pt_i(4, 0),
+        ))));
+        let base = to_string(&doc);
+        // A lone x, a non-numeric y, and a non-finite coordinate all fail to
+        // form a placement; the constraint itself must still load.
+        for bad in ["C LEN 0 4 1.0", "C LEN 0 4 1.0 nope", "C LEN 0 4 inf 2.0"] {
+            let doc2 = from_string(&format!("{base}{bad}\n")).unwrap();
+            assert_eq!(
+                doc2.constraints.len(),
+                1,
+                "record {bad:?} must survive without a placement"
+            );
+            assert_eq!(doc2.constraints[0].val, Some(4.0));
+            assert_eq!(doc2.constraints[0].place, None, "for {bad:?}");
+        }
+    }
+
+    #[test]
+    fn line_distance_records_without_a_sane_value_are_dropped() {
+        let mut doc = Document::new();
+        doc.add(EntityKind::Curve(Curve::Line(LineSeg::from_endpoints(
+            pt_i(0, 0),
+            pt_i(4, 0),
+        ))));
+        doc.add(EntityKind::Curve(Curve::Line(LineSeg::from_endpoints(
+            pt_i(0, 3),
+            pt_i(4, 3),
+        ))));
+        let base = to_string(&doc);
+        for bad in ["C LDIST 0 1", "C LDIST 0 1 -3", "C LDIST 0 1 nope"] {
+            let doc2 = from_string(&format!("{base}{bad}\n")).unwrap();
+            assert_eq!(doc2.len(), 2, "both lines still load");
+            assert!(
+                doc2.constraints.is_empty(),
+                "corrupt line-distance record {bad:?} must be dropped"
+            );
+        }
     }
 
     #[test]
@@ -1122,6 +1480,32 @@ mod tests {
         let ids: Vec<_> = doc2.iter().map(|e| e.id).collect();
         assert_eq!(c.a, ids[0]);
         assert_eq!(c.b, Some(ids[1]));
+    }
+
+    #[test]
+    fn roundtrip_coincident_keeps_a_derived_anchor() {
+        // A midpoint weld: the origin point welded to the middle of a line
+        // (anchor index 2). The index must survive the trip; 3+ is corrupt.
+        let mut doc = Document::new();
+        let p = doc.add(EntityKind::Point(pt_i(0, 0)));
+        let l = doc.add(EntityKind::Curve(Curve::Line(LineSeg::from_endpoints(
+            pt_i(-2, 3),
+            pt_i(2, 3),
+        ))));
+        doc.add_constraint(SketchConstraint::coincident(p, 0, l, ANCHOR_DERIVED));
+
+        let doc2 = from_string(&to_string(&doc)).unwrap();
+        assert_eq!(doc2.constraints.len(), 1);
+        assert_eq!(doc2.constraints[0].pts, Some((0, ANCHOR_DERIVED)));
+
+        let text = to_string(&doc);
+        let bad = text.replace(&format!("C COI 0 0 1 {ANCHOR_DERIVED}"), "C COI 0 0 1 3");
+        assert_ne!(text, bad, "the record was found and rewritten");
+        let doc3 = from_string(&bad).unwrap();
+        assert!(
+            doc3.constraints.is_empty(),
+            "anchor index 3 does not exist and must be dropped"
+        );
     }
 
     #[test]

@@ -76,8 +76,13 @@ Or build it yourself in one command (see [Build & run](#-build--run)).
 - One shared dimension style (text height, arrow size, font, precision); dimensions land on an auto-created **Dimensions** layer
 
 ### Parametric constraints
-- **Geometric** — Horizontal, Vertical, Parallel, Perpendicular, Equal length, Coincident (weld endpoints), and Tangent (line↔arc and arc↔arc)
-- **Driving dimensions** — lock or drive a circle/arc's **radius** (`RADCON` / `DIACON`) or a line's **length** (`LENCON`); a bare command holds the current value, a numeric argument resizes to it
+- **Geometric** — Horizontal, Vertical, Parallel, Perpendicular, Collinear, Equal length, Equal radius, Concentric, and Tangent (line↔arc and arc↔arc)
+- **Point relations** (pick-based) — Coincident/weld, Midpoint, Point-on-line, Point-on-circle, and Symmetric (mirror two points about a line); pick the points on canvas rather than pre-selecting
+- **Driving dimensions** — lock or drive a circle/arc's **radius** (`RADCON` / `DIACON`), a line's **length** (`LENCON`), the angle or width between two lines, or a point-to-point distance (straight / horizontal / vertical); a bare command holds the current value, a numeric argument resizes to it
+- **Fix** a piece in place, or **Block** a whole selection into a rigid group that only translates and rotates
+- **Live inference** — while drawing, a glyph at the cursor previews the Horizontal / Vertical / Coincident relation that will be captured on the next click; toggle auto-constrain off to draw freely
+- **Validity-aware toolbar** — each constraint button enables only when the current selection is a valid target, with a tooltip saying what it needs
+- **Degrees-of-freedom readout** in the status bar — *Fully constrained* (green) or *N DOF* for the active constraint group; a rejected constraint briefly **flashes the conflicting geometry** red
 - Constraints **re-solve live** as you drag grips, move, or edit properties — a minimal-motion numeric solver pulls constrained neighbours along and keeps welded corners together
 - On-canvas **glyph badges** show what's constrained; **click a badge to delete** that constraint, and the Properties inspector lists (and removes) every relation on the selection
 
@@ -96,7 +101,8 @@ Or build it yourself in one command (see [Build & run](#-build--run)).
 - **Drawing units** — mm / cm / m / km / in / ft / unitless — that bound the zoom range and label measurements
 - **Curvature comb** on selected curves for smoothness inspection
 - **`Ctrl+F` command palette** plus an always-available command line, **window / crossing marquee**, hover highlight, ghost previews, **undo / redo**
-- Modern dark, glass-panelled interface — top bar, two-column tool dock (draw + modify), inspector and status pill; preferences persist between sessions
+- **Radial tool wheel** — press `Q` for a **Tools** / **Modifiers** picker at the cursor; move toward either to reveal its full ring, then to a wedge and click to activate it, or push out further on Circle/Arc/Dimension/Line to reveal their construction-method variants; press `Q` again or `Esc` to dismiss
+- Modern dark, glass-panelled interface — top bar, inspector and status pill; preferences persist between sessions
 
 ### Geometry kernel
 - Curve primitives: line, circular arc, elliptical arc, cubic Bézier, rational Bézier, polycurve, clamped-cubic **NURBS**
@@ -116,7 +122,7 @@ Or build it yourself in one command (see [Build & run](#-build--run)).
 
 ## ⌨ Commands
 
-Type a verb in the command line, or use the toolbars / `Ctrl+F` palette. Common aliases:
+Type a verb in the command line, or use the `Draw`/`Modify` menus, the radial tool wheel (`Q`), or the `Ctrl+F` palette. Common aliases:
 
 | Draw | | Modify | | Other | |
 |------|--|--------|--|-------|--|
@@ -143,11 +149,15 @@ Type a verb in the command line, or use the toolbars / `Ctrl+F` palette. Common 
 with **Enter** or right-click, and close with **C**.
 
 Constrain the current selection with `HOR` · `VER` (horizontal / vertical),
-`PAR` · `PERP` (parallel / perpendicular), `EQL` (equal length), `COI`
-(coincident), `TANCON` (tangent), `RADCON` · `DIACON` (drive a radius /
-diameter) and `LENCON` (drive a line's length). The value commands take an
-optional number — `RADCON 2.5`, `LENCON 40` — or lock the current value when
-bare. `UNCON` drops every constraint on the selection.
+`PAR` · `PERP` (parallel / perpendicular), `COLL` (collinear), `EQL` (equal
+length), `EQR` (equal radius), `CONC` (concentric), `TANCON` (tangent),
+`RADCON` · `DIACON` (drive a radius / diameter) and `LENCON` (drive a line's
+length). The value commands take an optional number — `RADCON 2.5`, `LENCON
+40` — or lock the current value when bare. The point relations `COI`
+(coincident/weld), `MID` (midpoint), `POL` (point on line), `POC` (point on
+circle) and `SYM` (symmetric) pick their points on canvas. `BLOCK` locks the
+selection into a rigid group; `FIX` pins it in place; `UNCON` drops every
+constraint on the selection.
 
 ### Keyboard shortcuts
 
@@ -160,6 +170,7 @@ bare. `UNCON` drops every constraint on the selection.
 | `Esc` | Cancel / deselect | `Ctrl+A` | Select all |
 | `Z` | Zoom extents | `Ctrl+F` | Command palette |
 | `Space` | Repeat last command | `Del` | Delete selection |
+| `Q` | Radial tool wheel — move to Tools or Modifiers, then a wedge | | |
 | `F7`–`F12` | Toggle object snap · grid · grid snap · polar · tracking · dynamic input | | |
 
 ## 🔨 Build & run

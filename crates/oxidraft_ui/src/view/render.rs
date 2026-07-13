@@ -110,6 +110,33 @@ pub(super) fn tool_prompt(tool: &Tool) -> String {
                 "Click to place the leader".into()
             }
         }
+        Tool::DimConstraint { first, pending } => match (first, pending) {
+            (_, Some(_)) => "Click to place the dimension".into(),
+            (Some(_), None) => {
+                "Pick a second line for an angle/width, or click to place this line's length".into()
+            }
+            (None, None) => {
+                "Pick a line (length), a circle/arc (radius), or a first line for an angle".into()
+            }
+        },
+        Tool::Weld { first } => {
+            if first.is_none() {
+                "Pick the first point to weld (endpoint, midpoint, center, or point)".into()
+            } else {
+                "Pick the point to weld it to".into()
+            }
+        }
+        Tool::ConPick { kind, picks } => {
+            let plan = crate::tools::con_pick_plan(*kind);
+            match plan.get(picks.len()) {
+                Some(crate::tools::ConPickStep::Point) => {
+                    "Pick a point (endpoint, midpoint, center, or point)".into()
+                }
+                Some(crate::tools::ConPickStep::Line) => "Pick a line".into(),
+                Some(crate::tools::ConPickStep::Arc) => "Pick a circle or arc".into(),
+                None => "Applying…".into(),
+            }
+        }
         Tool::Ellipse { center, axis_end } => match (center, axis_end) {
             (None, _) => "Specify center of ellipse".into(),
             (Some(_), None) => "Specify end of first axis".into(),

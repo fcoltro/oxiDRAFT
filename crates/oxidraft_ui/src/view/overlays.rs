@@ -3,7 +3,9 @@ use super::render::corner_glass_frame;
 use crate::state::AppState;
 use crate::tools::Tool;
 use egui::{Color32, Stroke, pos2, vec2};
-use oxidraft_document::{ConstraintKind, Document, EntityId, EntityKind, SketchConstraint};
+use oxidraft_document::{
+    ANCHOR_DERIVED, ConstraintKind, Document, EntityId, EntityKind, SketchConstraint,
+};
 use oxidraft_geometry::{Continuity, Curve, CurveSegment, Point2d, curvature_at, normal_at};
 
 pub(super) fn curvature_comb(
@@ -78,6 +80,15 @@ pub(super) enum BadgeGlyph {
     Perpendicular,
     Equal,
     Tangent,
+    Fixed,
+    Concentric,
+    Collinear,
+    Midpoint,
+    EqualRadius,
+    PointOnLine,
+    PointOnCircle,
+    Symmetric,
+    Block,
 }
 
 /// A row of glyph chips: each glyph carries the constraints it stands for
@@ -90,6 +101,11 @@ pub(super) struct BadgeModel {
     /// Welded corners in world coordinates, deduplicated by position,
     /// each carrying the welds anchored there.
     pub corner_dots: Vec<((f64, f64), Vec<SketchConstraint>)>,
+    /// Fixed *point* entities (entity id, world position, the Fix
+    /// constraints on it). Fixed lines/arcs badge as a glyph in
+    /// `line_badges`; standalone points get their own marker instead. The
+    /// origin's structural Fix is included here and filtered out at render.
+    pub fixed_points: Vec<(EntityId, (f64, f64), Vec<SketchConstraint>)>,
     /// Valued constraints (driving length, radius) shown as dimension-style
     /// annotations in the constraint accent colour instead of glyph chips.
     /// Deliberately separate from dimension *entities*: those are drafting
@@ -112,6 +128,67 @@ fn badge_line_ends(doc: &Document, id: EntityId) -> Option<((f64, f64), (f64, f6
         }
         _ => None,
     }
+}
+
+/// World position of one coincident anchor for badge placement: 0/1 an
+/// endpoint, ANCHOR_DERIVED a line's midpoint or an arc's center; a point
+/// entity is its own anchor.
+fn badge_anchor_pos(doc: &Document, id: EntityId, idx: u8) -> Option<(f64, f64)> {
+    match &doc.get(id)?.kind {
+        EntityKind::Point(p) => Some(p.to_f64()),
+        EntityKind::Curve(Curve::Line(l)) if idx == ANCHOR_DERIVED => {
+            let (x0, y0) = l.p0.to_f64();
+            let (x1, y1) = l.p1.to_f64();
+            Some(((x0 + x1) * 0.5, (y0 + y1) * 0.5))
+        }
+        EntityKind::Curve(Curve::Arc(a)) if idx == ANCHOR_DERIVED => Some(a.center.to_f64()),
+        _ if idx <= 1 => {
+            let (p0, p1) = badge_line_ends(doc, id)?;
+            Some(if idx == 0 { p0 } else { p1 })
+        }
+        _ => None,
+    }
+}
+
+/// How far (screen px) a coincidence glyph sits from the welded point it
+/// annotates, so the mark reads *beside* the shared endpoint rather than
+/// hiding it.
+const CORNER_ICON_GAP: f32 = 20.0;
+
+/// Diagonal screen offset (px) from a fixed point to its Fix glyph, so the
+/// mark sits beside the point marker instead of on top of it.
+const FIX_ICON_OFFSET: f32 = 14.0;
+
+/// Screen-space offset from a welded corner to where its coincidence glyph
+/// sits. Points into the open space *away* from the welded legs so the chip
+/// clears the drawn geometry; falls back to straight up when the legs cancel
+/// out (a colinear pair) or none can be measured.
+fn corner_icon_offset(doc: &Document, corner: (f64, f64), cs: &[SketchConstraint]) -> egui::Vec2 {
+    let (mut sx, mut sy) = (0.0f64, 0.0f64);
+    for c in cs {
+        for id in [Some(c.a), c.b].into_iter().flatten() {
+            let Some((p0, p1)) = badge_line_ends(doc, id) else {
+                continue;
+            };
+            // One end is the corner itself; the leg leaves toward the other.
+            let d0 = (p0.0 - corner.0).hypot(p0.1 - corner.1);
+            let d1 = (p1.0 - corner.0).hypot(p1.1 - corner.1);
+            let far = if d0 >= d1 { p0 } else { p1 };
+            let (dx, dy) = (far.0 - corner.0, far.1 - corner.1);
+            let l = dx.hypot(dy);
+            if l > 1e-9 {
+                sx += dx / l;
+                sy += dy / l;
+            }
+        }
+    }
+    // Open direction is the negated sum of the legs; screen y runs down, so
+    // the world y flips while x does not.
+    let mut off = egui::vec2(-sx as f32, sy as f32);
+    if off.length() < 1e-3 {
+        off = egui::vec2(0.0, -1.0);
+    }
+    off.normalized() * CORNER_ICON_GAP
 }
 
 /// A badge row's anchor: world-space midpoint, unit direction to stack
@@ -153,6 +230,7 @@ pub(super) fn badge_model(doc: &Document) -> BadgeModel {
     let mut line_badges: Vec<(EntityId, GlyphChips)> = Vec::new();
     let mut corner_dots: Vec<((f64, f64), Vec<SketchConstraint>)> = Vec::new();
     let mut dim_badges: Vec<SketchConstraint> = Vec::new();
+    let mut fixed_points: Vec<(EntityId, (f64, f64), Vec<SketchConstraint>)> = Vec::new();
     let push =
         |badges: &mut Vec<(EntityId, GlyphChips)>, id, g: BadgeGlyph, c: SketchConstraint| {
             let row = match badges.iter_mut().find(|(e, _)| *e == id) {
@@ -173,8 +251,26 @@ pub(super) fn badge_model(doc: &Document) -> BadgeModel {
         };
     for c in &doc.constraints {
         let pair_glyph = match c.kind {
-            // Structural, not a user constraint — no badge, nothing to remove.
-            ConstraintKind::Fixed => continue,
+            ConstraintKind::Fixed => {
+                // A fixed line/arc badges as a glyph on the entity; a fixed
+                // point gets its own marker. (The origin's structural Fix
+                // lands here too and is filtered out where these render.)
+                match doc.get(c.a).map(|e| &e.kind) {
+                    Some(EntityKind::Curve(Curve::Line(_)))
+                    | Some(EntityKind::Curve(Curve::Arc(_))) => {
+                        push(&mut line_badges, c.a, BadgeGlyph::Fixed, *c);
+                    }
+                    Some(EntityKind::Point(p)) => {
+                        let pos = p.to_f64();
+                        match fixed_points.iter_mut().find(|(id, ..)| *id == c.a) {
+                            Some((_, _, cs)) => cs.push(*c),
+                            None => fixed_points.push((c.a, pos, vec![*c])),
+                        }
+                    }
+                    _ => {}
+                }
+                continue;
+            }
             ConstraintKind::Horizontal => {
                 push(&mut line_badges, c.a, BadgeGlyph::Horizontal, *c);
                 continue;
@@ -183,7 +279,13 @@ pub(super) fn badge_model(doc: &Document) -> BadgeModel {
                 push(&mut line_badges, c.a, BadgeGlyph::Vertical, *c);
                 continue;
             }
-            ConstraintKind::Radius | ConstraintKind::Distance | ConstraintKind::Angle => {
+            ConstraintKind::Radius
+            | ConstraintKind::Distance
+            | ConstraintKind::LineDistance
+            | ConstraintKind::Angle
+            | ConstraintKind::PointDistance
+            | ConstraintKind::HDistance
+            | ConstraintKind::VDistance => {
                 if c.val.is_some() {
                     dim_badges.push(*c);
                 }
@@ -193,11 +295,24 @@ pub(super) fn badge_model(doc: &Document) -> BadgeModel {
             ConstraintKind::Perpendicular => BadgeGlyph::Perpendicular,
             ConstraintKind::EqualLength => BadgeGlyph::Equal,
             ConstraintKind::Tangent => BadgeGlyph::Tangent,
+            ConstraintKind::Concentric => BadgeGlyph::Concentric,
+            ConstraintKind::Collinear => BadgeGlyph::Collinear,
+            ConstraintKind::EqualRadius => BadgeGlyph::EqualRadius,
+            ConstraintKind::Midpoint => BadgeGlyph::Midpoint,
+            ConstraintKind::PointOnLine => BadgeGlyph::PointOnLine,
+            ConstraintKind::PointOnCircle => BadgeGlyph::PointOnCircle,
+            ConstraintKind::Symmetric => BadgeGlyph::Symmetric,
+            ConstraintKind::Block => BadgeGlyph::Block,
             ConstraintKind::Coincident => {
-                let (Some((ea, _)), Some((p0, p1))) = (c.pts, badge_line_ends(doc, c.a)) else {
+                // Resolve the weld position from either side — welds to a
+                // point entity (the origin) or a midpoint/center anchor
+                // still get their dot at the shared spot.
+                let Some(p) = c.pts.and_then(|(ea, eb)| {
+                    badge_anchor_pos(doc, c.a, ea)
+                        .or_else(|| c.b.and_then(|b| badge_anchor_pos(doc, b, eb)))
+                }) else {
                     continue;
                 };
-                let p = if ea == 0 { p0 } else { p1 };
                 match corner_dots
                     .iter_mut()
                     .find(|(q, _)| (q.0 - p.0).hypot(q.1 - p.1) < 1e-9)
@@ -217,6 +332,7 @@ pub(super) fn badge_model(doc: &Document) -> BadgeModel {
         line_badges,
         corner_dots,
         dim_badges,
+        fixed_points,
     }
 }
 
@@ -264,12 +380,25 @@ fn dim_badge_layout(app: &AppState, c: &SketchConstraint) -> Option<DimBadge> {
             }
             let d = (b - a).normalized();
             // The glyph chips stack on the upward side (`chip_centers`
-            // forces n.y < 0); the dimension takes the opposite side.
+            // forces n.y < 0); the dimension takes the opposite side —
+            // unless the user placed it, which picks both the side and the
+            // offset.
             let mut n = vec2(d.y, -d.x);
-            if n.y < 0.0 {
-                n = -n;
-            }
-            let o = 22.0;
+            let o = match c.place {
+                Some((wx, wy)) => {
+                    let q = px(wx, wy);
+                    if n.dot(q - a) < 0.0 {
+                        n = -n;
+                    }
+                    n.dot(q - a).max(12.0)
+                }
+                None => {
+                    if n.y < 0.0 {
+                        n = -n;
+                    }
+                    22.0
+                }
+            };
             let (ea, eb) = (a + n * o, b + n * o);
             let label = units.format_measure(val, style.precision);
             Some(DimBadge {
@@ -280,6 +409,54 @@ fn dim_badge_layout(app: &AppState, c: &SketchConstraint) -> Option<DimBadge> {
                 ],
                 arrows: vec![dim_arrow(ea, d), dim_arrow(eb, -d)],
                 text_rect: dim_label_rect(ea + (eb - ea) * 0.5 + n * 13.0, &label),
+                label,
+            })
+        }
+        (ConstraintKind::LineDistance, Curve::Line(la)) => {
+            // Width between two parallel lines: a double-arrowed rung from
+            // the mover's midpoint to its perpendicular foot on the
+            // reference line, labelled with the driving distance.
+            let Curve::Line(lb) = app.document.get(c.b?)?.as_curve()? else {
+                return None;
+            };
+            let a0 = px(la.p0.x, la.p0.y);
+            let a1 = px(la.p1.x, la.p1.y);
+            // The rung crosses at the mover's midpoint, or slides to the
+            // user's placement point (projected onto the mover) once placed.
+            let mut mb = px((lb.p0.x + lb.p1.x) * 0.5, (lb.p0.y + lb.p1.y) * 0.5);
+            let d = a1 - a0;
+            let n2 = d.length_sq();
+            if n2 < 1e-9 {
+                return None;
+            }
+            if let Some((wx, wy)) = c.place {
+                let q = px(wx, wy);
+                let b0 = px(lb.p0.x, lb.p0.y);
+                let db = px(lb.p1.x, lb.p1.y) - b0;
+                let nb2 = db.length_sq();
+                if nb2 > 1e-9 {
+                    mb = b0 + db * (((q - b0).dot(db)) / nb2);
+                }
+            }
+            // Foot of the perpendicular from mb onto the (infinite)
+            // reference line, all in screen space.
+            let t = ((mb - a0).dot(d)) / n2;
+            let foot = a0 + d * t;
+            let rung = mb - foot;
+            if rung.length() < 18.0 {
+                return None;
+            }
+            let dir = rung.normalized();
+            let label = units.format_measure(val, style.precision);
+            let half_w = dim_label_width(&label) * 0.5;
+            // Label beside the rung's midpoint, offset along the lines'
+            // direction so it doesn't sit on the arrows.
+            let mid = foot + rung * 0.5;
+            let along = d.normalized();
+            Some(DimBadge {
+                lines: vec![[foot, mb]],
+                arrows: vec![dim_arrow(foot, dir), dim_arrow(mb, -dir)],
+                text_rect: dim_label_rect(mid + along * (half_w + 10.0), &label),
                 label,
             })
         }
@@ -334,7 +511,12 @@ fn dim_badge_layout(app: &AppState, c: &SketchConstraint) -> Option<DimBadge> {
             if sweep <= -std::f32::consts::PI {
                 sweep += std::f32::consts::TAU;
             }
-            let rad = 26.0;
+            // A placed annotation sweeps its arc through the placement
+            // point; the minimum keeps a click on the vertex legible.
+            let rad = match c.place {
+                Some((wx, wy)) => (px(wx, wy) - vtx).length().max(16.0),
+                None => 26.0,
+            };
             let at = |ang: f32| vtx + vec2(ang.cos(), ang.sin()) * rad;
             let mut lines = vec![[vtx, vtx + da * (rad + 5.0)], [vtx, vtx + db * (rad + 5.0)]];
             let steps = 16;
@@ -361,10 +543,15 @@ fn dim_badge_layout(app: &AppState, c: &SketchConstraint) -> Option<DimBadge> {
                 return None;
             }
             let full = (arc.end_angle - arc.start_angle).abs() >= 2.0 * std::f64::consts::PI - 1e-9;
-            let ang = if full {
-                std::f64::consts::FRAC_PI_4
-            } else {
-                0.5 * (arc.start_angle + arc.end_angle)
+            // A placed annotation points its leader at the placement; the
+            // automatic layout aims at the arc's middle (or 45° on a full
+            // circle, clear of the axis-aligned quadrant points).
+            let ang = match c.place {
+                Some((wx, wy)) if (wx - arc.center.x).hypot(wy - arc.center.y) > 1e-9 => {
+                    (wy - arc.center.y).atan2(wx - arc.center.x)
+                }
+                _ if full => std::f64::consts::FRAC_PI_4,
+                _ => 0.5 * (arc.start_angle + arc.end_angle),
             };
             let center = px(arc.center.x, arc.center.y);
             let rim = px(
@@ -372,7 +559,13 @@ fn dim_badge_layout(app: &AppState, c: &SketchConstraint) -> Option<DimBadge> {
                 arc.center.y + arc.radius * ang.sin(),
             );
             let out = (rim - center).normalized();
-            let tail = rim + out * 14.0;
+            // The leader runs on out to the placement when that sits past
+            // the rim, so the label lands under the drop.
+            let lead = match c.place {
+                Some((wx, wy)) => (px(wx, wy) - rim).dot(out).max(14.0),
+                None => 14.0,
+            };
+            let tail = rim + out * lead;
             let label = format!("R{}", units.format_measure(val, style.precision));
             let half_w = dim_label_width(&label) * 0.5;
             Some(DimBadge {
@@ -384,6 +577,113 @@ fn dim_badge_layout(app: &AppState, c: &SketchConstraint) -> Option<DimBadge> {
         }
         _ => None,
     }
+}
+
+/// Paints one laid-out dimension annotation: strokes, arrowheads, and the
+/// framed value label. Shared by the placed badges and the smart-dimension
+/// placement preview, which differ only in color.
+fn draw_dim_badge(
+    painter: &egui::Painter,
+    origin: egui::Pos2,
+    dim: &DimBadge,
+    col: Color32,
+    bg: Color32,
+    frame: Color32,
+) {
+    let stroke = Stroke::new(1.0, col);
+    for seg in &dim.lines {
+        painter.line_segment(
+            [origin + seg[0].to_vec2(), origin + seg[1].to_vec2()],
+            stroke,
+        );
+    }
+    for tri in &dim.arrows {
+        painter.add(egui::Shape::convex_polygon(
+            tri.iter().map(|q| origin + q.to_vec2()).collect(),
+            col,
+            Stroke::NONE,
+        ));
+    }
+    let tr = dim.text_rect.translate(origin.to_vec2());
+    painter.rect_filled(tr, 4.0, bg);
+    painter.rect_stroke(tr, 4.0, Stroke::new(1.0, frame), egui::StrokeKind::Middle);
+    painter.text(
+        tr.center(),
+        egui::Align2::CENTER_CENTER,
+        &dim.label,
+        egui::FontId::proportional(11.0),
+        col,
+    );
+}
+
+/// Ghost-previews the smart dimension being placed: once the tool holds
+/// fully picked geometry (`pending`) — or a held line whose next click
+/// would drop its length — the would-be dimension renders at the cursor in
+/// the preview color, and the placement click freezes it where it shows.
+pub(super) fn smart_dim_preview(painter: &egui::Painter, app: &AppState, origin: egui::Pos2) {
+    let Tool::DimConstraint { first, pending } = &app.tool else {
+        return;
+    };
+    let (a, b) = match (first, pending) {
+        (_, Some((a, b))) => (*a, *b),
+        (Some(a), None) => (*a, None),
+        (None, None) => return,
+    };
+    let Some(c) = smart_dim_ghost(app, a, b) else {
+        return;
+    };
+    let Some(dim) = dim_badge_layout(app, &c) else {
+        return;
+    };
+    draw_dim_badge(
+        painter,
+        origin,
+        &dim,
+        crate::theme::PREVIEW,
+        Color32::from_rgba_unmultiplied(20, 26, 36, 225),
+        crate::theme::OUTLINE,
+    );
+}
+
+/// The constraint the placement click would record, valued with the current
+/// measurement and placed at the cursor — the WYSIWYG source for
+/// [`smart_dim_preview`]. Mirrors `AppState::smart_dimension`'s kind
+/// inference: parallel pair → width, crossing pair → angle, circle/arc →
+/// radius, lone line → length.
+fn smart_dim_ghost(app: &AppState, a: EntityId, b: Option<EntityId>) -> Option<SketchConstraint> {
+    let curve = |id: EntityId| app.document.get(id).and_then(|e| e.as_curve());
+    let mut c = match b {
+        Some(bid) => {
+            let (Some(Curve::Line(la)), Some(Curve::Line(lb))) = (curve(a), curve(bid)) else {
+                return None;
+            };
+            if crate::state::lines_parallel(&app.document, a, bid) {
+                // Current width: perpendicular distance from the mover's
+                // midpoint to the (infinite) reference line.
+                let (dx, dy) = (la.p1.x - la.p0.x, la.p1.y - la.p0.y);
+                let len = dx.hypot(dy);
+                if len < 1e-12 {
+                    return None;
+                }
+                let (mx, my) = ((lb.p0.x + lb.p1.x) * 0.5, (lb.p0.y + lb.p1.y) * 0.5);
+                let w = ((mx - la.p0.x) * dy - (my - la.p0.y) * dx).abs() / len;
+                SketchConstraint::line_distance(a, bid, w)
+            } else {
+                // Mover minus reference, exactly as `constrain_angle` locks
+                // the current angle; the constructor normalizes to (0, 180].
+                let da = (la.p1.y - la.p0.y).atan2(la.p1.x - la.p0.x);
+                let db = (lb.p1.y - lb.p0.y).atan2(lb.p1.x - lb.p0.x);
+                SketchConstraint::angle(a, bid, (db - da).to_degrees())
+            }
+        }
+        None => match curve(a)? {
+            Curve::Arc(arc) => SketchConstraint::radius(a, arc.radius),
+            Curve::Line(l) => SketchConstraint::distance(a, l.p0.dist_f64(&l.p1)),
+            _ => return None,
+        },
+    };
+    c.place = Some(app.cursor_world);
+    Some(c)
 }
 
 /// Canvas-local centers of one badge row's chips — exactly where
@@ -435,18 +735,58 @@ pub(crate) fn badge_hit(app: &AppState, sx: f64, sy: f64) -> Option<Vec<SketchCo
     }
     for ((wx, wy), cs) in &model.corner_dots {
         let (dx, dy) = app.view.world_to_screen(*wx, *wy);
-        if (pos2(dx as f32, dy as f32) - p).length() <= 6.0 {
+        let base = pos2(dx as f32, dy as f32);
+        let chip_c = base + corner_icon_offset(&app.document, (*wx, *wy), cs);
+        if egui::Rect::from_center_size(chip_c, vec2(20.0, 20.0)).contains(p) {
+            return Some(cs.clone());
+        }
+    }
+    for (id, (wx, wy), cs) in &model.fixed_points {
+        if *id == app.origin_id {
+            continue;
+        }
+        let (dx, dy) = app.view.world_to_screen(*wx, *wy);
+        let chip_c = pos2(dx as f32, dy as f32) + vec2(FIX_ICON_OFFSET, -FIX_ICON_OFFSET);
+        if egui::Rect::from_center_size(chip_c, vec2(20.0, 20.0)).contains(p) {
             return Some(cs.clone());
         }
     }
     None
 }
 
+/// The driving-dimension constraint whose annotation sits under the given
+/// canvas-local position, if any. This is the click target for *editing*
+/// the value, kept separate from [`badge_hit`] (whose hits are deletions):
+/// clicking a dimension opens its editor instead of removing it.
+pub(crate) fn dim_badge_hit(app: &AppState, sx: f64, sy: f64) -> Option<SketchConstraint> {
+    if !app.show_constraints || app.document.constraints.is_empty() {
+        return None;
+    }
+    let p = pos2(sx as f32, sy as f32);
+    for c in &badge_model(&app.document).dim_badges {
+        if let Some(dim) = dim_badge_layout(app, c)
+            && dim.text_rect.contains(p)
+        {
+            return Some(*c);
+        }
+    }
+    None
+}
+
+/// Canvas-local center of a driving dimension's value label — where its
+/// inline editor anchors. `None` when the badge isn't currently drawable
+/// (entity gone, or too small on screen to annotate).
+pub(crate) fn dim_badge_anchor(app: &AppState, c: &SketchConstraint) -> Option<egui::Pos2> {
+    dim_badge_layout(app, c).map(|d| d.text_rect.center())
+}
+
 /// Draws the constraint badges: a row of small glyph chips beside each
-/// constrained line's midpoint and a dot on each welded corner. When `hover`
-/// (an absolute screen position) lands on a chip or dot, that badge is lit
-/// and a "click to delete" hint is drawn above it — badges are clickable
-/// deletions in Select mode, so the caller passes `hover` only then.
+/// constrained line's midpoint, a coincidence glyph beside each welded
+/// corner, and a dimension annotation for each driving value. When `hover`
+/// (an absolute screen position) lands on a badge it lights up with a hint:
+/// glyph chips and weld glyphs delete on click, driving dimensions open a
+/// value editor. These act only in Select mode, so the caller passes
+/// `hover` only then.
 pub(super) fn constraint_badges(
     painter: &egui::Painter,
     app: &AppState,
@@ -460,7 +800,9 @@ pub(super) fn constraint_badges(
     let clip = painter.clip_rect().expand(48.0);
     let bg = Color32::from_rgba_unmultiplied(20, 26, 36, 225);
     let col = crate::theme::ACCENT_BRIGHT;
-    let mut hint: Option<egui::Pos2> = None;
+    // The hint carries its own verb: glyph chips and weld dots delete on
+    // click, driving dimensions open an editor.
+    let mut hint: Option<(egui::Pos2, &'static str)> = None;
     // A badge sitting under a selection grip can't be click-deleted: the grip
     // drag claims that click first (see view.rs). A coincident weld dot lands
     // exactly on the shared endpoint grip, so once the line is selected its
@@ -487,7 +829,7 @@ pub(super) fn constraint_badges(
                 && !under_grip(p);
             badge_chip(painter, p, *g, bg, hot);
             if hot {
-                hint = Some(p);
+                hint = Some((p, "click to delete"));
             }
         }
     }
@@ -499,64 +841,69 @@ pub(super) fn constraint_badges(
         if !clip.contains(tr.center()) {
             continue;
         }
-        let stroke = Stroke::new(1.0, col);
-        for seg in &dim.lines {
-            painter.line_segment(
-                [origin + seg[0].to_vec2(), origin + seg[1].to_vec2()],
-                stroke,
-            );
-        }
-        for tri in &dim.arrows {
-            painter.add(egui::Shape::convex_polygon(
-                tri.iter().map(|q| origin + q.to_vec2()).collect(),
-                col,
-                Stroke::NONE,
-            ));
-        }
         let hot = hover.map(|h| tr.contains(h)).unwrap_or(false) && !under_grip(tr.center());
-        painter.rect_filled(tr, 4.0, bg);
-        painter.rect_stroke(
-            tr,
-            4.0,
-            Stroke::new(
-                1.0,
-                if hot {
-                    crate::theme::SNAP
-                } else {
-                    crate::theme::OUTLINE
-                },
-            ),
-            egui::StrokeKind::Middle,
-        );
-        painter.text(
-            tr.center(),
-            egui::Align2::CENTER_CENTER,
-            &dim.label,
-            egui::FontId::proportional(11.0),
-            col,
-        );
+        let frame = if hot {
+            crate::theme::SNAP
+        } else {
+            crate::theme::OUTLINE
+        };
+        draw_dim_badge(painter, origin, &dim, col, bg, frame);
         if hot {
-            hint = Some(tr.center());
+            hint = Some((tr.center(), "click to edit"));
         }
     }
-    for ((wx, wy), _) in &model.corner_dots {
+    for ((wx, wy), cs) in &model.corner_dots {
         let p = super::render::world_to_screen_pos(app, origin, *wx, *wy);
-        if !clip.contains(p) {
+        let dir = corner_icon_offset(&app.document, (*wx, *wy), cs);
+        let chip_c = p + dir;
+        if !clip.contains(chip_c) && !clip.contains(p) {
             continue;
         }
-        let hot = hover.map(|h| (h - p).length() <= 6.0).unwrap_or(false) && !under_grip(p);
-        painter.circle_filled(p, 4.4, bg);
-        painter.circle_stroke(p, 4.4, Stroke::new(1.0, crate::theme::OUTLINE));
-        painter.circle_filled(p, 2.2, if hot { crate::theme::SNAP } else { col });
+        // The click now lands on the offset glyph, clear of the endpoint
+        // grip, so (unlike the old on-point dot) it's always deletable.
+        let hot = hover
+            .map(|h| egui::Rect::from_center_size(chip_c, vec2(20.0, 20.0)).contains(h))
+            .unwrap_or(false)
+            && !under_grip(chip_c);
+        // A small tick keeps the exact shared point marked...
+        painter.circle_filled(p, 2.2, col);
+        // ...with a short leader out to the coincidence glyph beside it.
+        let edge = p + dir.normalized() * (CORNER_ICON_GAP - 9.5);
+        painter.line_segment([p, edge], Stroke::new(1.0, crate::theme::OUTLINE));
+        icon_chip(painter, chip_c, crate::icons::Icon::ConCoincident, bg, hot);
         if hot {
-            hint = Some(p);
+            hint = Some((chip_c, "click to delete"));
         }
     }
-    if let Some(p) = hint {
+    for (id, (wx, wy), _) in &model.fixed_points {
+        // The origin's structural anchor is not a user constraint — no badge.
+        if *id == app.origin_id {
+            continue;
+        }
+        let p = super::render::world_to_screen_pos(app, origin, *wx, *wy);
+        let chip_c = p + vec2(FIX_ICON_OFFSET, -FIX_ICON_OFFSET);
+        if !clip.contains(chip_c) && !clip.contains(p) {
+            continue;
+        }
+        let hot = hover
+            .map(|h| egui::Rect::from_center_size(chip_c, vec2(20.0, 20.0)).contains(h))
+            .unwrap_or(false)
+            && !under_grip(chip_c);
+        painter.circle_filled(p, 2.2, col);
+        painter.line_segment(
+            [p, p + vec2(FIX_ICON_OFFSET - 6.7, -(FIX_ICON_OFFSET - 6.7))],
+            Stroke::new(1.0, crate::theme::OUTLINE),
+        );
+        icon_chip(painter, chip_c, crate::icons::Icon::ConFix, bg, hot);
+        if hot {
+            hint = Some((chip_c, "click to delete"));
+        }
+    }
+    if let Some((p, verb)) = hint {
         painter.text(
             p + vec2(0.0, -12.0),
             egui::Align2::CENTER_BOTTOM,
-            "click to delete",
+            verb,
             egui::FontId::proportional(11.0),
             Color32::from_rgb(255, 200, 120),
         );
@@ -582,6 +929,34 @@ fn badge_chip(painter: &egui::Painter, c: egui::Pos2, g: BadgeGlyph, bg: Color32
     paint_badge_glyph(painter, c, g);
 }
 
+/// Draws a constraint glyph in its own rounded chip, set beside the geometry
+/// it annotates (a coincidence weld, a fixed point) rather than over it.
+fn icon_chip(
+    painter: &egui::Painter,
+    c: egui::Pos2,
+    icon: crate::icons::Icon,
+    bg: Color32,
+    hot: bool,
+) {
+    let r = egui::Rect::from_center_size(c, vec2(19.0, 19.0));
+    painter.rect_filled(r, 4.0, bg);
+    painter.rect_stroke(
+        r,
+        4.0,
+        Stroke::new(
+            1.0,
+            if hot {
+                crate::theme::SNAP
+            } else {
+                crate::theme::OUTLINE
+            },
+        ),
+        egui::StrokeKind::Middle,
+    );
+    let glyph = egui::Rect::from_center_size(c, vec2(14.0, 14.0));
+    crate::icons::paint_icon(painter, painter.ctx(), icon, glyph, Color32::WHITE);
+}
+
 /// Maps a constraint kind to its icon asset — shared by the canvas badges
 /// and the constraint bar so the two read identically.
 fn badge_icon(g: BadgeGlyph) -> crate::icons::Icon {
@@ -593,6 +968,16 @@ fn badge_icon(g: BadgeGlyph) -> crate::icons::Icon {
         BadgeGlyph::Perpendicular => Icon::ConPerpendicular,
         BadgeGlyph::Equal => Icon::ConEqual,
         BadgeGlyph::Tangent => Icon::ConTangent,
+        BadgeGlyph::Fixed => Icon::ConFix,
+        BadgeGlyph::Concentric => Icon::ConConcentric,
+        // Interim aliases until these kinds get their own icon assets.
+        BadgeGlyph::Collinear => Icon::ConParallel,
+        BadgeGlyph::Midpoint => Icon::ConCoincident,
+        BadgeGlyph::EqualRadius => Icon::ConEqual,
+        BadgeGlyph::PointOnLine => Icon::ConCoincident,
+        BadgeGlyph::PointOnCircle => Icon::ConCoincident,
+        BadgeGlyph::Symmetric => Icon::ConEqual,
+        BadgeGlyph::Block => Icon::ConFix,
     }
 }
 
@@ -665,6 +1050,40 @@ pub(super) fn cursor_readout(ctx: &egui::Context, app: &AppState, origin: egui::
                     );
                 });
         });
+}
+
+/// A small badge glyph beside the cursor while drawing, showing which
+/// constraint the auto-inference will capture on the next click (Fusion-
+/// style). Nothing is drawn when there's no inference pending.
+pub(super) fn inference_preview_glyph(ctx: &egui::Context, app: &AppState, origin: egui::Pos2) {
+    let Some(kind) = app.inference_preview() else {
+        return;
+    };
+    let glyph = match kind {
+        ConstraintKind::Horizontal => BadgeGlyph::Horizontal,
+        ConstraintKind::Vertical => BadgeGlyph::Vertical,
+        ConstraintKind::Coincident => BadgeGlyph::Midpoint,
+        _ => return,
+    };
+    let (cx, cy) = app.cursor_world;
+    let cur = app.view.world_to_screen(cx, cy);
+    let center = pos2(
+        origin.x + cur.0 as f32 + 20.0,
+        origin.y + cur.1 as f32 - 18.0,
+    );
+    let painter = ctx.layer_painter(egui::LayerId::new(
+        egui::Order::Foreground,
+        egui::Id::new("inference_preview_glyph"),
+    ));
+    // A faint accent chip behind the glyph so it reads as a hint, not a
+    // committed badge.
+    painter.circle_filled(center, 11.0, crate::theme::ACCENT_DIM);
+    painter.circle_stroke(
+        center,
+        11.0,
+        Stroke::new(1.0, crate::theme::ACCENT.gamma_multiply(0.6)),
+    );
+    paint_badge_glyph(&painter, center, glyph);
 }
 
 fn hud_field(
@@ -1753,8 +2172,12 @@ mod badge_tests {
         ))));
         app.document
             .add_constraint(SketchConstraint::coincident(a, 1, b, 0));
+        // The weld glyph sits offset beside the shared point now, so the
+        // click target is the chip, not the exact endpoint.
+        let cs = [SketchConstraint::coincident(a, 1, b, 0)];
         let (sx, sy) = app.view.world_to_screen(4.0, 0.0);
-        app.canvas_click(sx, sy);
+        let off = corner_icon_offset(&app.document, (4.0, 0.0), &cs);
+        app.canvas_click(sx + off.x as f64, sy + off.y as f64);
         assert!(
             user_constraints(&app).is_empty(),
             "dot click removed the weld"
@@ -1871,7 +2294,7 @@ mod badge_tests {
     }
 
     #[test]
-    fn dimension_badge_shows_the_value_and_deletes_on_click() {
+    fn dimension_badge_shows_its_value_and_edits_rather_than_deletes() {
         let mut app = AppState::new(800.0, 600.0);
         app.snap_on = false;
         let a = app.add_entity(EntityKind::Curve(Curve::Line(LineSeg::from_endpoints(
@@ -1887,22 +2310,36 @@ mod badge_tests {
             "label carries the driving value: {}",
             dim.label
         );
-        let hit = badge_hit(
-            &app,
+        // The dimension label is a click target for *editing*, not deletion.
+        let center = (
             dim.text_rect.center().x as f64,
             dim.text_rect.center().y as f64,
-        )
-        .expect("label is clickable");
-        assert_eq!(hit.as_slice(), &[c]);
+        );
+        let hit = dim_badge_hit(&app, center.0, center.1).expect("label is an edit target");
+        assert_eq!(hit, c);
         app.tool = Tool::Select;
-        app.canvas_click(
-            dim.text_rect.center().x as f64,
-            dim.text_rect.center().y as f64,
+        app.canvas_click(center.0, center.1);
+        assert_eq!(
+            user_constraints(&app).len(),
+            1,
+            "a click on a dimension never silently deletes it"
         );
-        assert!(
-            user_constraints(&app).is_empty(),
-            "clicking the dimension badge deletes the driving constraint"
-        );
+
+        // Editing the value re-solves the line to the new length, retargeting
+        // the existing record rather than stacking a second one.
+        app.set_constraint_value(c, 6.0);
+        let len = match app.document.get(a).and_then(|e| e.as_curve()) {
+            Some(Curve::Line(l)) => (l.p1.x - l.p0.x).hypot(l.p1.y - l.p0.y),
+            _ => panic!("still a line"),
+        };
+        assert!((len - 6.0).abs() < 1e-6, "edited length applied: {len}");
+        let n = app
+            .document
+            .constraints
+            .iter()
+            .filter(|k| k.kind == ConstraintKind::Distance && k.a == a)
+            .count();
+        assert_eq!(n, 1, "value edit retargets, not duplicates");
     }
 
     #[test]
@@ -1914,6 +2351,319 @@ mod badge_tests {
         doc.remove(a);
         let m = badge_model(&doc);
         assert!(m.corner_dots.is_empty(), "pruned weld leaves no dot");
+    }
+
+    #[test]
+    fn fixed_line_badges_a_glyph_and_a_fixed_point_gets_its_own_marker() {
+        // A fixed line carries the fix glyph in its chip row.
+        let mut doc = Document::new();
+        let a = line(&mut doc, 0.0, 0.0, 4.0, 0.0);
+        doc.add_constraint(SketchConstraint::fixed(a));
+        let m = badge_model(&doc);
+        let glyphs = m
+            .line_badges
+            .iter()
+            .find(|(id, _)| *id == a)
+            .map(|(_, g)| g.clone())
+            .unwrap_or_default();
+        assert!(
+            glyphs.iter().any(|(g, _)| *g == BadgeGlyph::Fixed),
+            "a fixed line shows the fix glyph"
+        );
+        assert!(
+            m.fixed_points.is_empty(),
+            "a line is not a fixed-point marker"
+        );
+
+        // A fixed standalone point is a marker, not a line glyph.
+        let mut doc2 = Document::new();
+        let p = doc2.add(EntityKind::Point(Point2d::from_f64(2.0, 3.0)));
+        doc2.add_constraint(SketchConstraint::fixed(p));
+        let m2 = badge_model(&doc2);
+        assert!(m2.line_badges.is_empty());
+        assert_eq!(m2.fixed_points.len(), 1);
+        assert_eq!(m2.fixed_points[0].0, p);
+    }
+
+    #[test]
+    fn smart_dimension_infers_length_radius_and_angle() {
+        let mut app = AppState::new(800.0, 600.0);
+        app.snap_on = false;
+        app.show_constraints = false;
+
+        // One line → a driving length, with its editor queued and badges shown.
+        let l = app.add_entity(EntityKind::Curve(Curve::Line(LineSeg::from_endpoints(
+            Point2d::from_f64(0.0, 0.0),
+            Point2d::from_f64(4.0, 0.0),
+        ))));
+        assert!(app.smart_dimension(l, None, None));
+        assert!(
+            app.document
+                .constraints
+                .iter()
+                .any(|c| c.kind == ConstraintKind::Distance && c.a == l && c.val.is_some()),
+            "a line gets a driving length"
+        );
+        assert!(app.show_constraints, "a new dimension reveals the badges");
+        assert!(
+            app.pending_dim_edit.is_some(),
+            "the new dimension is queued for inline editing"
+        );
+
+        // A circle/arc → a driving radius.
+        let c = app.add_entity(EntityKind::Curve(Curve::Arc(
+            oxidraft_geometry::CircularArc::new(
+                Point2d::from_f64(20.0, 0.0),
+                2.0,
+                0.0,
+                std::f64::consts::TAU,
+            ),
+        )));
+        assert!(app.smart_dimension(c, None, None));
+        assert!(
+            app.document
+                .constraints
+                .iter()
+                .any(|k| k.kind == ConstraintKind::Radius && k.a == c),
+            "a circle gets a driving radius"
+        );
+
+        // Two lines → a driving angle between them.
+        let a = app.add_entity(EntityKind::Curve(Curve::Line(LineSeg::from_endpoints(
+            Point2d::from_f64(0.0, 10.0),
+            Point2d::from_f64(6.0, 10.0),
+        ))));
+        let b = app.add_entity(EntityKind::Curve(Curve::Line(LineSeg::from_endpoints(
+            Point2d::from_f64(0.0, 10.0),
+            Point2d::from_f64(4.0, 14.0),
+        ))));
+        assert!(app.smart_dimension(a, Some(b), None));
+        assert!(
+            app.document
+                .constraints
+                .iter()
+                .any(|k| k.kind == ConstraintKind::Angle && k.a == a && k.b == Some(b)),
+            "two lines get a driving angle"
+        );
+    }
+
+    #[test]
+    fn smart_dimension_on_parallel_lines_is_a_width_not_an_angle() {
+        let mut app = AppState::new(800.0, 600.0);
+        app.snap_on = false;
+        let a = app.add_entity(EntityKind::Curve(Curve::Line(LineSeg::from_endpoints(
+            Point2d::from_f64(0.0, 0.0),
+            Point2d::from_f64(6.0, 0.0),
+        ))));
+        let b = app.add_entity(EntityKind::Curve(Curve::Line(LineSeg::from_endpoints(
+            Point2d::from_f64(1.0, 2.0),
+            Point2d::from_f64(5.0, 2.0),
+        ))));
+        assert!(app.smart_dimension(a, Some(b), None));
+        assert!(
+            app.document
+                .constraints
+                .iter()
+                .any(|c| c.kind == ConstraintKind::LineDistance && c.val == Some(2.0)),
+            "parallel pick records the width between the lines"
+        );
+        assert!(
+            !app.document
+                .constraints
+                .iter()
+                .any(|c| c.kind == ConstraintKind::Angle),
+            "no meaningless 180° angle is recorded"
+        );
+
+        // The width renders as a dimension badge and is editable like the
+        // other driving dimensions.
+        let c = *app
+            .document
+            .constraints
+            .iter()
+            .find(|c| c.kind == ConstraintKind::LineDistance)
+            .expect("record exists");
+        let dim = dim_badge_layout(&app, &c).expect("width annotation renders");
+        assert!(dim.label.starts_with("2.0"), "label: {}", dim.label);
+        let hit = dim_badge_hit(
+            &app,
+            dim.text_rect.center().x as f64,
+            dim.text_rect.center().y as f64,
+        )
+        .expect("width label is an edit target");
+        assert_eq!(hit, c);
+
+        app.set_constraint_value(c, 4.5);
+        let lb = match app.document.get(b).and_then(|e| e.as_curve()) {
+            Some(Curve::Line(l)) => l.clone(),
+            _ => panic!("still a line"),
+        };
+        assert!(
+            (lb.p0.y - 4.5).abs() < 1e-6 && (lb.p1.y - 4.5).abs() < 1e-6,
+            "editing the width slides the second line: {lb:?}"
+        );
+    }
+
+    #[test]
+    fn smart_dimension_placement_click_pins_the_annotation() {
+        let mut app = AppState::new(800.0, 600.0);
+        app.snap_on = false;
+        let a = app.add_entity(EntityKind::Curve(Curve::Line(LineSeg::from_endpoints(
+            Point2d::from_f64(0.0, 0.0),
+            Point2d::from_f64(4.0, 0.0),
+        ))));
+        let b = app.add_entity(EntityKind::Curve(Curve::Line(LineSeg::from_endpoints(
+            Point2d::from_f64(0.5, 2.0),
+            Point2d::from_f64(3.5, 2.5),
+        ))));
+        app.tool = Tool::DimConstraint {
+            first: None,
+            pending: None,
+        };
+
+        // First pick holds the line — it may still pair with a second one.
+        app.handle_modify_click(&Point2d::from_f64(2.0, 0.0));
+        assert!(
+            matches!(app.tool, Tool::DimConstraint { first: Some(id), pending: None } if id == a),
+            "line waits in `first`: {:?}",
+            app.tool
+        );
+
+        // The second line completes the pick; nothing is recorded yet —
+        // the dimension follows the cursor instead.
+        app.handle_modify_click(&Point2d::from_f64(2.0, 2.25));
+        assert!(
+            matches!(
+                app.tool,
+                Tool::DimConstraint { first: None, pending: Some((x, Some(y))) } if x == a && y == b
+            ),
+            "the pair waits for placement: {:?}",
+            app.tool
+        );
+        assert!(
+            user_constraints(&app).is_empty(),
+            "no constraint before the placement click"
+        );
+
+        // The placement click drops it and remembers where.
+        app.handle_modify_click(&Point2d::from_f64(8.0, 5.0));
+        let c = *user_constraints(&app)
+            .iter()
+            .find(|c| c.kind == ConstraintKind::Angle)
+            .expect("crossing lines record an angle");
+        assert_eq!(c.place, Some((8.0, 5.0)), "the drop point is recorded");
+        assert!(
+            matches!(
+                app.tool,
+                Tool::DimConstraint {
+                    first: None,
+                    pending: None
+                }
+            ),
+            "the tool is ready for the next pick"
+        );
+    }
+
+    #[test]
+    fn smart_dimension_circle_pick_goes_straight_to_placement() {
+        let mut app = AppState::new(800.0, 600.0);
+        app.snap_on = false;
+        let c_ent = app.add_entity(EntityKind::Curve(Curve::Arc(
+            oxidraft_geometry::CircularArc::new(
+                Point2d::from_f64(20.0, 0.0),
+                2.0,
+                0.0,
+                std::f64::consts::TAU,
+            ),
+        )));
+        app.tool = Tool::DimConstraint {
+            first: None,
+            pending: None,
+        };
+
+        // A circle pairs with nothing, so one pick fully picks it.
+        app.handle_modify_click(&Point2d::from_f64(22.0, 0.0));
+        assert!(
+            matches!(
+                app.tool,
+                Tool::DimConstraint { first: None, pending: Some((id, None)) } if id == c_ent
+            ),
+            "circle goes straight to the placement leg: {:?}",
+            app.tool
+        );
+
+        app.handle_modify_click(&Point2d::from_f64(26.0, 1.0));
+        let c = *user_constraints(&app)
+            .iter()
+            .find(|c| c.kind == ConstraintKind::Radius)
+            .expect("the placement click records the radius");
+        assert_eq!(c.val, Some(2.0));
+        assert_eq!(c.place, Some((26.0, 1.0)));
+    }
+
+    #[test]
+    fn placed_distance_annotation_takes_the_placement_side_and_offset() {
+        let mut app = AppState::new(800.0, 600.0);
+        app.snap_on = false;
+        let a = app.add_entity(EntityKind::Curve(Curve::Line(LineSeg::from_endpoints(
+            Point2d::from_f64(0.0, 0.0),
+            Point2d::from_f64(4.0, 0.0),
+        ))));
+        app.document
+            .add_constraint(SketchConstraint::distance(a, 4.0));
+        let auto = dim_badge_layout(
+            &app,
+            &app.document.constraints[app.document.constraints.len() - 1],
+        )
+        .expect("auto layout renders");
+
+        // Placed above the line (world +y, screen −y), the annotation must
+        // flip to that side of the automatic below-the-line layout.
+        let mut placed_c = app.document.constraints[app.document.constraints.len() - 1];
+        placed_c.place = Some((2.0, 3.0));
+        let placed = dim_badge_layout(&app, &placed_c).expect("placed layout renders");
+        let (_, line_sy) = app.view.world_to_screen(2.0, 0.0);
+        assert!(
+            placed.text_rect.center().y < line_sy as f32,
+            "placed label sits above the line on screen"
+        );
+        assert!(
+            placed.text_rect.center().y < auto.text_rect.center().y,
+            "placement overrides the automatic side"
+        );
+    }
+
+    #[test]
+    fn smart_dim_ghost_mirrors_the_would_be_constraint() {
+        let mut app = AppState::new(800.0, 600.0);
+        app.snap_on = false;
+        app.cursor_world = (2.0, 3.0);
+        let l = app.add_entity(EntityKind::Curve(Curve::Line(LineSeg::from_endpoints(
+            Point2d::from_f64(0.0, 0.0),
+            Point2d::from_f64(4.0, 0.0),
+        ))));
+        let g = smart_dim_ghost(&app, l, None).expect("a line ghosts a length");
+        assert_eq!(g.kind, ConstraintKind::Distance);
+        assert_eq!(g.val, Some(4.0), "ghost carries the current measurement");
+        assert_eq!(g.place, Some((2.0, 3.0)), "ghost hangs at the cursor");
+
+        // Parallel pair → width ghost with the current gap; crossing pair
+        // → angle ghost.
+        let p = app.add_entity(EntityKind::Curve(Curve::Line(LineSeg::from_endpoints(
+            Point2d::from_f64(1.0, 2.0),
+            Point2d::from_f64(5.0, 2.0),
+        ))));
+        let g = smart_dim_ghost(&app, l, Some(p)).expect("parallel lines ghost a width");
+        assert_eq!(g.kind, ConstraintKind::LineDistance);
+        assert_eq!(g.val, Some(2.0));
+        let x = app.add_entity(EntityKind::Curve(Curve::Line(LineSeg::from_endpoints(
+            Point2d::from_f64(0.0, 5.0),
+            Point2d::from_f64(4.0, 9.0),
+        ))));
+        let g = smart_dim_ghost(&app, l, Some(x)).expect("crossing lines ghost an angle");
+        assert_eq!(g.kind, ConstraintKind::Angle);
+        let v = g.val.expect("angle ghost is valued");
+        assert!((v - 45.0).abs() < 1e-9, "measured angle: {v}");
     }
 }
 
