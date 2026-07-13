@@ -2,11 +2,12 @@
 //! optimised: run `cargo bench -p oxidraft_geometry` before and after
 //! touching them.
 
-use criterion::{Criterion, black_box, criterion_group, criterion_main};
+use criterion::{Criterion, criterion_group, criterion_main};
 use oxidraft_geometry::{
     CircularArc, Curve, CurveSegment, LineSeg, NurbsCurve, Point2d, intersect,
     project_point_onto_curve, tessellate_curve,
 };
+use std::hint::black_box;
 
 fn arc_tessellation(c: &mut Criterion) {
     let arc = Curve::Arc(CircularArc::new(

@@ -3,7 +3,6 @@ use oxidraft_ui::{AppState, UiState, draw_ui, egui};
 /// Runs one full frame of the real UI through the same driver pattern as
 /// text_focus.rs (ctx.run() over the whole draw_ui pipeline, not just the
 /// toast in isolation).
-#[allow(deprecated)] // Context::run / CentralPanel::show: fine for a synchronous test driver
 fn frame(ctx: &egui::Context, app: &mut AppState, ui_state: &mut UiState) {
     let raw = egui::RawInput {
         screen_rect: Some(egui::Rect::from_min_size(
@@ -12,10 +11,8 @@ fn frame(ctx: &egui::Context, app: &mut AppState, ui_state: &mut UiState) {
         )),
         ..Default::default()
     };
-    let _ = ctx.run(raw, |ctx| {
-        egui::CentralPanel::default().show(ctx, |ui| {
-            draw_ui(ui, app, ui_state);
-        });
+    let _ = ctx.run_ui(raw, |ui| {
+        draw_ui(ui, app, ui_state);
     });
 }
 

@@ -2683,7 +2683,8 @@ mod text_hud_tests {
     }
 
     #[test]
-    #[allow(deprecated)] // dyn_text_hud takes &Context, not &mut Ui, so run_ui doesn't fit
+    // dyn_text_hud takes &Context, not &mut Ui, so a manual begin_pass/end_pass
+    // pair drives it rather than run_ui.
     fn typing_then_enter_creates_text() {
         let ctx = egui::Context::default();
         let mut app = AppState::new(800.0, 600.0);
@@ -2699,7 +2700,9 @@ mod text_hud_tests {
                 events,
                 ..Default::default()
             };
-            let _ = ctx.run(raw, |ctx| dyn_text_hud(ctx, app, ui, origin));
+            ctx.begin_pass(raw);
+            dyn_text_hud(&ctx, app, ui, origin);
+            let _ = ctx.end_pass();
         };
 
         // Frame 1: HUD appears and requests focus on the text field.
@@ -2739,7 +2742,6 @@ mod polygon_hud_tests {
     use super::*;
 
     #[test]
-    #[allow(deprecated)]
     fn hud_stays_hidden_until_center_is_placed() {
         let ctx = egui::Context::default();
         let mut app = AppState::new(800.0, 600.0);
@@ -2750,9 +2752,9 @@ mod polygon_hud_tests {
         };
         let mut ui_state = UiState::default();
         let origin = pos2(0.0, 0.0);
-        let _ = ctx.run(egui::RawInput::default(), |ctx| {
-            polygon_sides_hud(ctx, &mut app, &mut ui_state, origin)
-        });
+        ctx.begin_pass(egui::RawInput::default());
+        polygon_sides_hud(&ctx, &mut app, &mut ui_state, origin);
+        let _ = ctx.end_pass();
         assert!(
             !ui_state.dyn_poly_active,
             "no popup — and no cursor-following pointer box — before both clicks"
@@ -2765,9 +2767,9 @@ mod polygon_hud_tests {
             radius_point: None,
             sides: Some(6),
         };
-        let _ = ctx.run(egui::RawInput::default(), |ctx| {
-            polygon_sides_hud(ctx, &mut app, &mut ui_state, origin)
-        });
+        ctx.begin_pass(egui::RawInput::default());
+        polygon_sides_hud(&ctx, &mut app, &mut ui_state, origin);
+        let _ = ctx.end_pass();
         assert!(
             !ui_state.dyn_poly_active,
             "still no popup with only the center placed, before the radius click"
@@ -2775,7 +2777,6 @@ mod polygon_hud_tests {
     }
 
     #[test]
-    #[allow(deprecated)]
     fn custom_field_parses_into_sides_with_dyn_on_off() {
         let ctx = egui::Context::default();
         let mut app = AppState::new(800.0, 600.0);
@@ -2790,9 +2791,9 @@ mod polygon_hud_tests {
         let sid = egui::Id::new("dyn_poly_sides");
 
         // Frame 1: the popup appears (only now that center is placed).
-        let _ = ctx.run(egui::RawInput::default(), |ctx| {
-            polygon_sides_hud(ctx, &mut app, &mut ui_state, origin)
-        });
+        ctx.begin_pass(egui::RawInput::default());
+        polygon_sides_hud(&ctx, &mut app, &mut ui_state, origin);
+        let _ = ctx.end_pass();
         assert!(
             ui_state.dyn_poly_active,
             "popup must show once center is set"
@@ -2805,9 +2806,9 @@ mod polygon_hud_tests {
             events: vec![egui::Event::Text("9".into())],
             ..Default::default()
         };
-        let _ = ctx.run(raw, |ctx| {
-            polygon_sides_hud(ctx, &mut app, &mut ui_state, origin)
-        });
+        ctx.begin_pass(raw);
+        polygon_sides_hud(&ctx, &mut app, &mut ui_state, origin);
+        let _ = ctx.end_pass();
 
         assert!(
             matches!(

@@ -167,7 +167,7 @@ pub fn draw_ui(ui: &mut egui::Ui, app: &mut AppState, ui_state: &mut UiState) {
 fn canvas(root_ui: &mut egui::Ui, app: &mut AppState, ui_state: &mut UiState, palette_open: bool) {
     let ctx_owned = root_ui.ctx().clone();
     let ctx = &ctx_owned;
-    CentralPanel::default().show_inside(root_ui, |ui| {
+    CentralPanel::default().show(root_ui, |ui| {
         let avail = ui.available_size();
         app.view.width = avail.x as f64;
         app.view.height = avail.y as f64;

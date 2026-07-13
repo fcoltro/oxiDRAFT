@@ -1,6 +1,5 @@
 use oxidraft_ui::{AppState, UiState, draw_ui, egui};
 
-#[allow(deprecated)]
 fn frame(
     ctx: &egui::Context,
     app: &mut AppState,
@@ -15,10 +14,8 @@ fn frame(
         events,
         ..Default::default()
     };
-    let _ = ctx.run(raw, |ctx| {
-        egui::CentralPanel::default().show(ctx, |ui| {
-            draw_ui(ui, app, ui_state);
-        });
+    let _ = ctx.run_ui(raw, |ui| {
+        draw_ui(ui, app, ui_state);
     });
 }
 
@@ -72,8 +69,10 @@ fn holding_q_over_the_canvas_opens_the_radial_menu() {
 fn q_does_not_open_radial_menu_while_settings_dialog_is_open() {
     let ctx = egui::Context::default();
     let mut app = AppState::new(1200.0, 800.0);
-    let mut ui_state = UiState::default();
-    ui_state.settings_open = true;
+    let mut ui_state = UiState {
+        settings_open: true,
+        ..Default::default()
+    };
     let canvas_pos = egui::pos2(600.0, 400.0);
     frame(&ctx, &mut app, &mut ui_state, pointer_move(canvas_pos));
     frame(&ctx, &mut app, &mut ui_state, key(egui::Key::Q, true));
