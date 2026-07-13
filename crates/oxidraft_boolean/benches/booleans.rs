@@ -1,9 +1,10 @@
 //! Boolean pipeline benchmarks: the curved trim-and-stitch path, the
 //! polyline fallback, and winding-number containment.
 
-use criterion::{Criterion, black_box, criterion_group, criterion_main};
+use criterion::{Criterion, criterion_group, criterion_main};
 use oxidraft_boolean::{Region, union};
 use oxidraft_geometry::{CircularArc, Curve, LineSeg, Point2d};
+use std::hint::black_box;
 
 fn circle(cx: f64, cy: f64, r: f64) -> Region {
     Region::new(vec![Curve::Arc(CircularArc::new(

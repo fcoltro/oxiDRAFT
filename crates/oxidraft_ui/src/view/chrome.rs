@@ -282,6 +282,8 @@ fn export_menu(ctx: &Context, app: &mut AppState) {
     }
 }
 
+pub(crate) const PLOT_WINDOW_ID: &str = "plot_dialog_window";
+
 const PLOT_PRESET_ID: &str = "plot_paper_preset";
 
 const PLOT_CUSTOM_W_ID: &str = "plot_custom_w_mm";
@@ -314,6 +316,7 @@ pub(super) fn plot_dialog(ctx: &Context, app: &mut AppState) {
     let mut close_after_plot = false;
     let mut start_pick = false;
     egui::Window::new("Plot")
+        .id(egui::Id::new(PLOT_WINDOW_ID))
         .collapsible(false)
         .resizable(false)
         .anchor(egui::Align2::CENTER_CENTER, egui::Vec2::ZERO)

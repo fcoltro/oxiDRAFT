@@ -31,8 +31,8 @@ oxidraft_document = { path = "crates/oxidraft_document" }
 oxidraft_cad = { path = "crates/oxidraft_cad" }
 oxidraft_io = { path = "crates/oxidraft_io" }
 oxidraft_ui = { path = "crates/oxidraft_ui" }
-egui = "0.34"
-eframe = "0.34"
+egui = "0.35"
+eframe = "0.35"
 robust = "1"
 rfd = "0.17"
 fontdb = "0.23"
@@ -42,7 +42,7 @@ svg2pdf = "0.13"
 winresource = "0.1"
 rayon = "1"
 proptest = "1"
-criterion = "0.5"
+criterion = "0.8"
 
 # Lints applied across the whole workspace. The geometry kernel and everything
 # built on it are 100% safe Rust — forbid `unsafe` so that stays true.

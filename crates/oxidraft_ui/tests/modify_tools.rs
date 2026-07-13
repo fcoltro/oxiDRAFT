@@ -610,7 +610,6 @@ fn con_pick_symmetric_needs_three_picks() {
 
 #[test]
 fn dof_status_reports_fully_constrained_and_flashes_conflicts() {
-    use oxidraft_document::ConstraintKind;
     let mut a = app();
     a.infer_constraints = false;
     let l = a.add_entity(line(0, 0, 4, 1));

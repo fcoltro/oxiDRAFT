@@ -1,8 +1,7 @@
 use oxidraft_ui::{AppState, UiState, draw_ui, egui};
 
-/// Same driver pattern as command_toast.rs / text_focus.rs: a real ctx.run()
-/// over the whole draw_ui pipeline, not just the dialog in isolation.
-#[allow(deprecated)] // Context::run / CentralPanel::show: fine for a synchronous test driver
+/// Same driver pattern as command_toast.rs / text_focus.rs: a real pass over
+/// the whole draw_ui pipeline, not just the dialog in isolation.
 fn frame(ctx: &egui::Context, app: &mut AppState, ui_state: &mut UiState) {
     let raw = egui::RawInput {
         screen_rect: Some(egui::Rect::from_min_size(
@@ -11,11 +10,17 @@ fn frame(ctx: &egui::Context, app: &mut AppState, ui_state: &mut UiState) {
         )),
         ..Default::default()
     };
-    let _ = ctx.run(raw, |ctx| {
-        egui::CentralPanel::default().show(ctx, |ui| {
-            draw_ui(ui, app, ui_state);
-        });
+    let _ = ctx.run_ui(raw, |ui| {
+        draw_ui(ui, app, ui_state);
     });
+}
+
+/// The pinned `id` given to the Plot `Window` in `chrome::plot_dialog`. Since
+/// egui 0.35 a `Window`'s auto-derived area id comes from `Atoms::text()`
+/// (an `Option<Cow<str>>`), not the bare title, so the dialog carries an
+/// explicit id and the tests look it up by that same id.
+fn plot_window_id() -> egui::Id {
+    egui::Id::new("plot_dialog_window")
 }
 
 /// Reproduces the File > Plot... menu action (sets the same AppState flag
@@ -29,7 +34,7 @@ fn setting_the_open_plot_flag_shows_the_plot_window() {
 
     frame(&ctx, &mut app, &mut ui_state);
     assert!(
-        ctx.memory(|m| m.area_rect(egui::Id::new("Plot"))).is_none(),
+        ctx.memory(|m| m.area_rect(plot_window_id())).is_none(),
         "Plot dialog should be closed by default"
     );
 
@@ -38,7 +43,7 @@ fn setting_the_open_plot_flag_shows_the_plot_window() {
     frame(&ctx, &mut app, &mut ui_state);
 
     assert!(
-        ctx.memory(|m| m.area_rect(egui::Id::new("Plot"))).is_some(),
+        ctx.memory(|m| m.area_rect(plot_window_id())).is_some(),
         "Plot dialog should be visible once plot_dialog_open is set"
     );
 }
@@ -53,7 +58,7 @@ fn a_finished_window_pick_reopens_the_plot_dialog() {
     let mut ui_state = UiState::default();
 
     frame(&ctx, &mut app, &mut ui_state);
-    assert!(ctx.memory(|m| m.area_rect(egui::Id::new("Plot"))).is_none());
+    assert!(ctx.memory(|m| m.area_rect(plot_window_id())).is_none());
 
     // What apply_tool_event leaves behind after the second corner click.
     app.plot_window = Some((0.0, 0.0, 40.0, 30.0));
@@ -62,7 +67,7 @@ fn a_finished_window_pick_reopens_the_plot_dialog() {
     frame(&ctx, &mut app, &mut ui_state);
 
     assert!(
-        ctx.memory(|m| m.area_rect(egui::Id::new("Plot"))).is_some(),
+        ctx.memory(|m| m.area_rect(plot_window_id())).is_some(),
         "the dialog must reopen after the canvas pick"
     );
     assert!(

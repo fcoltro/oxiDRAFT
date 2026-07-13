@@ -1,7 +1,6 @@
 use oxidraft_document::EntityKind;
 use oxidraft_ui::{AppState, UiState, draw_ui, egui};
 
-#[allow(deprecated)]
 fn frame(
     ctx: &egui::Context,
     app: &mut AppState,
@@ -16,10 +15,8 @@ fn frame(
         events,
         ..Default::default()
     };
-    let _ = ctx.run(raw, |ctx| {
-        egui::CentralPanel::default().show(ctx, |ui| {
-            draw_ui(ui, app, ui_state);
-        });
+    let _ = ctx.run_ui(raw, |ui| {
+        draw_ui(ui, app, ui_state);
     });
 }
 
