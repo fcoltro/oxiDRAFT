@@ -15,7 +15,7 @@ members = [
 # Shared package metadata — every crate inherits these via `field.workspace = true`,
 # so the version/edition/license are set in one place at release time.
 [workspace.package]
-version = "0.3.1-alpha"
+version = "0.3.2-alpha"
 edition = "2024"
 license = "GPL-3.0-or-later"
 publish = false
