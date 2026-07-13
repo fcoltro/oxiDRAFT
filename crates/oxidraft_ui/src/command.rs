@@ -286,7 +286,8 @@ pub fn parse_command(input: &str) -> Command {
         "COLLINEAR" | "COLL" | "GCCOLLINEAR" => Command::Constrain(ConstraintKind::Collinear),
         "EQUALRADIUS" | "EQR" | "GCEQUALRADIUS" => Command::Constrain(ConstraintKind::EqualRadius),
         "MIDPOINT" | "MID" | "GCMID" => Command::Constrain(ConstraintKind::Midpoint),
-        "POINTONLINE" | "POL" | "GCPOL" => Command::Constrain(ConstraintKind::PointOnLine),
+        // `POL` is already the Polygon alias, so point-on-line uses PTL/GCPOL.
+        "POINTONLINE" | "PTL" | "GCPOL" => Command::Constrain(ConstraintKind::PointOnLine),
         "POINTONCIRCLE" | "POC" | "GCPOC" => Command::Constrain(ConstraintKind::PointOnCircle),
         "SYMMETRIC" | "SYM" | "GCSYM" | "GCSYMMETRIC" => {
             Command::Constrain(ConstraintKind::Symmetric)
@@ -367,6 +368,11 @@ mod tests {
         assert!(matches!(
             parse_command("POL 6"),
             Command::Activate(Tool::Polygon { sides: Some(6), .. })
+        ));
+        // POL belongs to Polygon; point-on-line uses PTL so it can't shadow.
+        assert!(matches!(
+            parse_command("PTL"),
+            Command::Constrain(ConstraintKind::PointOnLine)
         ));
         assert!(matches!(
             parse_command("SPLINE"),

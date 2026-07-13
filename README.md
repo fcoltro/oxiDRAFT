@@ -154,7 +154,7 @@ length), `EQR` (equal radius), `CONC` (concentric), `TANCON` (tangent),
 `RADCON` · `DIACON` (drive a radius / diameter) and `LENCON` (drive a line's
 length). The value commands take an optional number — `RADCON 2.5`, `LENCON
 40` — or lock the current value when bare. The point relations `COI`
-(coincident/weld), `MID` (midpoint), `POL` (point on line), `POC` (point on
+(coincident/weld), `MID` (midpoint), `PTL` (point on line), `POC` (point on
 circle) and `SYM` (symmetric) pick their points on canvas. `BLOCK` locks the
 selection into a rigid group; `FIX` pins it in place; `UNCON` drops every
 constraint on the selection.
