@@ -1291,6 +1291,14 @@ pub fn solve_chamfer(
     dist_a: f64,
     dist_b: f64,
 ) -> Option<ChamferSolution> {
+    // pa/pb are placed at `corner + dir * dist`, walking *away* from the
+    // corner along each edge; a non-positive distance either does nothing
+    // (0.0) or walks backward through the corner, and trim_entity_for_corner
+    // then extends the edge the wrong way instead of cutting it. solve_fillet
+    // already rejects a non-positive radius the same way.
+    if !(dist_a > 0.0 && dist_b > 0.0) {
+        return None;
+    }
     let (la, lb) = match (a, b) {
         (CornerEdge::Line { p0: a0, p1: a1 }, CornerEdge::Line { p0: b0, p1: b1 }) => {
             ((a0, a1), (b0, b1))
@@ -3140,6 +3148,54 @@ mod tests {
                     && x0.abs() < 1e-6
                     && (y0 - 3.0).abs() < 1e-6);
             assert!(ok, "chamfer endpoints ({x0},{y0})-({x1},{y1})");
+        } else {
+            panic!()
+        }
+    }
+
+    #[test]
+    fn chamfer_rejects_non_positive_distances() {
+        let mut doc = Document::new();
+        let a = draw::line(&mut doc, pt(10, 0), pt(0, 0));
+        let b = draw::line(&mut doc, pt(0, 0), pt(0, 10));
+        assert!(
+            chamfer(&mut doc, a, b, 0.0, 3.0).is_none(),
+            "a zero distance must not move either line"
+        );
+        assert!(
+            chamfer(&mut doc, a, b, -3.0, 3.0).is_none(),
+            "a negative distance must not extend the line backward through the corner"
+        );
+        // Neither rejected call should have mutated the source lines.
+        if let Curve::Line(l) = doc.get(a).unwrap().as_curve().unwrap() {
+            assert_eq!(l.p0, pt(10, 0));
+            assert_eq!(l.p1, pt(0, 0));
+        } else {
+            panic!()
+        }
+    }
+
+    #[test]
+    fn chamfer_poly_corner_rejects_non_positive_distance() {
+        let mut doc = Document::new();
+        let id = square_poly(&mut doc);
+        assert!(
+            !chamfer_poly_corner(&mut doc, id, 0, 0.0),
+            "a zero distance must be rejected"
+        );
+        assert!(
+            !chamfer_poly_corner(&mut doc, id, 0, -1.0),
+            "a negative distance must be rejected"
+        );
+        let segs = poly_segments(&doc, id);
+        assert_eq!(
+            segs.len(),
+            4,
+            "a rejected chamfer must not splice in a bevel"
+        );
+        if let Curve::Line(l) = &segs[0] {
+            assert_eq!(l.p0, pt(0, 0));
+            assert_eq!(l.p1, pt(4, 0));
         } else {
             panic!()
         }
