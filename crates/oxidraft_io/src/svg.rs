@@ -102,7 +102,7 @@ fn dimension_to_svg(
             out,
             "  <text x=\"{tx:.6}\" y=\"{ty:.6}\" font-size=\"{:.6}\" fill=\"{stroke}\" text-anchor=\"middle\"{transform}>{}</text>",
             t.height,
-            xml_escape(&t.content)
+            text_content_markup(&t.content, tx, t.height * 1.2)
         );
     }
     out
@@ -224,13 +224,12 @@ fn entity_to_svg(
             ..
         } => {
             let (x, y) = anchor.to_f64();
+            let (sx, sy) = (fx(x), fy(y));
             Some(format!(
-                "  <text x=\"{:.6}\" y=\"{:.6}\" font-size=\"{:.6}\" fill=\"{}\">{}</text>",
-                fx(x),
-                fy(y),
+                "  <text x=\"{sx:.6}\" y=\"{sy:.6}\" font-size=\"{:.6}\" fill=\"{}\">{}</text>",
                 height,
                 stroke,
-                xml_escape(content)
+                text_content_markup(content, sx, *height * 1.2)
             ))
         }
         EntityKind::Hatch {
@@ -381,6 +380,25 @@ fn xml_escape(s: &str) -> String {
     s.replace('&', "&amp;")
         .replace('<', "&lt;")
         .replace('>', "&gt;")
+}
+
+/// Renders text content as SVG markup, splitting embedded newlines into one
+/// `<tspan>` per line so multi-line content doesn't collapse onto one line
+/// (SVG has no notion of a literal line break inside plain character data).
+fn text_content_markup(content: &str, x: f64, line_height: f64) -> String {
+    if !content.contains('\n') {
+        return xml_escape(content);
+    }
+    let mut out = String::new();
+    for (i, line) in content.split('\n').enumerate() {
+        let dy = if i == 0 { 0.0 } else { line_height };
+        let _ = write!(
+            out,
+            "<tspan x=\"{x:.6}\" dy=\"{dy:.6}\">{}</tspan>",
+            xml_escape(line)
+        );
+    }
+    out
 }
 
 pub fn import_svg(svg: &str) -> Document {
@@ -1169,6 +1187,30 @@ mod tests {
         assert!(svg.contains("<svg"));
         assert!(svg.contains("<line"));
         assert!(svg.contains("</svg>"));
+    }
+
+    #[test]
+    fn exports_multiline_text_as_one_tspan_per_line() {
+        let mut doc = Document::new();
+        doc.add(EntityKind::Text {
+            anchor: pt(0, 0),
+            content: "line one\nline two".into(),
+            height: 2.5,
+            rotation: 0.0,
+            font: None,
+        });
+        let svg = export_svg(&doc);
+        assert_eq!(
+            svg.matches("<tspan").count(),
+            2,
+            "each source line should become its own tspan: {svg}"
+        );
+        assert!(svg.contains(">line one</tspan>"));
+        assert!(svg.contains(">line two</tspan>"));
+        assert!(
+            !svg.contains("line one\nline two"),
+            "content must not appear as a single unbroken text node"
+        );
     }
 
     #[test]
