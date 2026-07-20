@@ -22,7 +22,12 @@ impl AppState {
                         .map(|e| e.id)
                         .filter(|&i| i != id && i != self.origin_id)
                         .collect();
-                    edit::trim(&mut self.document, id, &cutters, px, py);
+                    // edit::trim returns `vec![id]` unchanged exactly when the
+                    // pick found no valid span to remove (TrimOutcome::NoOp);
+                    // every other outcome removes or replaces `id`.
+                    if edit::trim(&mut self.document, id, &cutters, px, py) == vec![id] {
+                        self.history.discard_last();
+                    }
                     self.selection.clear();
                 }
                 true
@@ -276,6 +281,8 @@ impl AppState {
                                     edit::fillet(&mut self.document, a, id, radius, px, py)
                                 {
                                     self.record_corner_constraints([a, id], arc, true);
+                                } else {
+                                    self.history.discard_last();
                                 }
                             }
                             self.tool = Tool::Fillet {
@@ -303,6 +310,8 @@ impl AppState {
                                     edit::chamfer(&mut self.document, a, id, dist, dist)
                                 {
                                     self.record_corner_constraints([a, id], conn, false);
+                                } else {
+                                    self.history.discard_last();
                                 }
                             }
                             self.tool = Tool::Chamfer { dist, first: None };
