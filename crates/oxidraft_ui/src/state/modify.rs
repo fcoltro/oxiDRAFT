@@ -435,8 +435,11 @@ impl AppState {
                         let dx = px - bp.x;
                         let dy = py - bp.y;
                         self.history.snapshot(&self.document);
-                        edit::stretch(&mut self.document, &ids, window, dx, dy);
-                        oxidraft_cad::resolve_after_transform(&mut self.document, &ids);
+                        if edit::stretch(&mut self.document, &ids, window, dx, dy) {
+                            oxidraft_cad::resolve_after_transform(&mut self.document, &ids);
+                        } else {
+                            self.history.discard_last();
+                        }
                         self.tool = Tool::Stretch {
                             c1: None,
                             c2: None,

@@ -1653,21 +1653,27 @@ fn arc_point(arc: &CircularArc, angle: f64) -> Point2d {
     )
 }
 
+/// Nudges every control point of `ids` that falls inside `window` by
+/// `(dx, dy)`. Returns whether anything was actually inside the window (and
+/// so the document changed) — a caller doing its own undo bookkeeping needs
+/// this to avoid recording a snapshot for a no-op drag.
 pub fn stretch(
     doc: &mut Document,
     ids: &[EntityId],
     window: (f64, f64, f64, f64),
     dx: f64,
     dy: f64,
-) {
-    if !(dx.is_finite() && dy.is_finite()) {
-        return;
+) -> bool {
+    if !(dx.is_finite() && dy.is_finite()) || (dx == 0.0 && dy == 0.0) {
+        return false;
     }
     let (xmin, ymin, xmax, ymax) = window;
     let inside = |x: f64, y: f64| x >= xmin && x <= xmax && y >= ymin && y <= ymax;
+    let changed = std::cell::Cell::new(false);
     let nudge = |p: &Point2d| -> Point2d {
         let (x, y) = p.to_f64();
         if inside(x, y) {
+            changed.set(true);
             Point2d::from_f64(x + dx, y + dy)
         } else {
             *p
@@ -1745,6 +1751,7 @@ pub fn stretch(
             }
         }
     }
+    changed.get()
 }
 
 type LineData = ((f64, f64), (f64, f64));
