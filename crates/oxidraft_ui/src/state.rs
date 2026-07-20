@@ -4346,6 +4346,94 @@ mod tests {
     }
 
     #[test]
+    fn fillet_with_non_positive_radius_does_not_leave_a_phantom_undo_entry() {
+        let mut a = app();
+        a.run_command("LINE");
+        a.canvas_click(400.0, 300.0);
+        a.canvas_click(500.0, 300.0);
+        a.run_command("");
+        a.run_command("LINE");
+        a.canvas_click(500.0, 300.0);
+        a.canvas_click(500.0, 400.0);
+        a.run_command("");
+        let before = a.document.len();
+        let depth = a.history.undo_depth();
+
+        a.run_command("FILLET 0");
+        a.canvas_click(450.0, 300.0);
+        a.canvas_click(500.0, 350.0);
+
+        assert_eq!(
+            a.document.len(),
+            before,
+            "a non-positive radius fillets nothing"
+        );
+        assert_eq!(
+            a.history.undo_depth(),
+            depth,
+            "a rejected fillet must not leave a phantom undo entry"
+        );
+    }
+
+    #[test]
+    fn chamfer_of_parallel_lines_does_not_leave_a_phantom_undo_entry() {
+        let mut a = app();
+        // Parallel lines have no corner to chamfer — solve_chamfer must
+        // decline regardless of the requested distance.
+        a.run_command("LINE");
+        a.canvas_click(400.0, 300.0);
+        a.canvas_click(500.0, 300.0);
+        a.run_command("");
+        a.run_command("LINE");
+        a.canvas_click(400.0, 350.0);
+        a.canvas_click(500.0, 350.0);
+        a.run_command("");
+        let before = a.document.len();
+        let depth = a.history.undo_depth();
+
+        a.run_command("CHAMFER 3");
+        a.canvas_click(450.0, 300.0);
+        a.canvas_click(450.0, 350.0);
+
+        assert_eq!(
+            a.document.len(),
+            before,
+            "parallel lines have no corner to chamfer"
+        );
+        assert_eq!(
+            a.history.undo_depth(),
+            depth,
+            "a rejected chamfer must not leave a phantom undo entry"
+        );
+    }
+
+    #[test]
+    fn trim_no_op_does_not_leave_a_phantom_undo_entry() {
+        let mut a = app();
+        a.run_command("LINE");
+        a.canvas_click(400.0, 300.0);
+        a.canvas_click(500.0, 300.0);
+        a.run_command("");
+        let before = a.document.len();
+        let depth = a.history.undo_depth();
+
+        // A lone line has no cutters to trim against, so picking it is a no-op.
+        a.run_command("TRIM");
+        a.canvas_click(450.0, 300.0);
+
+        assert_eq!(
+            a.document.len(),
+            before,
+            "trim with no cutters removes nothing"
+        );
+        assert_eq!(
+            a.history.undo_depth(),
+            depth,
+            "a no-op trim must not leave a phantom undo entry"
+        );
+    }
+
+    #[test]
     fn exploding_a_non_polyline_does_not_leave_a_phantom_undo_entry() {
         let mut a = app();
         let id = a.add_entity(line(0, 0, 10, 0));

@@ -1020,7 +1020,16 @@ fn esc(s: &str) -> String {
     if s.is_empty() {
         return "_".into();
     }
-    s.replace('\\', "\\\\").replace(' ', "\\s")
+    let mut out = String::with_capacity(s.len());
+    for c in s.chars() {
+        match c {
+            '\\' => out.push_str("\\\\"),
+            ' ' => out.push_str("\\s"),
+            '\n' => out.push_str("\\n"),
+            _ => out.push(c),
+        }
+    }
+    out
 }
 
 fn dim_override(o: &Option<String>) -> String {
@@ -1041,7 +1050,36 @@ fn unesc(s: &str) -> String {
     if s == "_" {
         return String::new();
     }
-    s.replace("\\s", " ").replace("\\\\", "\\")
+    // A single left-to-right scan, consuming each backslash together with
+    // exactly the character after it. Doing this as a sequence of whole-string
+    // replace() passes instead (as this used to) is unsound: encoding a lone
+    // backslash immediately followed by a literal 's' or 'n' doubles the
+    // backslash, and a later pass matching "\s"/"\n" as a substring can then
+    // span the boundary between the doubled backslash and that literal
+    // letter — e.g. `esc("C:\notes.txt")` decodes back to `"C:\<NEWLINE>otes.txt"`
+    // instead of the original text. Scanning once and treating "backslash +
+    // next char" as an atomic unit removes the ambiguity entirely.
+    let mut out = String::with_capacity(s.len());
+    let mut chars = s.chars();
+    while let Some(c) = chars.next() {
+        if c != '\\' {
+            out.push(c);
+            continue;
+        }
+        match chars.next() {
+            Some('\\') => out.push('\\'),
+            Some('s') => out.push(' '),
+            Some('n') => out.push('\n'),
+            // Not one of ours: preserve both characters rather than
+            // silently dropping the backslash.
+            Some(other) => {
+                out.push('\\');
+                out.push(other);
+            }
+            None => out.push('\\'),
+        }
+    }
+    out
 }
 
 #[cfg(test)]
@@ -1575,6 +1613,49 @@ mod tests {
             |e| matches!(&e.kind, EntityKind::Text { content, .. } if content == "hello world"),
         );
         assert!(has_text);
+    }
+
+    #[test]
+    fn roundtrip_multiline_text_is_not_truncated() {
+        let mut doc = Document::new();
+        doc.add(EntityKind::Curve(Curve::Line(LineSeg::from_endpoints(
+            pt_i(0, 0),
+            pt_i(1, 1),
+        ))));
+        let id = doc.add(EntityKind::Text {
+            anchor: pt_i(1, 1),
+            content: "line one\nline two\nline three".into(),
+            height: 2.5,
+            rotation: 0.0,
+            font: None,
+        });
+
+        let doc2 = from_string(&to_string(&doc)).unwrap();
+        assert_eq!(
+            doc2.len(),
+            2,
+            "the second physical line must not be dropped as junk"
+        );
+        let text = doc2.get(id).unwrap();
+        assert!(
+            matches!(&text.kind, EntityKind::Text { content, .. } if content == "line one\nline two\nline three")
+        );
+    }
+
+    #[test]
+    fn esc_unesc_roundtrips_a_literal_backslash_next_to_an_escape_letter() {
+        // A whole-string-replace-chain decoder can misfire on content like
+        // this: encoding the lone backslash doubles it, and a later pass
+        // matching "\s"/"\n" as a substring can span the boundary between
+        // that doubled backslash and the literal letter that follows.
+        for text in [
+            "C:\\notes.txt",
+            "a\\sb",
+            "use \\n in regex",
+            "\\\\already escaped",
+        ] {
+            assert_eq!(unesc(&esc(text)), text, "roundtrip of {text:?}");
+        }
     }
 
     #[test]

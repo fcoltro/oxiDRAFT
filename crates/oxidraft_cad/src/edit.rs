@@ -1291,6 +1291,14 @@ pub fn solve_chamfer(
     dist_a: f64,
     dist_b: f64,
 ) -> Option<ChamferSolution> {
+    // pa/pb are placed at `corner + dir * dist`, walking *away* from the
+    // corner along each edge; a non-positive distance either does nothing
+    // (0.0) or walks backward through the corner, and trim_entity_for_corner
+    // then extends the edge the wrong way instead of cutting it. solve_fillet
+    // already rejects a non-positive radius the same way.
+    if !(dist_a > 0.0 && dist_b > 0.0) {
+        return None;
+    }
     let (la, lb) = match (a, b) {
         (CornerEdge::Line { p0: a0, p1: a1 }, CornerEdge::Line { p0: b0, p1: b1 }) => {
             ((a0, a1), (b0, b1))
@@ -1710,16 +1718,21 @@ pub fn stretch(
                     **pc = PolyCurve::new(segs);
                 }
                 EntityKind::Curve(Curve::Arc(arc)) => {
+                    // Endpoints must be read from the arc's original (pre-nudge)
+                    // center: computing them after moving the center would already
+                    // include the center's translation, and nudging them again on
+                    // top of that double-applies dx/dy whenever the whole arc (center
+                    // and both endpoints) sits inside the window.
+                    let start_pt = arc_point(arc, arc.start_angle);
+                    let end_pt = arc_point(arc, arc.end_angle);
                     if inside(arc.center.x, arc.center.y) {
                         arc.center = nudge(&arc.center);
                     }
-                    let start_pt = arc_point(arc, arc.start_angle);
                     if inside(start_pt.x, start_pt.y) {
                         let moved = nudge(&start_pt);
                         let a = (moved.y - arc.center.y).atan2(moved.x - arc.center.x);
                         *arc = crate::grips::with_angles(arc, a, arc.end_angle);
                     }
-                    let end_pt = arc_point(arc, arc.end_angle);
                     if inside(end_pt.x, end_pt.y) {
                         let moved = nudge(&end_pt);
                         let a = (moved.y - arc.center.y).atan2(moved.x - arc.center.x);
@@ -3148,6 +3161,54 @@ mod tests {
     }
 
     #[test]
+    fn chamfer_rejects_non_positive_distances() {
+        let mut doc = Document::new();
+        let a = draw::line(&mut doc, pt(10, 0), pt(0, 0));
+        let b = draw::line(&mut doc, pt(0, 0), pt(0, 10));
+        assert!(
+            chamfer(&mut doc, a, b, 0.0, 3.0).is_none(),
+            "a zero distance must not move either line"
+        );
+        assert!(
+            chamfer(&mut doc, a, b, -3.0, 3.0).is_none(),
+            "a negative distance must not extend the line backward through the corner"
+        );
+        // Neither rejected call should have mutated the source lines.
+        if let Curve::Line(l) = doc.get(a).unwrap().as_curve().unwrap() {
+            assert_eq!(l.p0, pt(10, 0));
+            assert_eq!(l.p1, pt(0, 0));
+        } else {
+            panic!()
+        }
+    }
+
+    #[test]
+    fn chamfer_poly_corner_rejects_non_positive_distance() {
+        let mut doc = Document::new();
+        let id = square_poly(&mut doc);
+        assert!(
+            !chamfer_poly_corner(&mut doc, id, 0, 0.0),
+            "a zero distance must be rejected"
+        );
+        assert!(
+            !chamfer_poly_corner(&mut doc, id, 0, -1.0),
+            "a negative distance must be rejected"
+        );
+        let segs = poly_segments(&doc, id);
+        assert_eq!(
+            segs.len(),
+            4,
+            "a rejected chamfer must not splice in a bevel"
+        );
+        if let Curve::Line(l) = &segs[0] {
+            assert_eq!(l.p0, pt(0, 0));
+            assert_eq!(l.p1, pt(4, 0));
+        } else {
+            panic!()
+        }
+    }
+
+    #[test]
     fn stretch_moves_only_windowed_endpoints() {
         let mut doc = Document::new();
         let id = draw::line(&mut doc, pt(0, 0), pt(10, 0));
@@ -3207,6 +3268,31 @@ mod tests {
         if let Curve::Arc(a) = doc.get(id).unwrap().as_curve().unwrap() {
             assert!((a.center.x - 3.0).abs() < 1e-6 && (a.center.y - 4.0).abs() < 1e-6);
             assert!((a.radius - 5.0).abs() < 1e-6);
+        } else {
+            panic!()
+        }
+    }
+
+    #[test]
+    fn stretch_arc_whole_arc_in_window_translates_rigidly() {
+        let mut doc = Document::new();
+        let id = draw::arc(&mut doc, pt(0, 0), 1.0, 0.0, std::f64::consts::FRAC_PI_2);
+        // Window encloses the center and both endpoints, as when a user
+        // rubber-band-selects the whole arc and drags it.
+        stretch(&mut doc, &[id], (-2.0, -2.0, 2.0, 2.0), 0.5, 0.3);
+        if let Curve::Arc(a) = doc.get(id).unwrap().as_curve().unwrap() {
+            assert!((a.center.x - 0.5).abs() < 1e-6 && (a.center.y - 0.3).abs() < 1e-6);
+            assert!((a.radius - 1.0).abs() < 1e-6);
+            assert!(
+                a.start_angle.abs() < 1e-6,
+                "start angle must be unchanged by a rigid translation: {}",
+                a.start_angle
+            );
+            assert!(
+                (a.end_angle - std::f64::consts::FRAC_PI_2).abs() < 1e-6,
+                "end angle must be unchanged by a rigid translation: {}",
+                a.end_angle
+            );
         } else {
             panic!()
         }
