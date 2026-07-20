@@ -1704,16 +1704,21 @@ pub fn stretch(
                     **pc = PolyCurve::new(segs);
                 }
                 EntityKind::Curve(Curve::Arc(arc)) => {
+                    // Endpoints must be read from the arc's original (pre-nudge)
+                    // center: computing them after moving the center would already
+                    // include the center's translation, and nudging them again on
+                    // top of that double-applies dx/dy whenever the whole arc (center
+                    // and both endpoints) sits inside the window.
+                    let start_pt = arc_point(arc, arc.start_angle);
+                    let end_pt = arc_point(arc, arc.end_angle);
                     if inside(arc.center.x, arc.center.y) {
                         arc.center = nudge(&arc.center);
                     }
-                    let start_pt = arc_point(arc, arc.start_angle);
                     if inside(start_pt.x, start_pt.y) {
                         let moved = nudge(&start_pt);
                         let a = (moved.y - arc.center.y).atan2(moved.x - arc.center.x);
                         *arc = crate::grips::with_angles(arc, a, arc.end_angle);
                     }
-                    let end_pt = arc_point(arc, arc.end_angle);
                     if inside(end_pt.x, end_pt.y) {
                         let moved = nudge(&end_pt);
                         let a = (moved.y - arc.center.y).atan2(moved.x - arc.center.x);
@@ -3200,6 +3205,31 @@ mod tests {
         if let Curve::Arc(a) = doc.get(id).unwrap().as_curve().unwrap() {
             assert!((a.center.x - 3.0).abs() < 1e-6 && (a.center.y - 4.0).abs() < 1e-6);
             assert!((a.radius - 5.0).abs() < 1e-6);
+        } else {
+            panic!()
+        }
+    }
+
+    #[test]
+    fn stretch_arc_whole_arc_in_window_translates_rigidly() {
+        let mut doc = Document::new();
+        let id = draw::arc(&mut doc, pt(0, 0), 1.0, 0.0, std::f64::consts::FRAC_PI_2);
+        // Window encloses the center and both endpoints, as when a user
+        // rubber-band-selects the whole arc and drags it.
+        stretch(&mut doc, &[id], (-2.0, -2.0, 2.0, 2.0), 0.5, 0.3);
+        if let Curve::Arc(a) = doc.get(id).unwrap().as_curve().unwrap() {
+            assert!((a.center.x - 0.5).abs() < 1e-6 && (a.center.y - 0.3).abs() < 1e-6);
+            assert!((a.radius - 1.0).abs() < 1e-6);
+            assert!(
+                a.start_angle.abs() < 1e-6,
+                "start angle must be unchanged by a rigid translation: {}",
+                a.start_angle
+            );
+            assert!(
+                (a.end_angle - std::f64::consts::FRAC_PI_2).abs() < 1e-6,
+                "end angle must be unchanged by a rigid translation: {}",
+                a.end_angle
+            );
         } else {
             panic!()
         }
