@@ -2585,7 +2585,7 @@ dependencies = [
 
 [[package]]
 name = "oxidraft_app"
-version = "0.3.2-alpha"
+version = "0.3.3-alpha"
 dependencies = [
  "eframe",
  "oxidraft_geometry",
@@ -2595,7 +2595,7 @@ dependencies = [
 
 [[package]]
 name = "oxidraft_boolean"
-version = "0.3.2-alpha"
+version = "0.3.3-alpha"
 dependencies = [
  "criterion",
  "oxidraft_geometry",
@@ -2606,7 +2606,7 @@ dependencies = [
 
 [[package]]
 name = "oxidraft_cad"
-version = "0.3.2-alpha"
+version = "0.3.3-alpha"
 dependencies = [
  "oxidraft_boolean",
  "oxidraft_constraint",
@@ -2616,21 +2616,21 @@ dependencies = [
 
 [[package]]
 name = "oxidraft_constraint"
-version = "0.3.2-alpha"
+version = "0.3.3-alpha"
 dependencies = [
  "proptest",
 ]
 
 [[package]]
 name = "oxidraft_document"
-version = "0.3.2-alpha"
+version = "0.3.3-alpha"
 dependencies = [
  "oxidraft_geometry",
 ]
 
 [[package]]
 name = "oxidraft_geometry"
-version = "0.3.2-alpha"
+version = "0.3.3-alpha"
 dependencies = [
  "criterion",
  "proptest",
@@ -2638,7 +2638,7 @@ dependencies = [
 
 [[package]]
 name = "oxidraft_io"
-version = "0.3.2-alpha"
+version = "0.3.3-alpha"
 dependencies = [
  "oxidraft_document",
  "oxidraft_geometry",
@@ -2648,14 +2648,14 @@ dependencies = [
 
 [[package]]
 name = "oxidraft_spatial"
-version = "0.3.2-alpha"
+version = "0.3.3-alpha"
 dependencies = [
  "oxidraft_geometry",
 ]
 
 [[package]]
 name = "oxidraft_ui"
-version = "0.3.2-alpha"
+version = "0.3.3-alpha"
 dependencies = [
  "egui",
  "fontdb",
