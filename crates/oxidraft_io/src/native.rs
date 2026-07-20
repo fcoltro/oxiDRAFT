@@ -1020,7 +1020,9 @@ fn esc(s: &str) -> String {
     if s.is_empty() {
         return "_".into();
     }
-    s.replace('\\', "\\\\").replace(' ', "\\s")
+    s.replace('\\', "\\\\")
+        .replace(' ', "\\s")
+        .replace('\n', "\\n")
 }
 
 fn dim_override(o: &Option<String>) -> String {
@@ -1041,7 +1043,9 @@ fn unesc(s: &str) -> String {
     if s == "_" {
         return String::new();
     }
-    s.replace("\\s", " ").replace("\\\\", "\\")
+    s.replace("\\n", "\n")
+        .replace("\\s", " ")
+        .replace("\\\\", "\\")
 }
 
 #[cfg(test)]
@@ -1575,6 +1579,33 @@ mod tests {
             |e| matches!(&e.kind, EntityKind::Text { content, .. } if content == "hello world"),
         );
         assert!(has_text);
+    }
+
+    #[test]
+    fn roundtrip_multiline_text_is_not_truncated() {
+        let mut doc = Document::new();
+        doc.add(EntityKind::Curve(Curve::Line(LineSeg::from_endpoints(
+            pt_i(0, 0),
+            pt_i(1, 1),
+        ))));
+        let id = doc.add(EntityKind::Text {
+            anchor: pt_i(1, 1),
+            content: "line one\nline two\nline three".into(),
+            height: 2.5,
+            rotation: 0.0,
+            font: None,
+        });
+
+        let doc2 = from_string(&to_string(&doc)).unwrap();
+        assert_eq!(
+            doc2.len(),
+            2,
+            "the second physical line must not be dropped as junk"
+        );
+        let text = doc2.get(id).unwrap();
+        assert!(
+            matches!(&text.kind, EntityKind::Text { content, .. } if content == "line one\nline two\nline three")
+        );
     }
 
     #[test]
