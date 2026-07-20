@@ -162,6 +162,13 @@ fn polyline_vertices(poly: &PolyCurve) -> Option<Vec<Point2d>> {
         }
         vs.push(l.p1);
     }
+    // A closed polyline's last vertex coincides with its first; collapse
+    // them into one grip so dragging that corner moves both segments that
+    // meet there, instead of leaving the last segment's endpoint behind
+    // and tearing the shape open (see move_polyline_vertex).
+    if vs.len() >= 2 && vs[0].dist_f64(vs.last().unwrap()) < 1e-6 {
+        vs.pop();
+    }
     Some(vs)
 }
 
@@ -539,18 +546,28 @@ pub(crate) fn set_poly_ctrl(seg: &mut Curve, ci: u8, to: Point2d) {
 
 fn move_polyline_vertex(poly: &PolyCurve, k: usize, to: Point2d) -> Option<PolyCurve> {
     let n = poly.segments.len();
-    if n == 0 || k > n {
+    if n == 0 {
         return None;
     }
     let mut verts = polyline_vertices(poly)?;
     if k >= verts.len() {
         return None;
     }
+    // polyline_vertices() collapses a closed polyline's coincident first/last
+    // vertex into one entry, so it has n entries (closed) instead of n + 1
+    // (open); rebuild the missing closing segment in that case.
+    let closed = verts.len() == n;
     verts[k] = to;
-    let segments = verts
+    let mut segments: Vec<Curve> = verts
         .windows(2)
         .map(|w| Curve::Line(LineSeg::from_endpoints(w[0], w[1])))
         .collect();
+    if closed {
+        segments.push(Curve::Line(LineSeg::from_endpoints(
+            *verts.last().unwrap(),
+            verts[0],
+        )));
+    }
     Some(PolyCurve::new(segments))
 }
 
@@ -932,6 +949,46 @@ mod tests {
             assert_eq!(l1.p0, Point2d::from_f64(1.0, 5.0));
             assert_eq!(l0.p0, Point2d::from_f64(0.0, 0.0));
             assert_eq!(l1.p1, Point2d::from_f64(2.0, 0.0));
+        } else {
+            panic!("expected polyline");
+        }
+    }
+
+    #[test]
+    fn closed_polyline_vertex_grip_keeps_the_shape_closed() {
+        let poly = PolyCurve::new(vec![
+            Curve::Line(LineSeg::from_endpoints(
+                Point2d::from_f64(0.0, 0.0),
+                Point2d::from_f64(4.0, 0.0),
+            )),
+            Curve::Line(LineSeg::from_endpoints(
+                Point2d::from_f64(4.0, 0.0),
+                Point2d::from_f64(4.0, 4.0),
+            )),
+            Curve::Line(LineSeg::from_endpoints(
+                Point2d::from_f64(4.0, 4.0),
+                Point2d::from_f64(0.0, 4.0),
+            )),
+            Curve::Line(LineSeg::from_endpoints(
+                Point2d::from_f64(0.0, 4.0),
+                Point2d::from_f64(0.0, 0.0),
+            )),
+        ]);
+        let start = EntityKind::Curve(Curve::Poly(Box::new(poly)));
+        let g = grips_for(&start);
+        // The coincident first/last corner must be a single grip, not two.
+        assert_eq!(g.len(), 4);
+        assert!(matches!(g[0].role, GripRole::Vertex(0)));
+
+        let to = Point2d::from_f64(1.0, 1.0);
+        if let EntityKind::Curve(Curve::Poly(p)) = apply_grip(&start, &g[0], to) {
+            let first = p.segments.first().unwrap().as_line().unwrap();
+            let last = p.segments.last().unwrap().as_line().unwrap();
+            assert_eq!(first.p0, to, "dragged corner must move the first segment");
+            assert_eq!(
+                last.p1, to,
+                "dragged corner must also move the closing segment's endpoint, not tear the shape open"
+            );
         } else {
             panic!("expected polyline");
         }
