@@ -485,10 +485,51 @@ fn parse_mtext(rec: &[Pair]) -> Vec<EntityKind> {
 }
 
 /// Strips the most common MTEXT inline formatting so plain text survives.
+///
+/// A single left-to-right scan, consuming each backslash together with
+/// exactly the character after it. Doing this as a sequence of whole-string
+/// replace() passes instead is unsound: mtext_escape() encoding a lone
+/// backslash immediately followed by a literal 'P' doubles the backslash,
+/// and a later pass matching "\P" as a substring can then span the boundary
+/// between that doubled backslash and the literal letter — e.g. a Text
+/// entity containing "C:\Program Files\..." would decode back with an
+/// injected newline and a dropped 'P'. Unrecognized escapes (MTEXT has many
+/// more inline formatting codes than the handful decoded here) are left
+/// untouched, same as before.
 fn strip_mtext(s: &str) -> String {
-    s.replace("\\P", "\n")
-        .replace("\\~", " ")
-        .replace("\\\\", "\\")
+    let mut out = String::with_capacity(s.len());
+    let mut chars = s.chars();
+    while let Some(c) = chars.next() {
+        if c != '\\' {
+            out.push(c);
+            continue;
+        }
+        match chars.next() {
+            Some('P') => out.push('\n'),
+            Some('~') => out.push(' '),
+            Some('\\') => out.push('\\'),
+            Some(other) => {
+                out.push('\\');
+                out.push(other);
+            }
+            None => out.push('\\'),
+        }
+    }
+    out
+}
+
+/// Escapes plain text for use as an MTEXT group-1 value, the inverse of
+/// [`strip_mtext`]'s `\P`/`\\` handling.
+fn mtext_escape(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    for c in s.chars() {
+        match c {
+            '\\' => out.push_str("\\\\"),
+            '\n' => out.push_str("\\P"),
+            _ => out.push(c),
+        }
+    }
+    out
 }
 
 fn bulge_arc(x1: f64, y1: f64, x2: f64, y2: f64, bulge: f64) -> Curve {
@@ -606,17 +647,33 @@ fn dimension_to_dxf(
         w(21, &fmt(b.y));
     }
     if let Some(t) = &prims.text {
-        w(0, "TEXT");
-        emit_layer(w, layer, color, line_type);
-        w(10, &fmt(t.anchor.x));
-        w(20, &fmt(t.anchor.y));
-        w(40, &fmt(t.height));
-        w(72, "1");
-        w(73, "2");
-        w(11, &fmt(t.anchor.x));
-        w(21, &fmt(t.anchor.y));
-        w(1, &t.content);
-        w(50, &fmt(t.rotation_deg));
+        if t.content.contains('\n') {
+            // Plain TEXT is a single DXF line per group value, so a raw
+            // newline here would split one entity record across two
+            // physical lines and corrupt everything written after it.
+            // MTEXT is line-oriented the same way DXF itself is, but
+            // represents line breaks with the in-string `\P` token instead.
+            w(0, "MTEXT");
+            emit_layer(w, layer, color, line_type);
+            w(10, &fmt(t.anchor.x));
+            w(20, &fmt(t.anchor.y));
+            w(40, &fmt(t.height));
+            w(71, "5"); // middle-center, matching TEXT's center/middle justification above
+            w(50, &fmt(t.rotation_deg));
+            w(1, &mtext_escape(&t.content));
+        } else {
+            w(0, "TEXT");
+            emit_layer(w, layer, color, line_type);
+            w(10, &fmt(t.anchor.x));
+            w(20, &fmt(t.anchor.y));
+            w(40, &fmt(t.height));
+            w(72, "1");
+            w(73, "2");
+            w(11, &fmt(t.anchor.x));
+            w(21, &fmt(t.anchor.y));
+            w(1, &t.content);
+            w(50, &fmt(t.rotation_deg));
+        }
     }
 }
 
@@ -728,13 +785,27 @@ fn write_entity(
             ..
         } => {
             let (x, y) = anchor.to_f64();
-            w(0, "TEXT");
-            emit_layer(w, layer, color, line_type);
-            w(10, &fmt(x));
-            w(20, &fmt(y));
-            w(40, &fmt(*height));
-            w(1, content);
-            w(50, &fmt(rotation / DEG));
+            if content.contains('\n') {
+                // See the matching comment in dimension_to_dxf: TEXT can't
+                // hold an embedded newline without corrupting the file, so
+                // fall back to MTEXT, which encodes line breaks as `\P`.
+                w(0, "MTEXT");
+                emit_layer(w, layer, color, line_type);
+                w(10, &fmt(x));
+                w(20, &fmt(y));
+                w(40, &fmt(*height));
+                w(71, "1"); // top-left, matching TEXT's default justification above
+                w(50, &fmt(rotation / DEG));
+                w(1, &mtext_escape(content));
+            } else {
+                w(0, "TEXT");
+                emit_layer(w, layer, color, line_type);
+                w(10, &fmt(x));
+                w(20, &fmt(y));
+                w(40, &fmt(*height));
+                w(1, content);
+                w(50, &fmt(rotation / DEG));
+            }
         }
         EntityKind::Hatch {
             boundary, holes, ..
@@ -930,6 +1001,68 @@ mod tests {
             !entities_section.contains("6\n"),
             "ByLayer entity must not emit an explicit code-6 line type"
         );
+    }
+
+    #[test]
+    fn multiline_text_exports_as_mtext_and_roundtrips() {
+        let mut doc = Document::new();
+        doc.add(EntityKind::Curve(Curve::Line(LineSeg::from_endpoints(
+            pt(0, 0),
+            pt(1, 1),
+        ))));
+        doc.add(EntityKind::Text {
+            anchor: pt(2, 3),
+            content: "line one\nline two\nline three".into(),
+            height: 2.5,
+            rotation: 0.0,
+            font: None,
+        });
+        let dxf = export_dxf(&doc);
+        // A single-line TEXT entity would split this record across
+        // multiple physical lines and corrupt every group code that
+        // follows; MTEXT must be used instead.
+        assert!(
+            dxf.contains("0\nMTEXT\n"),
+            "multi-line text must export as MTEXT:\n{dxf}"
+        );
+        assert!(
+            !dxf.contains("0\nTEXT\n8\n0\n10\n2"),
+            "must not emit a corrupt single-line TEXT record"
+        );
+
+        let doc2 = import_dxf(&dxf);
+        assert_eq!(
+            doc2.len(),
+            2,
+            "the corrupted tail must not surface as a bogus extra entity"
+        );
+        let has_text = doc2.iter().any(|e| {
+            matches!(&e.kind, EntityKind::Text { content, .. } if content == "line one\nline two\nline three")
+        });
+        assert!(
+            has_text,
+            "multi-line content must survive the roundtrip intact"
+        );
+    }
+
+    #[test]
+    fn mtext_escape_strip_mtext_roundtrips_a_backslash_next_to_p() {
+        // A whole-string-replace-chain implementation can misfire on
+        // content like this: encoding the lone backslash doubles it, and a
+        // later pass matching "\P" as a substring can span the boundary
+        // between that doubled backslash and the literal 'P' that follows —
+        // exactly what an ordinary Windows path contains.
+        for text in [
+            "C:\\Program Files\\oxiDRAFT",
+            "line one\nline two",
+            "\\\\already escaped",
+        ] {
+            assert_eq!(
+                strip_mtext(&mtext_escape(text)),
+                text,
+                "roundtrip of {text:?}"
+            );
+        }
     }
 
     #[test]
