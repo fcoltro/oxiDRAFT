@@ -338,6 +338,11 @@ pub struct GripDrag {
     pub entity_id: EntityId,
     pub grip: Grip,
     pub start_kind: EntityKind,
+    /// Set once apply_grip_drag() has been fed a cursor position meaningfully
+    /// different from the grip's starting point — lets end_grip_drag() tell
+    /// a real edit apart from a click on the grip immediately followed by
+    /// another click with no movement in between.
+    pub moved: bool,
 }
 
 #[derive(Clone, Debug)]
@@ -1673,6 +1678,11 @@ impl AppState {
             }
             new_ids.extend(group);
         }
+        if new_ids.is_empty() {
+            self.selection = ids;
+            self.history.discard_last();
+            return;
+        }
         let survived: Vec<_> = ids
             .into_iter()
             .filter(|&id| self.document.get(id).is_some())
@@ -2342,6 +2352,8 @@ impl AppState {
         }
         if !new_ids.is_empty() {
             self.selection = new_ids;
+        } else {
+            self.history.discard_last();
         }
     }
 
@@ -2650,6 +2662,7 @@ impl AppState {
                 entity_id: id,
                 grip,
                 start_kind: e.kind.clone(),
+                moved: false,
             });
         }
     }
@@ -2661,6 +2674,11 @@ impl AppState {
         let to = Point2d::from_f64(cursor.0, cursor.1);
         let edited = apply_grip(&drag.start_kind, &drag.grip, to);
         let id = drag.entity_id;
+        if drag.grip.world.dist_f64(&to) > 1e-9
+            && let Some(d) = self.interaction.grip_drag.as_mut()
+        {
+            d.moved = true;
+        }
         let prev_kind = self.document.get(id).map(|e| e.kind.clone());
         let prev_constraints = self.document.constraints.clone();
         if let Some(e) = self.document.get_mut(id) {
@@ -2791,7 +2809,11 @@ impl AppState {
     }
 
     pub fn end_grip_drag(&mut self) {
-        self.interaction.grip_drag = None;
+        if let Some(drag) = self.interaction.grip_drag.take()
+            && !drag.moved
+        {
+            self.history.discard_last();
+        }
     }
 
     pub fn cancel_grip_drag(&mut self) {
@@ -4320,6 +4342,120 @@ mod tests {
             a.history.undo_depth(),
             depth,
             "declined commands snapshot nothing"
+        );
+    }
+
+    #[test]
+    fn exploding_a_non_polyline_does_not_leave_a_phantom_undo_entry() {
+        let mut a = app();
+        let id = a.add_entity(line(0, 0, 10, 0));
+        a.selection = vec![id];
+        let before = a.document.len();
+        let depth = a.history.undo_depth();
+
+        a.explode_selection();
+
+        assert_eq!(
+            a.document.len(),
+            before,
+            "a plain line has nothing to explode"
+        );
+        assert_eq!(
+            a.history.undo_depth(),
+            depth,
+            "a no-op explode must not leave a phantom undo entry"
+        );
+    }
+
+    #[test]
+    fn outline_text_of_blank_content_does_not_leave_a_phantom_undo_entry() {
+        let mut a = app();
+        let id = a.add_entity(EntityKind::Text {
+            anchor: pt(0, 0),
+            content: "   ".into(),
+            height: 2.5,
+            rotation: 0.0,
+            font: None,
+        });
+        a.selection = vec![id];
+        let before = a.document.len();
+        let depth = a.history.undo_depth();
+
+        a.outline_text_selection();
+
+        assert_eq!(a.document.len(), before, "blank text has no glyph outlines");
+        assert_eq!(
+            a.history.undo_depth(),
+            depth,
+            "a no-op outline must not leave a phantom undo entry"
+        );
+    }
+
+    #[test]
+    fn stretch_missing_the_selection_does_not_leave_a_phantom_undo_entry() {
+        let mut a = app();
+        a.run_command("LINE");
+        a.canvas_click(400.0, 300.0);
+        a.canvas_click(500.0, 300.0);
+        a.run_command("");
+        let line_id = *a.document.order.last().unwrap();
+        a.selection = vec![line_id];
+        let before = line_of(&a, line_id);
+        let depth = a.history.undo_depth();
+
+        // A crossing window nowhere near the line's endpoints (c1, c2), then
+        // a base point and a non-zero drag (base, final): STRETCH must
+        // decline rather than record a no-op edit.
+        a.run_command("STRETCH");
+        a.canvas_click(10.0, 10.0);
+        a.canvas_click(30.0, 30.0);
+        a.canvas_click(50.0, 50.0);
+        a.canvas_click(60.0, 60.0);
+
+        assert_eq!(
+            (line_of(&a, line_id).p0, line_of(&a, line_id).p1),
+            (before.p0, before.p1),
+            "the window enclosed no endpoint"
+        );
+        assert_eq!(
+            a.history.undo_depth(),
+            depth,
+            "a no-op stretch must not leave a phantom undo entry"
+        );
+    }
+
+    #[test]
+    fn grip_drag_with_no_movement_does_not_leave_a_phantom_undo_entry() {
+        let mut a = app();
+        let id = a.add_entity(line(0, 0, 10, 0));
+        let grip = oxidraft_cad::grips_for(&a.document.get(id).unwrap().kind)[0];
+        let depth = a.history.undo_depth();
+
+        a.begin_grip_drag(id, grip);
+        a.end_grip_drag();
+
+        assert_eq!(
+            a.history.undo_depth(),
+            depth,
+            "picking up and releasing a grip with no movement must not leave a phantom undo entry"
+        );
+    }
+
+    #[test]
+    fn grip_drag_that_moves_records_one_undo_step() {
+        let mut a = app();
+        let id = a.add_entity(line(0, 0, 10, 0));
+        let grip = oxidraft_cad::grips_for(&a.document.get(id).unwrap().kind)[0];
+        let depth = a.history.undo_depth();
+
+        a.begin_grip_drag(id, grip);
+        a.apply_grip_drag((3.0, 4.0));
+        a.end_grip_drag();
+
+        assert_eq!(
+            a.history.undo_depth(),
+            depth + 1,
+            "a real drag must still record its undo step"
         );
     }
 
