@@ -485,16 +485,51 @@ fn parse_mtext(rec: &[Pair]) -> Vec<EntityKind> {
 }
 
 /// Strips the most common MTEXT inline formatting so plain text survives.
+///
+/// A single left-to-right scan, consuming each backslash together with
+/// exactly the character after it. Doing this as a sequence of whole-string
+/// replace() passes instead is unsound: mtext_escape() encoding a lone
+/// backslash immediately followed by a literal 'P' doubles the backslash,
+/// and a later pass matching "\P" as a substring can then span the boundary
+/// between that doubled backslash and the literal letter — e.g. a Text
+/// entity containing "C:\Program Files\..." would decode back with an
+/// injected newline and a dropped 'P'. Unrecognized escapes (MTEXT has many
+/// more inline formatting codes than the handful decoded here) are left
+/// untouched, same as before.
 fn strip_mtext(s: &str) -> String {
-    s.replace("\\P", "\n")
-        .replace("\\~", " ")
-        .replace("\\\\", "\\")
+    let mut out = String::with_capacity(s.len());
+    let mut chars = s.chars();
+    while let Some(c) = chars.next() {
+        if c != '\\' {
+            out.push(c);
+            continue;
+        }
+        match chars.next() {
+            Some('P') => out.push('\n'),
+            Some('~') => out.push(' '),
+            Some('\\') => out.push('\\'),
+            Some(other) => {
+                out.push('\\');
+                out.push(other);
+            }
+            None => out.push('\\'),
+        }
+    }
+    out
 }
 
 /// Escapes plain text for use as an MTEXT group-1 value, the inverse of
 /// [`strip_mtext`]'s `\P`/`\\` handling.
 fn mtext_escape(s: &str) -> String {
-    s.replace('\\', "\\\\").replace('\n', "\\P")
+    let mut out = String::with_capacity(s.len());
+    for c in s.chars() {
+        match c {
+            '\\' => out.push_str("\\\\"),
+            '\n' => out.push_str("\\P"),
+            _ => out.push(c),
+        }
+    }
+    out
 }
 
 fn bulge_arc(x1: f64, y1: f64, x2: f64, y2: f64, bulge: f64) -> Curve {
@@ -1008,6 +1043,26 @@ mod tests {
             has_text,
             "multi-line content must survive the roundtrip intact"
         );
+    }
+
+    #[test]
+    fn mtext_escape_strip_mtext_roundtrips_a_backslash_next_to_p() {
+        // A whole-string-replace-chain implementation can misfire on
+        // content like this: encoding the lone backslash doubles it, and a
+        // later pass matching "\P" as a substring can span the boundary
+        // between that doubled backslash and the literal 'P' that follows —
+        // exactly what an ordinary Windows path contains.
+        for text in [
+            "C:\\Program Files\\oxiDRAFT",
+            "line one\nline two",
+            "\\\\already escaped",
+        ] {
+            assert_eq!(
+                strip_mtext(&mtext_escape(text)),
+                text,
+                "roundtrip of {text:?}"
+            );
+        }
     }
 
     #[test]
