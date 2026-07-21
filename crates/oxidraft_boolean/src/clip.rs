@@ -1,10 +1,18 @@
+//! The polygon clipper: a Greiner–Hormann style boolean over tessellated
+//! polygon rings, using robust orientation predicates. The fallback path when
+//! the curve-preserving boolean declines a degenerate configuration.
+
 use oxidraft_geometry::{Point2d, point_segment_dist_sq};
 use robust::{Coord, orient2d};
 
+/// Which boolean operation the clipper performs.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum BoolOp {
+    /// Keep area in either polygon.
     Union,
+    /// Keep area in both polygons.
     Intersection,
+    /// Keep subject area not in the clip polygon.
     Difference,
 }
 
@@ -22,6 +30,9 @@ struct Node {
 
 const NONE: usize = usize::MAX;
 
+/// Clips `subject` polygon rings against `clip_poly` rings under `op`,
+/// returning the resulting rings. Rings are lists of vertices; a non-finite
+/// vertex makes a ring undefined and it is dropped.
 pub fn clip(subject: &[Vec<Point2d>], clip_poly: &[Vec<Point2d>], op: BoolOp) -> Vec<Vec<Point2d>> {
     // A ring with a non-finite vertex has no defined geometry, and NaN makes
     // the entry-marking parity below inconsistent — the traversal in `trace`

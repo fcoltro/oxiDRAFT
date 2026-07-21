@@ -1,10 +1,16 @@
+//! Welding a region's boundary loops: snapping near-coincident endpoints
+//! together so the loops are watertight before a boolean operation runs.
+
 use crate::region::Region;
 use oxidraft_geometry::{
     CubicBezier, Curve, CurveSegment, LineSeg, NurbsCurve, Point2d, PolyCurve, RationalBezier,
 };
 
+/// Default endpoint-snapping tolerance used when welding region boundaries.
 pub const WELD_TOL: f64 = 1e-6;
 
+/// Returns a copy of `r` with boundary vertices closer than `tol` snapped
+/// together, closing tiny gaps so the loops are watertight.
 pub fn weld_region(r: &Region, tol: f64) -> Region {
     Region::with_holes(
         weld_loop(&r.outer, tol),

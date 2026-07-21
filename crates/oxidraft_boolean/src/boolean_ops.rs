@@ -1,3 +1,8 @@
+//! The region boolean operations — union, intersection, difference, xor —
+//! returning a *set* of disjoint result regions. Each first tries a
+//! curve-preserving trim-and-stitch path (arcs stay arcs) and falls back to the
+//! tessellating clipper for degenerate configurations.
+
 use crate::clip::{BoolOp, clip};
 use crate::region::Region;
 use crate::weld::{WELD_TOL, weld_region};
@@ -13,6 +18,7 @@ use oxidraft_geometry::{Curve, CurveSegment, LineSeg, Point2d, tessellate_curve}
 // tangencies, vertex-only contacts — and those fall back to the tessellating
 // clipper, which resolves them by perturbation.
 
+/// The union of two regions — the area covered by either.
 pub fn union(a: &Region, b: &Region) -> Vec<Region> {
     let (a, b) = (scrubbed(a), scrubbed(b));
     let (a, b) = (&*a, &*b);
@@ -20,6 +26,7 @@ pub fn union(a: &Region, b: &Region) -> Vec<Region> {
         .unwrap_or_else(|| loops_to_regions(clip_regions(a, b, BoolOp::Union)))
 }
 
+/// The intersection of two regions — the area covered by both.
 pub fn intersection(a: &Region, b: &Region) -> Vec<Region> {
     let (a, b) = (scrubbed(a), scrubbed(b));
     let (a, b) = (&*a, &*b);
@@ -27,6 +34,7 @@ pub fn intersection(a: &Region, b: &Region) -> Vec<Region> {
         .unwrap_or_else(|| loops_to_regions(clip_regions(a, b, BoolOp::Intersection)))
 }
 
+/// The difference `a − b` — the part of `a` not covered by `b`.
 pub fn difference(a: &Region, b: &Region) -> Vec<Region> {
     let (a, b) = (scrubbed(a), scrubbed(b));
     let (a, b) = (&*a, &*b);
@@ -34,6 +42,7 @@ pub fn difference(a: &Region, b: &Region) -> Vec<Region> {
         .unwrap_or_else(|| loops_to_regions(clip_regions(a, b, BoolOp::Difference)))
 }
 
+/// The symmetric difference — the area covered by exactly one of `a`, `b`.
 pub fn xor(a: &Region, b: &Region) -> Vec<Region> {
     let mut out = difference(a, b);
     out.extend(difference(b, a));

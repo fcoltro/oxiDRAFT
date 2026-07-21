@@ -1,11 +1,19 @@
+//! The [`Region`] type: a closed area bounded by an outer loop of curves with
+//! optional inner holes — the operand of every boolean operation. Flattened
+//! rings (for area) and exact rational-Bézier boundaries (for containment) are
+//! cached and self-validate against edits.
+
 use oxidraft_geometry::nurbs::lower;
 use oxidraft_geometry::{
     Curve, CurveSegment, Point2d, RationalBezier, rational_winding_angle, tessellate_curve,
 };
 use std::sync::{Arc, PoisonError, RwLock};
 
+/// A filled planar region: an outer boundary loop, minus any hole loops.
 pub struct Region {
+    /// The outer boundary, a closed loop of curves.
     pub outer: Vec<Curve>,
+    /// Hole boundaries, each a closed loop cut out of the region.
     pub holes: Vec<Vec<Curve>>,
     // Prepared boundary forms, keyed by a content hash of the curves:
     // flattened rings for area, and the exact rational-Bézier lowering for
@@ -50,10 +58,12 @@ impl std::fmt::Debug for Region {
 }
 
 impl Region {
+    /// A region bounded by `outer` with no holes.
     pub fn new(outer: Vec<Curve>) -> Self {
         Region::with_holes(outer, Vec::new())
     }
 
+    /// A region bounded by `outer` with the given `holes` cut out.
     pub fn with_holes(outer: Vec<Curve>, holes: Vec<Vec<Curve>>) -> Self {
         Region {
             outer,
@@ -62,6 +72,8 @@ impl Region {
         }
     }
 
+    /// The signed area (outer area minus hole areas); the sign reflects the
+    /// outer loop's winding direction.
     pub fn signed_area_f64(&self) -> f64 {
         let rings = self.rings();
         ring_signed_area(&rings.outer)
