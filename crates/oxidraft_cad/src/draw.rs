@@ -1,0 +1,292 @@
+use oxidraft_document::{Document, EntityId, EntityKind};
+use oxidraft_geometry::{
+    CircularArc, CubicBezier, Curve, EllipticalArc, LineSeg, Point2d, PolyCurve,
+};
+
+pub fn line(doc: &mut Document, a: Point2d, b: Point2d) -> EntityId {
+    doc.add(EntityKind::Curve(Curve::Line(LineSeg::from_endpoints(
+        a, b,
+    ))))
+}
+
+pub fn circle(doc: &mut Document, center: Point2d, radius: f64) -> EntityId {
+    let arc = CircularArc::new(center, radius, 0.0, 2.0 * std::f64::consts::PI);
+    doc.add(EntityKind::Curve(Curve::Arc(arc)))
+}
+
+pub fn circle_3p(doc: &mut Document, p1: &Point2d, p2: &Point2d, p3: &Point2d) -> Option<EntityId> {
+    let arc = CircularArc::from_three_points(p1, p2, p3)?;
+    let full = CircularArc::new(arc.center, arc.radius, 0.0, 2.0 * std::f64::consts::PI);
+    Some(doc.add(EntityKind::Curve(Curve::Arc(full))))
+}
+
+pub fn arc(doc: &mut Document, center: Point2d, radius: f64, start: f64, end: f64) -> EntityId {
+    doc.add(EntityKind::Curve(Curve::Arc(CircularArc::new(
+        center, radius, start, end,
+    ))))
+}
+
+pub fn ellipse(
+    doc: &mut Document,
+    center: Point2d,
+    major: f64,
+    minor: f64,
+    rotation: f64,
+) -> EntityId {
+    let e = EllipticalArc::new(
+        center,
+        major,
+        minor,
+        rotation,
+        0.0,
+        2.0 * std::f64::consts::PI,
+    );
+    doc.add(EntityKind::Curve(Curve::Ellipse(e)))
+}
+
+pub fn rectangle(doc: &mut Document, c0: &Point2d, c1: &Point2d) -> Vec<EntityId> {
+    let (x0, x1) = order(c0.x, c1.x);
+    let (y0, y1) = order(c0.y, c1.y);
+    let p = |x: f64, y: f64| Point2d::new(x, y);
+    let corners = [p(x0, y0), p(x1, y0), p(x1, y1), p(x0, y1)];
+    (0..4)
+        .map(|i| line(doc, corners[i], corners[(i + 1) % 4]))
+        .collect()
+}
+
+pub fn polygon(
+    doc: &mut Document,
+    center: &Point2d,
+    n: u32,
+    radius: f64,
+    inscribed: bool,
+    start_angle: f64,
+) -> Vec<EntityId> {
+    // Side count and geometry come straight from user input: decline
+    // instead of panicking on n < 3 or adding a billion entities on a
+    // typo'd count, and don't let a non-finite center/radius/angle write
+    // NaN vertices into the document.
+    if !(3..=4096).contains(&n)
+        || !center.is_finite()
+        || !radius.is_finite()
+        || !start_angle.is_finite()
+    {
+        return Vec::new();
+    }
+    let r = if inscribed {
+        radius
+    } else {
+        radius / (std::f64::consts::PI / n as f64).cos()
+    };
+    let (cx, cy) = center.to_f64();
+    let verts: Vec<Point2d> = (0..n)
+        .map(|i| {
+            let a = start_angle + 2.0 * std::f64::consts::PI * i as f64 / n as f64;
+            Point2d::from_f64(cx + r * a.cos(), cy + r * a.sin())
+        })
+        .collect();
+    (0..n as usize)
+        .map(|i| line(doc, verts[i], verts[(i + 1) % n as usize]))
+        .collect()
+}
+
+pub fn bezier(doc: &mut Document, p0: Point2d, p1: Point2d, p2: Point2d, p3: Point2d) -> EntityId {
+    doc.add(EntityKind::Curve(Curve::Bezier(CubicBezier::new(
+        p0, p1, p2, p3,
+    ))))
+}
+
+pub fn polycurve(doc: &mut Document, segments: Vec<Curve>) -> EntityId {
+    doc.add(EntityKind::Curve(Curve::Poly(Box::new(PolyCurve::new(
+        segments,
+    )))))
+}
+
+pub fn point(doc: &mut Document, p: Point2d) -> EntityId {
+    doc.add(EntityKind::Point(p))
+}
+
+pub fn divide(doc: &mut Document, curve: &Curve, n: u32) -> Vec<EntityId> {
+    use oxidraft_geometry::CurveSegment;
+    // Matches AutoCAD's DIVIDE segment cap; a corrupt count would balloon
+    // the document with millions of point entities.
+    if n > 32_767 {
+        return Vec::new();
+    }
+    // Equal divisions of the *arc length*, not the parameter — uniform
+    // parameter steps bunch points on unevenly parameterized splines.
+    let len = curve.arc_length();
+    if !(len > 0.0 && len.is_finite()) {
+        return Vec::new();
+    }
+    let targets: Vec<f64> = (1..n).map(|i| len * i as f64 / n as f64).collect();
+    curve
+        .param_at_lengths(&targets)
+        .into_iter()
+        .filter_map(|t| {
+            let (x, y) = curve.evaluate_f64(t);
+            let p = Point2d::from_f64(x, y);
+            // A poisoned curve evaluates to NaN; drop those division
+            // points rather than storing them.
+            p.is_finite().then(|| point(doc, p))
+        })
+        .collect()
+}
+
+/// Places point entities every `interval` of arc length along the curve,
+/// starting from its start — AutoCAD's MEASURE to [`divide`]'s DIVIDE.
+pub fn measure(doc: &mut Document, curve: &Curve, interval: f64) -> Vec<EntityId> {
+    use oxidraft_geometry::CurveSegment;
+    let len = curve.arc_length();
+    if !(interval.is_finite() && interval > 0.0 && len > 0.0 && len.is_finite()) {
+        return Vec::new();
+    }
+    // Same cap as divide: a tiny interval on a long curve must not
+    // balloon the document.
+    if len / interval > 32_767.0 {
+        return Vec::new();
+    }
+    let mut targets = Vec::new();
+    let mut s = interval;
+    while s < len - 1e-12 {
+        targets.push(s);
+        s += interval;
+    }
+    curve
+        .param_at_lengths(&targets)
+        .into_iter()
+        .filter_map(|t| {
+            let (x, y) = curve.evaluate_f64(t);
+            let p = Point2d::from_f64(x, y);
+            p.is_finite().then(|| point(doc, p))
+        })
+        .collect()
+}
+
+fn order(a: f64, b: f64) -> (f64, f64) {
+    if a <= b { (a, b) } else { (b, a) }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn pt(x: i64, y: i64) -> Point2d {
+        Point2d::from_i64(x, y)
+    }
+
+    #[test]
+    fn draw_line_and_circle() {
+        let mut doc = Document::new();
+        line(&mut doc, pt(0, 0), pt(5, 5));
+        circle(&mut doc, pt(2, 2), 3.0);
+        assert_eq!(doc.len(), 2);
+    }
+
+    #[test]
+    fn rectangle_has_four_sides_and_correct_extents() {
+        let mut doc = Document::new();
+        let ids = rectangle(&mut doc, &pt(0, 0), &pt(4, 3));
+        assert_eq!(ids.len(), 4);
+        let bb = doc.extents().unwrap();
+        assert_eq!(bb.min, pt(0, 0));
+        assert_eq!(bb.max, pt(4, 3));
+    }
+
+    #[test]
+    fn polygon_vertex_count() {
+        let mut doc = Document::new();
+        let edges = polygon(&mut doc, &pt(0, 0), 6, 5.0, true, 0.0);
+        assert_eq!(edges.len(), 6);
+    }
+
+    #[test]
+    fn inscribed_polygon_vertices_on_circle() {
+        let mut doc = Document::new();
+        polygon(&mut doc, &pt(0, 0), 4, 5.0, true, 0.0);
+        for e in doc.iter() {
+            if let Some(Curve::Line(l)) = e.as_curve() {
+                let d = (l.p0.x.powi(2) + l.p0.y.powi(2)).sqrt();
+                assert!((d - 5.0).abs() < 1e-6, "vertex not on circle: d={}", d);
+            }
+        }
+    }
+
+    #[test]
+    fn divide_creates_n_minus_1_points() {
+        let mut doc = Document::new();
+        let c = Curve::Line(LineSeg::from_endpoints(pt(0, 0), pt(10, 0)));
+        let pts = divide(&mut doc, &c, 5);
+        assert_eq!(pts.len(), 4);
+        let first = doc.get(pts[0]).unwrap();
+        if let EntityKind::Point(p) = &first.kind {
+            assert!((p.x - 2.0).abs() < 1e-6);
+        } else {
+            panic!()
+        }
+    }
+
+    #[test]
+    fn divide_spaces_by_arc_length_not_parameter() {
+        let mut doc = Document::new();
+        // Straight geometry, wildly uneven parameter speed: the old
+        // uniform-parameter division bunched all points near x≈0.3.
+        let c = Curve::Bezier(oxidraft_geometry::CubicBezier::new(
+            Point2d::from_f64(0.0, 0.0),
+            Point2d::from_f64(0.1, 0.0),
+            Point2d::from_f64(0.2, 0.0),
+            Point2d::from_f64(4.0, 0.0),
+        ));
+        let ids = divide(&mut doc, &c, 4);
+        assert_eq!(ids.len(), 3);
+        for (i, id) in ids.iter().enumerate() {
+            let EntityKind::Point(p) = &doc.get(*id).unwrap().kind else {
+                panic!("expected a point");
+            };
+            let want = (i + 1) as f64;
+            assert!(
+                (p.x - want).abs() < 0.05,
+                "division {i} at x={}, wanted {want}",
+                p.x
+            );
+        }
+    }
+
+    #[test]
+    fn measure_places_points_at_fixed_intervals() {
+        let mut doc = Document::new();
+        let c = Curve::Line(LineSeg::from_endpoints(pt(0, 0), pt(10, 0)));
+        let ids = measure(&mut doc, &c, 3.0);
+        assert_eq!(ids.len(), 3, "at 3, 6, 9 — not at the endpoint");
+        for (i, id) in ids.iter().enumerate() {
+            let EntityKind::Point(p) = &doc.get(*id).unwrap().kind else {
+                panic!("expected a point");
+            };
+            assert!((p.x - 3.0 * (i + 1) as f64).abs() < 1e-9);
+        }
+        // Hostile intervals decline instead of ballooning or spinning.
+        for bad in [0.0, -1.0, f64::NAN, f64::INFINITY, 1e-9] {
+            assert!(measure(&mut doc, &c, bad).is_empty(), "interval {bad}");
+        }
+        let zero = Curve::Line(LineSeg::from_endpoints(pt(1, 1), pt(1, 1)));
+        assert!(measure(&mut doc, &zero, 1.0).is_empty());
+    }
+
+    #[test]
+    fn circle_3p_through_points() {
+        let mut doc = Document::new();
+        let id = circle_3p(
+            &mut doc,
+            &Point2d::from_f64(1.0, 0.0),
+            &Point2d::from_f64(0.0, 1.0),
+            &Point2d::from_f64(-1.0, 0.0),
+        )
+        .unwrap();
+        if let Some(Curve::Arc(a)) = doc.get(id).unwrap().as_curve() {
+            assert!(a.center.x.abs() < 1e-9 && a.center.y.abs() < 1e-9);
+            assert!((a.radius - 1.0).abs() < 1e-6);
+        } else {
+            panic!()
+        }
+    }
+}

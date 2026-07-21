@@ -1,0 +1,19 @@
+[package]
+name = "oxidraft_geometry"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+
+[dev-dependencies]
+proptest.workspace = true
+criterion.workspace = true
+
+[[bench]]
+name = "kernel"
+harness = false
+
+[lints]
+workspace = true

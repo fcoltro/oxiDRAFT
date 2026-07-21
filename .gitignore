@@ -1,0 +1,18 @@
+# Rust build artifacts
+/target/
+**/target/
+
+# Claude Code / local tooling metadata
+/.claude/
+
+# Editor / OS noise
+.vscode/
+.idea/
+*.swp
+.DS_Store
+Thumbs.db
+
+# Code-signing material — never commit private keys (see
+# apps/oxidraft_app/assets/PACKAGING.md; the real .pfx lives outside the repo)
+*.pfx
+*.p12

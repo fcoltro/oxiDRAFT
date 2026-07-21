@@ -1,0 +1,15 @@
+[package]
+name = "oxidraft_cad"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+oxidraft_geometry.workspace = true
+oxidraft_document.workspace = true
+oxidraft_boolean.workspace = true
+oxidraft_constraint.workspace = true
+
+[lints]
+workspace = true

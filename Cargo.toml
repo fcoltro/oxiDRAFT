@@ -1,0 +1,59 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/oxidraft_geometry",
+    "crates/oxidraft_spatial",
+    "crates/oxidraft_boolean",
+    "crates/oxidraft_constraint",
+    "crates/oxidraft_document",
+    "crates/oxidraft_cad",
+    "crates/oxidraft_io",
+    "crates/oxidraft_ui",
+    "apps/oxidraft_app",
+]
+
+# Shared package metadata — every crate inherits these via `field.workspace = true`,
+# so the version/edition/license are set in one place at release time.
+[workspace.package]
+version = "0.3.3-alpha"
+edition = "2024"
+license = "GPL-3.0-or-later"
+publish = false
+
+# Single source of truth for dependency versions. Internal crates are referenced
+# by path here too, so a crate just writes `oxidraft_geometry.workspace = true`.
+[workspace.dependencies]
+oxidraft_geometry = { path = "crates/oxidraft_geometry" }
+oxidraft_spatial = { path = "crates/oxidraft_spatial" }
+oxidraft_boolean = { path = "crates/oxidraft_boolean" }
+oxidraft_constraint = { path = "crates/oxidraft_constraint" }
+oxidraft_document = { path = "crates/oxidraft_document" }
+oxidraft_cad = { path = "crates/oxidraft_cad" }
+oxidraft_io = { path = "crates/oxidraft_io" }
+oxidraft_ui = { path = "crates/oxidraft_ui" }
+egui = "0.35"
+eframe = "0.35"
+robust = "1"
+rfd = "0.17"
+fontdb = "0.23"
+ttf-parser = "0.25"
+resvg = { version = "0.47", default-features = false }
+svg2pdf = "0.13"
+winresource = "0.1"
+rayon = "1"
+proptest = "1"
+criterion = "0.8"
+
+# Lints applied across the whole workspace. The geometry kernel and everything
+# built on it are 100% safe Rust — forbid `unsafe` so that stays true.
+[workspace.lints.rust]
+unsafe_code = "forbid"
+
+# Release artifacts are built once per release in CI, so trade compile time for
+# runtime speed and binary size. Thin LTO (not fat) keeps the 4-platform release
+# matrix from blowing past its current ~5 min per job.
+[profile.release]
+opt-level = 3
+lto = "thin"
+codegen-units = 1
+strip = true

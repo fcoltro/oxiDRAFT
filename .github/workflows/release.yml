@@ -1,0 +1,109 @@
+name: Release
+
+# Build native binaries for Windows, Linux and macOS. Pushing a version tag
+# (e.g. `v0.1.0`) publishes them to a GitHub Release; manual runs just build.
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: ${{ matrix.name }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: linux-x86_64
+            os: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+          - name: windows-x86_64
+            os: windows-latest
+            target: x86_64-pc-windows-msvc
+          # Cross-compiled from an Apple Silicon runner: the Intel `macos-13`
+          # image is being retired, and the arm64 Xcode SDK builds the x86_64
+          # slice fine (we only package the binary here, never run it).
+          - name: macos-x86_64
+            os: macos-14
+            target: x86_64-apple-darwin
+          - name: macos-aarch64
+            os: macos-14
+            target: aarch64-apple-darwin
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Install Linux build dependencies
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y libgtk-3-dev
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: ${{ matrix.target }}
+
+      - name: Build release binary
+        run: cargo build --release -p oxidraft_app --target ${{ matrix.target }}
+
+      # Self-signed Authenticode cert — see apps/oxidraft_app/assets/PACKAGING.md.
+      # Skipped entirely (build stays unsigned) until the WINDOWS_CODESIGN_*
+      # secrets are set on the repo, so this is a no-op for forks/PRs.
+      - name: Code-sign Windows binary
+        if: runner.os == 'Windows'
+        shell: pwsh
+        env:
+          CODESIGN_PFX_BASE64: ${{ secrets.WINDOWS_CODESIGN_PFX_BASE64 }}
+          CODESIGN_PFX_PASSWORD: ${{ secrets.WINDOWS_CODESIGN_PFX_PASSWORD }}
+        run: |
+          if (-not $env:CODESIGN_PFX_BASE64) {
+            Write-Output "No WINDOWS_CODESIGN_PFX_BASE64 secret configured — skipping signing."
+            exit 0
+          }
+          ./scripts/codesign-windows.ps1 `
+            -Path "target/${{ matrix.target }}/release/oxidraft.exe" `
+            -PfxBase64 $env:CODESIGN_PFX_BASE64 `
+            -PfxPassword $env:CODESIGN_PFX_PASSWORD
+
+      - name: Package (Unix)
+        if: runner.os != 'Windows'
+        shell: bash
+        run: |
+          ver="${GITHUB_REF_NAME:-dev}"
+          dist="oxidraft-${ver}-${{ matrix.name }}"
+          mkdir -p "$dist"
+          cp "target/${{ matrix.target }}/release/oxidraft" "$dist/"
+          cp README.md LICENSE "$dist/"
+          tar -czf "${dist}.tar.gz" "$dist"
+          echo "ASSET=${dist}.tar.gz" >> "$GITHUB_ENV"
+
+      - name: Package (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $ver = if ($env:GITHUB_REF_NAME) { $env:GITHUB_REF_NAME } else { "dev" }
+          $dist = "oxidraft-$ver-${{ matrix.name }}"
+          New-Item -ItemType Directory -Force -Path $dist | Out-Null
+          Copy-Item "target/${{ matrix.target }}/release/oxidraft.exe" $dist/
+          Copy-Item README.md, LICENSE $dist/
+          Compress-Archive -Path $dist -DestinationPath "$dist.zip"
+          "ASSET=$dist.zip" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v5
+        with:
+          name: ${{ matrix.name }}
+          path: ${{ env.ASSET }}
+
+      - name: Attach to GitHub Release
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v3
+        with:
+          files: ${{ env.ASSET }}
+          generate_release_notes: true
