@@ -11,25 +11,29 @@ pub enum RadialRing {
     Modify,
 }
 
-const DEAD_ZONE: f32 = 26.0;
+// Neutral zone over the hub: no hover or click registers here.
+const DEAD_ZONE: f32 = 72.0;
 
-// Move past this (from the centre) to commit to a category / expand a group.
-const ROOT_EXPAND: f32 = 34.0;
+// Move past this (from the centre) to commit to a category / expand a group —
+// set just inside the wedge ring so you commit as the cursor leaves the hub.
+const ROOT_EXPAND: f32 = 72.0;
 const CATEGORY_EXPAND: f32 = ROOT_EXPAND;
 
-// The pie geometry: a central hub, then the wedge ring between INNER and OUTER.
-const HUB_RADIUS: f32 = 54.0;
-const RING_INNER: f32 = 62.0;
-const RING_OUTER: f32 = 152.0;
-// Angular slice trimmed off each side of a wedge, leaving the thin dark gap
-// (and the divider line) that reads as a segmented pie.
-const WEDGE_HALF_GAP: f32 = 0.03;
-const RING_ICON_SIZE: f32 = 28.0;
+// The pie geometry: a large central hub, then a thin wedge ring hugging it.
+const HUB_RADIUS: f32 = 80.0;
+const RING_INNER: f32 = 84.0;
+const RING_OUTER: f32 = 150.0;
+// Wedges sit flush against each other; the divider lines alone separate them.
+const WEDGE_HALF_GAP: f32 = 0.0;
+const RING_ICON_SIZE: f32 = 23.0;
 
-const VARIANT_RADIUS: f32 = 214.0;
 const VARIANT_ARC_STEP: f32 = 0.34;
 const VARIANT_UNLATCH_MARGIN: f32 = 0.15;
-const VARIANT_BTN_RADIUS: f32 = 21.0;
+// The variant sub-menu is a second concentric ring of slices just outside the
+// tool ring — a continuation of the pizza — fanned around the parent wedge.
+const VARIANT_INNER: f32 = 154.0;
+const VARIANT_OUTER: f32 = 212.0;
+const VARIANT_ICON_SIZE: f32 = 21.0;
 
 // Local palette — the theme's WIDGET_* tokens are near-transparent (they sit on
 // panels), but the radial menu floats over the canvas and needs solid fills.
@@ -66,10 +70,6 @@ fn dir_of(angle: f32) -> egui::Vec2 {
 fn variant_angle(parent_angle: f32, index: usize, count: usize) -> f32 {
     let offset = index as f32 - (count as f32 - 1.0) / 2.0;
     parent_angle + offset * VARIANT_ARC_STEP
-}
-
-fn variant_point(center: Pos2, parent_angle: f32, index: usize, count: usize, radius: f32) -> Pos2 {
-    center + dir_of(variant_angle(parent_angle, index, count)) * radius
 }
 
 fn angle_diff(a: f32, b: f32) -> f32 {
@@ -158,8 +158,10 @@ fn fill_sector(
     painter.add(egui::Shape::mesh(mesh));
 }
 
-/// One pie wedge: filled sector, side dividers, a hovered/active outer-edge
-/// highlight, and a centred icon or text label.
+/// One pie wedge in the ring between `inner_r` and `outer_r`: filled sector,
+/// side dividers, a hovered/active outer-edge highlight, and a centred icon or
+/// text label. Shared by the tool ring and the variant ring so both read as
+/// slices of the same pizza.
 #[allow(clippy::too_many_arguments)]
 fn draw_sector(
     painter: &egui::Painter,
@@ -167,6 +169,9 @@ fn draw_sector(
     center: Pos2,
     center_angle: f32,
     half_span: f32,
+    inner_r: f32,
+    outer_r: f32,
+    icon_size: f32,
     hovered: bool,
     active: bool,
     enabled: bool,
@@ -179,27 +184,27 @@ fn draw_sector(
         center,
         center_angle,
         half_span,
-        RING_INNER,
-        RING_OUTER,
+        inner_r,
+        outer_r,
         bg,
     );
 
     for edge in [center_angle - half_span, center_angle + half_span] {
         let d = dir_of(edge);
         painter.line_segment(
-            [center + d * RING_INNER, center + d * RING_OUTER],
+            [center + d * inner_r, center + d * outer_r],
             Stroke::new(1.0, DIVIDER),
         );
     }
     if hovered || active {
         let hl = if active { theme::ACCENT } else { EDGE_HL };
         painter.add(egui::Shape::line(
-            arc_points(center, center_angle, half_span, RING_OUTER - 1.5),
+            arc_points(center, center_angle, half_span, outer_r - 1.5),
             Stroke::new(2.5, hl),
         ));
     }
 
-    let mid = (RING_INNER + RING_OUTER) * 0.5;
+    let mid = (inner_r + outer_r) * 0.5;
     let pos = center + dir_of(center_angle) * mid;
     let tint = if !enabled {
         theme::TEXT_DIM
@@ -213,7 +218,7 @@ fn draw_sector(
             painter,
             ctx,
             icon,
-            Rect::from_center_size(pos, vec2(RING_ICON_SIZE, RING_ICON_SIZE)),
+            Rect::from_center_size(pos, vec2(icon_size, icon_size)),
             tint,
         );
     }
@@ -237,9 +242,9 @@ fn draw_hub(painter: &egui::Painter, center: Pos2, label: Option<&str>) {
         Some(text) => {
             let galley = painter.layout(
                 text.to_string(),
-                egui::FontId::proportional(theme::tok::T_SM),
+                egui::FontId::proportional(theme::tok::T_LG),
                 theme::TEXT,
-                HUB_RADIUS * 1.7,
+                HUB_RADIUS * 1.5,
             );
             painter.galley(center - galley.size() * 0.5, galley, theme::TEXT);
         }
@@ -257,35 +262,6 @@ fn draw_hub(painter: &egui::Painter, center: Pos2, label: Option<&str>) {
 
 /// A small round button for a group's expanded variants, which fan out from
 /// their parent wedge rather than tiling the ring.
-fn draw_variant_button(
-    painter: &egui::Painter,
-    ctx: &egui::Context,
-    pos: Pos2,
-    icon: Icon,
-    hovered: bool,
-    active: bool,
-    enabled: bool,
-) {
-    let bg = if hovered { WEDGE_HOVER } else { WEDGE_BG };
-    painter.circle_filled(pos, VARIANT_BTN_RADIUS, bg);
-    let ring = if active { theme::ACCENT } else { DIVIDER };
-    painter.circle_stroke(pos, VARIANT_BTN_RADIUS, Stroke::new(1.2, ring));
-    let tint = if !enabled {
-        theme::TEXT_DIM
-    } else if hovered {
-        Color32::WHITE
-    } else {
-        theme::TEXT
-    };
-    icons::paint_icon(
-        painter,
-        ctx,
-        icon,
-        Rect::from_center_size(pos, vec2(RING_ICON_SIZE * 0.85, RING_ICON_SIZE * 0.85)),
-        tint,
-    );
-}
-
 pub(super) fn radial_menu(
     ctx: &Context,
     app: &mut AppState,
@@ -419,7 +395,7 @@ pub(super) fn radial_menu(
             let catch = ui.allocate_rect(ctx.content_rect(), egui::Sense::click());
             let painter = ui.painter();
             let outer_r = if variant_entries.is_some() {
-                VARIANT_RADIUS + 34.0
+                VARIANT_OUTER + 22.0
             } else {
                 RING_OUTER + 28.0
             };
@@ -430,10 +406,15 @@ pub(super) fn radial_menu(
                 // A category was chosen: a full ring of tool wedges.
                 let count = entries.len();
                 let half = std::f32::consts::PI / count as f32 - WEDGE_HALF_GAP;
-                let dimmed = variant_entries.is_some();
+                let expanded = variant_entries.is_some();
                 for (i, (icon, label, act)) in entries.iter().enumerate() {
                     let ca = wedge_center_angle(i, count);
-                    let hovered = !dimmed && category_hovered == Some(i) && dist > ROOT_EXPAND;
+                    // The group whose variants are open stays lit to show it's
+                    // the one in use; otherwise the plain angular hover.
+                    let is_parent =
+                        expanded && variant_gid.is_some() && group_id(act) == variant_gid;
+                    let hovered = is_parent
+                        || (!expanded && category_hovered == Some(i) && dist > ROOT_EXPAND);
                     let active = matches!(act, Act::Tool(t) if active_name == t.name());
                     let enabled = has_sel || !act_needs_selection(act);
                     draw_sector(
@@ -442,6 +423,9 @@ pub(super) fn radial_menu(
                         center,
                         ca,
                         half,
+                        RING_INNER,
+                        RING_OUTER,
+                        RING_ICON_SIZE,
                         hovered,
                         active,
                         enabled,
@@ -449,11 +433,6 @@ pub(super) fn radial_menu(
                         None,
                     );
                     let _ = label;
-                    // Marks a wedge whose group fans into variants.
-                    if group_id(act).is_some() {
-                        let tick = center + dir_of(ca) * (RING_OUTER + 9.0);
-                        painter.circle_filled(tick, 2.5, theme::TEXT_DIM);
-                    }
                 }
             } else {
                 // Root: the circle split into two big halves — Tools / Modifiers.
@@ -467,6 +446,9 @@ pub(super) fn radial_menu(
                         center,
                         ca,
                         half,
+                        RING_INNER,
+                        RING_OUTER,
+                        RING_ICON_SIZE,
                         hovered,
                         false,
                         true,
@@ -476,14 +458,30 @@ pub(super) fn radial_menu(
                 }
             }
 
+            // Variant sub-menu: a second ring of slices fanned around the parent.
             if let (Some(sub), Some(pa)) = (&variant_entries, parent_angle) {
-                let sub_count = sub.len();
+                let count = sub.len();
+                let half = VARIANT_ARC_STEP / 2.0 - WEDGE_HALF_GAP;
                 for (i, (icon, _label, act)) in sub.iter().enumerate() {
-                    let pos = variant_point(center, pa, i, sub_count, VARIANT_RADIUS);
+                    let ca = variant_angle(pa, i, count);
                     let hovered = variant_hovered == Some(i);
                     let active = matches!(act, Act::Tool(t) if active_name == t.name());
                     let enabled = has_sel || !act_needs_selection(act);
-                    draw_variant_button(painter, ctx, pos, *icon, hovered, active, enabled);
+                    draw_sector(
+                        painter,
+                        ctx,
+                        center,
+                        ca,
+                        half,
+                        VARIANT_INNER,
+                        VARIANT_OUTER,
+                        VARIANT_ICON_SIZE,
+                        hovered,
+                        active,
+                        enabled,
+                        Some(*icon),
+                        None,
+                    );
                 }
             }
 
