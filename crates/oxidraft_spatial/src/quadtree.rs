@@ -1,38 +1,61 @@
+//! A quadtree over curve bounding boxes, for fast rectangle, point, and
+//! nearest-curve queries against a drawing.
+
 use oxidraft_geometry::{BoundingBox, Curve, CurveSegment};
 
+/// How a quadtree cell relates to the geometry it covers.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum CellClass {
+    /// No curve touches the cell.
     Empty,
+    /// The cell is entirely inside covered geometry.
     Full,
+    /// A curve crosses the cell's region.
     Boundary,
 }
 
+/// One node of the quadtree: its region, the curves indexed there, its
+/// classification, and its four children (empty when a leaf).
 #[derive(Clone, Debug)]
 pub struct QuadNode {
+    /// The rectangular region this node covers.
     pub bounds: BoundingBox,
+    /// Indices (into [`Quadtree::curves`]) of curves overlapping this node.
     pub curve_indices: Vec<usize>,
+    /// This node's classification.
     pub class: CellClass,
+    /// Child nodes; empty for a leaf.
     pub children: Vec<QuadNode>,
 }
 
 impl QuadNode {
+    /// True when this node has no children.
     pub fn is_leaf(&self) -> bool {
         self.children.is_empty()
     }
 }
 
+/// A quadtree index over a set of curves, subdividing space to answer spatial
+/// queries without scanning every curve.
 pub struct Quadtree {
+    /// The root node covering the whole indexed region.
     pub root: QuadNode,
+    /// All curves inserted, addressed by index.
     pub curves: Vec<Curve>,
     /// Per-curve bounding boxes, parallel to `curves`. Cached at insert:
     /// recomputing every box on every insert made building O(n²) in
     /// bounding-box evaluations.
     bbs: Vec<BoundingBox>,
+    /// Deepest level the tree may subdivide to.
     pub max_depth: u32,
+    /// A leaf splits once it holds more than this many curves (until
+    /// `max_depth`).
     pub max_curves_per_leaf: usize,
 }
 
 impl Quadtree {
+    /// An empty quadtree covering `bounds`, subdividing at most `max_depth`
+    /// levels deep.
     pub fn new(bounds: BoundingBox, max_depth: u32) -> Self {
         Quadtree {
             root: QuadNode {
@@ -48,6 +71,7 @@ impl Quadtree {
         }
     }
 
+    /// Inserts a curve and returns its index, subdividing cells as needed.
     pub fn insert(&mut self, curve: Curve) -> usize {
         let idx = self.curves.len();
         let bb = curve.bounding_box();
@@ -163,6 +187,7 @@ impl Quadtree {
         }
     }
 
+    /// Indices of all curves whose bounding box overlaps `query_bb`.
     pub fn query_rect(&self, query_bb: &BoundingBox) -> Vec<usize> {
         let mut candidates = Vec::new();
         Self::query_node(&self.root, query_bb, &mut candidates);
@@ -202,6 +227,8 @@ impl Quadtree {
         }
     }
 
+    /// The deepest leaf node containing point `(px, py)`, or `None` if outside
+    /// the tree's bounds.
     pub fn query_point(&self, px: f64, py: f64) -> Option<&QuadNode> {
         Self::find_leaf(&self.root, px, py)
     }
@@ -221,6 +248,8 @@ impl Quadtree {
         None
     }
 
+    /// Index of the curve nearest to point `(px, py)`, using the tree to prune
+    /// far-away candidates, or `None` when the tree is empty.
     pub fn nearest_curve(&self, px: f64, py: f64) -> Option<usize> {
         use oxidraft_geometry::point_to_curve_distance;
         // A non-finite query would make every distance NaN and the winner

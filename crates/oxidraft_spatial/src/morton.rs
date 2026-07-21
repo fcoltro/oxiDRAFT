@@ -1,3 +1,7 @@
+//! Morton (Z-order) codes: interleaving two 32-bit coordinates into one 64-bit
+//! key so that spatially nearby points get nearby codes.
+
+/// The Morton code of `(x, y)` — the bits of `x` and `y` interleaved.
 pub fn morton_code(x: u32, y: u32) -> u64 {
     interleave(x as u64) | (interleave(y as u64) << 1)
 }
