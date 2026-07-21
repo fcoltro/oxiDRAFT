@@ -632,6 +632,25 @@ fn dof_status_reports_fully_constrained_and_flashes_conflicts() {
 }
 
 #[test]
+fn dof_status_does_not_claim_fully_constrained_with_free_entities() {
+    let mut a = app();
+    a.infer_constraints = false;
+    // Fully pin one line...
+    let l = a.add_entity(line(0, 0, 4, 0));
+    a.selection = vec![l];
+    a.run_command("FIX");
+    // ...then add geometry no constraint touches.
+    a.add_entity(line(10, 10, 14, 12));
+    let s = a.dof_status().expect("has constraints");
+    assert_eq!(s.dof, 0, "the constrained component itself is rigid");
+    assert_eq!(
+        s.free_entities, 1,
+        "the free line must be visible to the status chip, or it reads \
+         'Fully constrained' while the drawing plainly isn't"
+    );
+}
+
+#[test]
 fn inference_preview_predicts_the_horizontal_capture() {
     use oxidraft_document::ConstraintKind;
     let mut a = app();

@@ -378,10 +378,11 @@ fn quadrants(c: &Curve) -> Vec<(f64, f64)> {
             (0..4)
                 .filter_map(|k| {
                     let ang = k as f64 * FRAC_PI_2;
-                    let in_range = full || {
-                        let t = oxidraft_geometry::wrap_from(ang, a.start_angle);
-                        t <= a.end_angle + 1e-9
-                    };
+                    // contains_angle wraps from the lower domain end, so
+                    // reversed arcs (end < start, from reverse_curve/JOIN)
+                    // keep their quadrant snaps; wrapping from start_angle
+                    // admitted none of them.
+                    let in_range = full || a.contains_angle(ang);
                     in_range.then(|| (cx + a.radius * ang.cos(), cy + a.radius * ang.sin()))
                 })
                 .collect()
@@ -484,6 +485,31 @@ mod tests {
             pt(10, 0),
         ))));
         (doc, id)
+    }
+
+    #[test]
+    fn reversed_arc_keeps_its_quadrant_snaps() {
+        // A half arc traversed backwards (π → 0), as reverse_curve/JOIN
+        // store. The top quadrant (0, 5) is interior to the span and must
+        // still be offered; wrapping from start_angle admitted none.
+        let mut doc = Document::new();
+        doc.add(EntityKind::Curve(Curve::Arc(CircularArc::new(
+            pt(0, 0),
+            5.0,
+            std::f64::consts::PI,
+            0.0,
+        ))));
+        let s = SnapSettings {
+            enabled: vec![SnapKind::Quadrant],
+            ..SnapSettings::default()
+        };
+        let hits = find_snaps(&doc, (0.2, 4.8), &s, None);
+        assert!(
+            hits.iter().any(|h| h.kind == SnapKind::Quadrant
+                && (h.pos.0).abs() < 1e-9
+                && (h.pos.1 - 5.0).abs() < 1e-9),
+            "top quadrant of the reversed half arc must snap: {hits:?}"
+        );
     }
 
     #[test]

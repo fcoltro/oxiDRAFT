@@ -2083,7 +2083,19 @@ pub(super) fn status_pill(ctx: &Context, app: &mut AppState, canvas_rect: egui::
     // and the pill's own closure borrows it too). `None` when there are no
     // constraints to report on.
     let dof_chip: Option<(String, egui::Color32)> = app.dof_status().map(|s| {
-        if s.dof == 0 {
+        if s.dof == 0 && s.free_entities > 0 {
+            // The constraint component is rigid, but the drawing still has
+            // geometry no constraint touches — claiming "fully constrained"
+            // here would be a lie about everything outside the component.
+            (
+                format!(
+                    "{} unconstrained entit{}",
+                    s.free_entities,
+                    if s.free_entities == 1 { "y" } else { "ies" }
+                ),
+                crate::theme::STATUS_AMBER,
+            )
+        } else if s.dof == 0 {
             ("Fully constrained".to_string(), crate::theme::STATUS_GREEN)
         } else if !s.redundant.is_empty() {
             (

@@ -1591,6 +1591,7 @@ fn validate_recorded(
     let CompSketch {
         s,
         vars,
+        intrinsic,
         constraint_doc_idx,
     } = component_sketch(doc, seeds);
     let mut strict = s.clone();
@@ -1618,7 +1619,10 @@ fn validate_recorded(
         .diagnose_conflict(&initial)
         .culprits
         .into_iter()
-        .filter_map(|i| constraint_doc_idx.get(i).copied())
+        .filter_map(|i| {
+            i.checked_sub(intrinsic)
+                .and_then(|i| constraint_doc_idx.get(i).copied())
+        })
         .filter(|&i| Some(i) != touched)
         .collect();
     Err(ConstrainError {
@@ -1630,10 +1634,17 @@ fn validate_recorded(
 struct CompSketch {
     s: Sketch,
     vars: HashMap<EntityId, ShapeVars>,
-    /// Parallel to `s`'s constraint insertion order: `constraint_doc_idx[i]`
-    /// is the index into `doc.constraints` that solver constraint `i` came
-    /// from. Lets diagnostics computed on `s` (redundant rows, conflict
-    /// culprits) name the document constraint responsible.
+    /// Number of intrinsic solver constraints emitted while building the
+    /// shape variables themselves (an arc's endpoints riding its circle),
+    /// before any document constraint was lowered. Solver constraint `i`
+    /// maps to `constraint_doc_idx[i - intrinsic]`; indices below
+    /// `intrinsic` have no document counterpart.
+    intrinsic: usize,
+    /// Parallel to `s`'s constraint insertion order *after* the intrinsic
+    /// prefix: `constraint_doc_idx[i]` is the index into `doc.constraints`
+    /// that solver constraint `intrinsic + i` came from. Lets diagnostics
+    /// computed on `s` (redundant rows, conflict culprits) name the
+    /// document constraint responsible.
     constraint_doc_idx: Vec<usize>,
 }
 
@@ -1685,6 +1696,9 @@ fn component_sketch(doc: &Document, seeds: &[EntityId]) -> CompSketch {
         }
     }
 
+    // Everything constrained so far is intrinsic to the shapes (arc
+    // endpoints on their circles) — document constraints start after it.
+    let intrinsic = s.constraint_count();
     let mut constraint_doc_idx = Vec::new();
     for (doc_idx, c) in doc.constraints.iter().enumerate() {
         let Some(sa) = vars.get(&c.a) else {
@@ -1761,8 +1775,13 @@ fn component_sketch(doc: &Document, seeds: &[EntityId]) -> CompSketch {
             }
             ConstraintKind::LineDistance => {
                 // Both of b's endpoints held at the width from a's infinite
-                // line — this pins the gap *and* keeps the pair parallel.
-                // Two solver rows for one record, so log doc_idx twice.
+                // line. The distance residual is |signed distance| − v, so
+                // the two rows alone have a second satisfied state with the
+                // endpoints on OPPOSITE sides of a (b crossing it) — an
+                // explicit Parallel row excludes it. In the intended
+                // same-side state that row is linearly dependent, so the
+                // DOF/rank accounting is unchanged. Three solver rows for
+                // one record, so log doc_idx three times.
                 let (Some((a0, a1)), Some((b0, b1)), Some(v)) =
                     (sa.line(), sb.and_then(|s| s.line()), c.val)
                 else {
@@ -1770,6 +1789,8 @@ fn component_sketch(doc: &Document, seeds: &[EntityId]) -> CompSketch {
                 };
                 s.constrain(Constraint::PointLineDistance(b0, a0, a1, v));
                 s.constrain(Constraint::PointLineDistance(b1, a0, a1, v));
+                s.constrain(Constraint::Parallel(a0, a1, b0, b1));
+                constraint_doc_idx.push(doc_idx);
                 constraint_doc_idx.push(doc_idx);
                 constraint_doc_idx.push(doc_idx);
             }
@@ -1925,6 +1946,7 @@ fn component_sketch(doc: &Document, seeds: &[EntityId]) -> CompSketch {
     CompSketch {
         s,
         vars,
+        intrinsic,
         constraint_doc_idx,
     }
 }
@@ -2014,6 +2036,12 @@ fn anchor_point_var(
 pub struct DofSummary {
     pub dof: usize,
     pub redundant: Vec<usize>,
+    /// Geometric entities (curves and points) in the document that no
+    /// constraint references at all. They are invisible to `dof` — the
+    /// component sketch never includes them — so a caller reporting
+    /// "fully constrained" must also check that this is zero, or the claim
+    /// silently ignores entirely free geometry.
+    pub free_entities: usize,
 }
 
 /// Reports the DOF/redundancy state of the constraint component reachable
@@ -2022,6 +2050,7 @@ pub struct DofSummary {
 pub fn dof_report(doc: &Document, seeds: &[EntityId]) -> DofSummary {
     let CompSketch {
         s,
+        intrinsic,
         constraint_doc_idx,
         ..
     } = component_sketch(doc, seeds);
@@ -2029,11 +2058,22 @@ pub fn dof_report(doc: &Document, seeds: &[EntityId]) -> DofSummary {
     let redundant = report
         .redundant
         .into_iter()
-        .filter_map(|i| constraint_doc_idx.get(i).copied())
+        .filter_map(|i| {
+            i.checked_sub(intrinsic)
+                .and_then(|i| constraint_doc_idx.get(i).copied())
+        })
         .collect();
+    let free_entities = doc
+        .iter()
+        .filter(|e| {
+            matches!(e.kind, EntityKind::Curve(_) | EntityKind::Point(_))
+                && doc.constraints_on(e.id).next().is_none()
+        })
+        .count();
     DofSummary {
         dof: report.dof,
         redundant,
+        free_entities,
     }
 }
 
@@ -2046,6 +2086,7 @@ pub fn dof_report(doc: &Document, seeds: &[EntityId]) -> DofSummary {
 pub fn diagnose_conflict(doc: &Document, seeds: &[EntityId]) -> Vec<usize> {
     let CompSketch {
         mut s,
+        intrinsic,
         constraint_doc_idx,
         ..
     } = component_sketch(doc, seeds);
@@ -2056,7 +2097,10 @@ pub fn diagnose_conflict(doc: &Document, seeds: &[EntityId]) -> Vec<usize> {
     s.diagnose_conflict(&initial)
         .culprits
         .into_iter()
-        .filter_map(|i| constraint_doc_idx.get(i).copied())
+        .filter_map(|i| {
+            i.checked_sub(intrinsic)
+                .and_then(|i| constraint_doc_idx.get(i).copied())
+        })
         .collect()
 }
 
@@ -2113,7 +2157,7 @@ pub fn resolve_after_edit(
         }
         _ => pin_shape(&mut s, sv),
     }
-    if !s.solve().converged {
+    if !s.solve_robust().converged {
         return false;
     }
     write_back(doc, &s, &vars);
@@ -2141,7 +2185,13 @@ pub fn resolve_after_transform(doc: &mut Document, moved: &[EntityId]) -> bool {
             pin_shape(&mut s, sv);
         }
     }
-    if !s.solve().converged {
+    // solve_robust, not solve: pure-angle residuals (Parallel,
+    // Perpendicular, ...) have an exact saddle 90° from the target, and a
+    // transform can land geometry exactly there (axis-aligned drawings do
+    // this routinely). Plain solve() then reports failure and the recorded
+    // constraint is silently left violated with no user signal. Every
+    // record-time sibling already retries from a perturbed start.
+    if !s.solve_robust().converged {
         return false;
     }
     write_back(doc, &s, &vars);
@@ -3172,6 +3222,113 @@ mod tests {
         let report = dof_report(&doc, &[id]);
         assert_eq!(report.dof, 3, "one row pinned by Horizontal");
         assert!(report.redundant.is_empty());
+    }
+
+    #[test]
+    fn redundancy_blame_stays_aligned_with_an_arc_in_the_component() {
+        // A partial arc adds two intrinsic PointOnCircle rows to the solver
+        // BEFORE any document constraint is lowered. The redundant/culprit
+        // indices must be mapped past that prefix, or the blame lands on the
+        // wrong document constraint (or is silently dropped past the end).
+        let mut doc = Document::new();
+        let a = add_line(&mut doc, 0.0, 0.0, 4.0, 0.0);
+        let b = add_line(&mut doc, 0.0, 1.0, 4.0, 1.3);
+        let c = add_line(&mut doc, 0.0, 2.0, 4.0, 2.2);
+        let arc = doc.add(EntityKind::Curve(Curve::Arc(CircularArc::new(
+            Point2d::from_f64(0.0, 0.0),
+            2.0,
+            0.0,
+            std::f64::consts::FRAC_PI_2,
+        ))));
+        // Weld the arc's start to a's start so it joins the same component.
+        constrain_coincident_points(&mut doc, (arc, 0), (a, 0)).unwrap();
+        constrain_lines(&mut doc, &[a, b], ConstraintKind::Parallel).unwrap();
+        constrain_lines(&mut doc, &[b, c], ConstraintKind::Parallel).unwrap();
+        constrain_lines(&mut doc, &[a, c], ConstraintKind::Parallel).unwrap();
+        let report = dof_report(&doc, &[a]);
+        assert_eq!(
+            report.redundant.len(),
+            1,
+            "exactly one Parallel is redundant: {:?}",
+            report.redundant
+        );
+        let blamed = &doc.constraints[report.redundant[0]];
+        assert_eq!(
+            blamed.kind,
+            ConstraintKind::Parallel,
+            "the blame must land on a Parallel record, not shift onto {blamed:?}"
+        );
+    }
+
+    #[test]
+    fn dof_report_counts_entities_no_constraint_touches() {
+        let mut doc = Document::new();
+        let a = add_line(&mut doc, 0.0, 0.0, 4.0, 0.0);
+        doc.add_constraint(SketchConstraint::fixed(a));
+        add_line(&mut doc, 10.0, 10.0, 14.0, 12.0);
+        let report = dof_report(&doc, &[a]);
+        assert_eq!(report.dof, 0, "the fixed line itself is rigid");
+        assert_eq!(
+            report.free_entities, 1,
+            "the untouched line must be reported, or 'fully constrained' lies"
+        );
+    }
+
+    #[test]
+    fn resolve_after_transform_survives_the_axis_aligned_saddle() {
+        // Pure-angle residuals have an exact saddle 90° from the target;
+        // axis-aligned drawings land on it exactly. a is pinned vertical,
+        // b sits exactly horizontal — plain solve() stalls on the saddle
+        // and the recorded Parallel is silently left violated.
+        let mut doc = Document::new();
+        let a = add_line(&mut doc, 0.0, 0.0, 0.0, 5.0);
+        let b = add_line(&mut doc, 2.0, 0.0, 7.0, 0.0);
+        doc.add_constraint(SketchConstraint::fixed(a));
+        doc.add_constraint(SketchConstraint::pair(ConstraintKind::Parallel, a, b));
+        assert!(
+            resolve_after_transform(&mut doc, &[a]),
+            "the saddle start must not be reported as unsolvable"
+        );
+        let lb = line_of(&doc, b).unwrap();
+        assert!(
+            (lb.p1.x - lb.p0.x).abs() < 1e-6,
+            "b must actually be vertical after the resolve: {lb:?}"
+        );
+    }
+
+    #[test]
+    fn line_distance_does_not_settle_with_the_mover_crossing_the_reference() {
+        // |signed distance| − v is also zero with b's endpoints on OPPOSITE
+        // sides of a. Without an explicit Parallel row the solver accepts
+        // that crossing state as fully satisfied.
+        let mut doc = Document::new();
+        let a = add_line(&mut doc, 0.0, 0.0, 10.0, 0.0);
+        let b = add_line(&mut doc, 0.0, 5.0, 10.0, 5.0);
+        doc.add_constraint(SketchConstraint::fixed(a));
+        constrain_line_distance(&mut doc, &[a, b], Some(5.0)).expect("must solve");
+        // Push b into the crossing state: both endpoints at distance 5 but
+        // on opposite sides of a. The two |distance| rows are exactly
+        // satisfied there, so the old lowering CONVERGED and left b crossing
+        // the reference while the record claimed a parallel width. With the
+        // Parallel row the state is correctly refused (the residual barrier
+        // at the crossing means it cannot be solved from here), so the
+        // caller keeps/rolls back its own edit instead of accepting junk.
+        set_line(&mut doc, b, 0.0, 5.0, 10.0, -5.0);
+        assert!(
+            !resolve_after_edit(&mut doc, a, None),
+            "the crossing state must be refused, not accepted as satisfied"
+        );
+        // A full flip to the far side is a legitimate second state of an
+        // unsigned width and must still resolve fine.
+        set_line(&mut doc, b, 0.0, -5.0, 10.0, -5.0);
+        assert!(resolve_after_edit(&mut doc, a, None));
+        let lb = line_of(&doc, b).unwrap();
+        assert!(
+            lb.p0.y.signum() == lb.p1.y.signum()
+                && (lb.p0.y.abs() - 5.0).abs() < 1e-6
+                && (lb.p1.y.abs() - 5.0).abs() < 1e-6,
+            "the flipped-but-parallel state stays valid: {lb:?}"
+        );
     }
 
     #[test]
