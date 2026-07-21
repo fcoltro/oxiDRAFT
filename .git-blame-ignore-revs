@@ -1,3 +1,0 @@
-# Bulk rustfmt of the whole workspace — ignored by `git blame`.
-# Enable locally with: git config blame.ignoreRevsFile .git-blame-ignore-revs
-0775270f2a5344817c746048d8cdb9f77a77dcdc
