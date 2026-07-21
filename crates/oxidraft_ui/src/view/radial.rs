@@ -13,25 +13,31 @@ pub enum RadialRing {
 
 const DEAD_ZONE: f32 = 26.0;
 
-const ROOT_RADIUS: f32 = 58.0;
-
+// Move past this (from the centre) to commit to a category / expand a group.
 const ROOT_EXPAND: f32 = 34.0;
-
 const CATEGORY_EXPAND: f32 = ROOT_EXPAND;
 
-const ROOT_BACKDROP_RADIUS: f32 = 100.0;
+// The pie geometry: a central hub, then the wedge ring between INNER and OUTER.
+const HUB_RADIUS: f32 = 54.0;
+const RING_INNER: f32 = 62.0;
+const RING_OUTER: f32 = 152.0;
+// Angular slice trimmed off each side of a wedge, leaving the thin dark gap
+// (and the divider line) that reads as a segmented pie.
+const WEDGE_HALF_GAP: f32 = 0.03;
+const RING_ICON_SIZE: f32 = 28.0;
 
-const CATEGORY_RADIUS: f32 = 148.0;
-
-const VARIANT_RADIUS: f32 = 210.0;
-
+const VARIANT_RADIUS: f32 = 214.0;
 const VARIANT_ARC_STEP: f32 = 0.34;
-
 const VARIANT_UNLATCH_MARGIN: f32 = 0.15;
+const VARIANT_BTN_RADIUS: f32 = 21.0;
 
-const ICON_SIZE: f32 = 30.0;
-
-const ROOT_ICON_SIZE: f32 = 40.0;
+// Local palette — the theme's WIDGET_* tokens are near-transparent (they sit on
+// panels), but the radial menu floats over the canvas and needs solid fills.
+const WEDGE_BG: Color32 = Color32::from_rgb(28, 32, 41);
+const WEDGE_HOVER: Color32 = Color32::from_rgb(49, 57, 71);
+const HUB_BG: Color32 = Color32::from_rgb(14, 16, 22);
+const DIVIDER: Color32 = Color32::from_rgb(54, 60, 73);
+const EDGE_HL: Color32 = Color32::from_rgb(150, 162, 182);
 
 fn wedge_at(angle: f32, count: usize) -> usize {
     if count == 0 {
@@ -51,9 +57,10 @@ fn wedge_center_angle(index: usize, count: usize) -> f32 {
     index as f32 * std::f32::consts::TAU / count as f32
 }
 
-fn wedge_point(center: Pos2, index: usize, count: usize, radius: f32) -> Pos2 {
-    let a = wedge_center_angle(index, count);
-    center + vec2(a.sin(), -a.cos()) * radius
+/// Unit direction for a menu angle. Angle 0 points straight up, matching
+/// [`angle_of`] and [`wedge_at`], so drawing and hit-testing agree.
+fn dir_of(angle: f32) -> egui::Vec2 {
+    vec2(angle.sin(), -angle.cos())
 }
 
 fn variant_angle(parent_angle: f32, index: usize, count: usize) -> f32 {
@@ -62,8 +69,7 @@ fn variant_angle(parent_angle: f32, index: usize, count: usize) -> f32 {
 }
 
 fn variant_point(center: Pos2, parent_angle: f32, index: usize, count: usize, radius: f32) -> Pos2 {
-    let a = variant_angle(parent_angle, index, count);
-    center + vec2(a.sin(), -a.cos()) * radius
+    center + dir_of(variant_angle(parent_angle, index, count)) * radius
 }
 
 fn angle_diff(a: f32, b: f32) -> f32 {
@@ -112,40 +118,158 @@ fn latch<T>(state: &mut Option<T>, dist: f32, expand: f32, compute: impl FnOnce(
     }
 }
 
-fn wedge_shell(
-    painter: &egui::Painter,
-    center: Pos2,
-    radius: f32,
-    bg: Color32,
-    stroke_color: Color32,
-    stroke_width: f32,
-) {
-    painter.circle_filled(center, radius, bg);
-    painter.circle_stroke(center, radius, Stroke::new(stroke_width, stroke_color));
+/// Points sampled along the arc at `radius`, spanning `±half_span` about
+/// `center_angle` — used for the filled wedge and its hovered-edge highlight.
+fn arc_points(center: Pos2, center_angle: f32, half_span: f32, radius: f32) -> Vec<Pos2> {
+    const SEGS: usize = 28;
+    (0..=SEGS)
+        .map(|k| {
+            let a = center_angle - half_span + 2.0 * half_span * (k as f32 / SEGS as f32);
+            center + dir_of(a) * radius
+        })
+        .collect()
 }
 
+/// Fills the annular sector (a pie slice with the hub cut out) as a triangle
+/// strip between the inner and outer arcs — a mesh so the concave inner edge
+/// tessellates correctly, which a convex-polygon fill would not.
+fn fill_sector(
+    painter: &egui::Painter,
+    center: Pos2,
+    center_angle: f32,
+    half_span: f32,
+    inner_r: f32,
+    outer_r: f32,
+    color: Color32,
+) {
+    const SEGS: usize = 28;
+    let mut mesh = egui::Mesh::default();
+    for k in 0..=SEGS {
+        let a = center_angle - half_span + 2.0 * half_span * (k as f32 / SEGS as f32);
+        let d = dir_of(a);
+        mesh.colored_vertex(center + d * inner_r, color);
+        mesh.colored_vertex(center + d * outer_r, color);
+    }
+    for k in 0..SEGS {
+        let i = (k * 2) as u32;
+        mesh.add_triangle(i, i + 1, i + 2);
+        mesh.add_triangle(i + 1, i + 3, i + 2);
+    }
+    painter.add(egui::Shape::mesh(mesh));
+}
+
+/// One pie wedge: filled sector, side dividers, a hovered/active outer-edge
+/// highlight, and a centred icon or text label.
 #[allow(clippy::too_many_arguments)]
-fn draw_wedge_icon(
+fn draw_sector(
     painter: &egui::Painter,
     ctx: &egui::Context,
     center: Pos2,
+    center_angle: f32,
+    half_span: f32,
+    hovered: bool,
+    active: bool,
+    enabled: bool,
+    icon: Option<Icon>,
+    text: Option<&str>,
+) {
+    let bg = if hovered { WEDGE_HOVER } else { WEDGE_BG };
+    fill_sector(
+        painter,
+        center,
+        center_angle,
+        half_span,
+        RING_INNER,
+        RING_OUTER,
+        bg,
+    );
+
+    for edge in [center_angle - half_span, center_angle + half_span] {
+        let d = dir_of(edge);
+        painter.line_segment(
+            [center + d * RING_INNER, center + d * RING_OUTER],
+            Stroke::new(1.0, DIVIDER),
+        );
+    }
+    if hovered || active {
+        let hl = if active { theme::ACCENT } else { EDGE_HL };
+        painter.add(egui::Shape::line(
+            arc_points(center, center_angle, half_span, RING_OUTER - 1.5),
+            Stroke::new(2.5, hl),
+        ));
+    }
+
+    let mid = (RING_INNER + RING_OUTER) * 0.5;
+    let pos = center + dir_of(center_angle) * mid;
+    let tint = if !enabled {
+        theme::TEXT_DIM
+    } else if hovered {
+        Color32::WHITE
+    } else {
+        theme::TEXT
+    };
+    if let Some(icon) = icon {
+        icons::paint_icon(
+            painter,
+            ctx,
+            icon,
+            Rect::from_center_size(pos, vec2(RING_ICON_SIZE, RING_ICON_SIZE)),
+            tint,
+        );
+    }
+    if let Some(text) = text {
+        painter.text(
+            pos,
+            egui::Align2::CENTER_CENTER,
+            short_label(text),
+            egui::FontId::proportional(theme::tok::T_SM),
+            tint,
+        );
+    }
+}
+
+/// The dark central hub, showing the hovered entry's label like the reference
+/// design ("Toggle overlays"). Long labels wrap to the hub width.
+fn draw_hub(painter: &egui::Painter, center: Pos2, label: Option<&str>) {
+    painter.circle_filled(center, HUB_RADIUS, HUB_BG);
+    painter.circle_stroke(center, HUB_RADIUS, Stroke::new(1.0, DIVIDER));
+    match label {
+        Some(text) => {
+            let galley = painter.layout(
+                text.to_string(),
+                egui::FontId::proportional(theme::tok::T_SM),
+                theme::TEXT,
+                HUB_RADIUS * 1.7,
+            );
+            painter.galley(center - galley.size() * 0.5, galley, theme::TEXT);
+        }
+        None => {
+            painter.text(
+                center,
+                egui::Align2::CENTER_CENTER,
+                "Radial",
+                egui::FontId::proportional(theme::tok::T_XS),
+                theme::TEXT_DIM,
+            );
+        }
+    }
+}
+
+/// A small round button for a group's expanded variants, which fan out from
+/// their parent wedge rather than tiling the ring.
+fn draw_variant_button(
+    painter: &egui::Painter,
+    ctx: &egui::Context,
+    pos: Pos2,
     icon: Icon,
-    label: &str,
     hovered: bool,
     active: bool,
     enabled: bool,
 ) {
-    let bg = if hovered {
-        theme::WIDGET_HOVER
-    } else {
-        theme::WIDGET_BG
-    };
-    let stroke_color = if active {
-        theme::ACCENT
-    } else {
-        theme::OUTLINE
-    };
-    wedge_shell(painter, center, ICON_SIZE * 0.62, bg, stroke_color, 1.0);
+    let bg = if hovered { WEDGE_HOVER } else { WEDGE_BG };
+    painter.circle_filled(pos, VARIANT_BTN_RADIUS, bg);
+    let ring = if active { theme::ACCENT } else { DIVIDER };
+    painter.circle_stroke(pos, VARIANT_BTN_RADIUS, Stroke::new(1.2, ring));
     let tint = if !enabled {
         theme::TEXT_DIM
     } else if hovered {
@@ -157,58 +281,8 @@ fn draw_wedge_icon(
         painter,
         ctx,
         icon,
-        Rect::from_center_size(center, vec2(ICON_SIZE * 0.8, ICON_SIZE * 0.8)),
+        Rect::from_center_size(pos, vec2(RING_ICON_SIZE * 0.85, RING_ICON_SIZE * 0.85)),
         tint,
-    );
-    if hovered {
-        painter.text(
-            center + vec2(0.0, ICON_SIZE * 0.9),
-            egui::Align2::CENTER_TOP,
-            short_label(label),
-            egui::FontId::proportional(theme::tok::T_XS),
-            theme::TEXT,
-        );
-    }
-}
-
-fn draw_root_wedge(
-    painter: &egui::Painter,
-    center: Pos2,
-    label: &str,
-    hovered: bool,
-    dimmed: bool,
-) {
-    let bg = if hovered {
-        theme::WIDGET_HOVER
-    } else {
-        theme::WIDGET_BG
-    };
-    let stroke_color = if hovered {
-        theme::ACCENT
-    } else {
-        theme::OUTLINE
-    };
-    wedge_shell(
-        painter,
-        center,
-        ROOT_ICON_SIZE * 0.62,
-        bg,
-        stroke_color,
-        1.2,
-    );
-    let color = if dimmed {
-        theme::TEXT_DIM
-    } else if hovered {
-        Color32::WHITE
-    } else {
-        theme::TEXT
-    };
-    painter.text(
-        center,
-        egui::Align2::CENTER_CENTER,
-        label,
-        egui::FontId::proportional(theme::tok::T_XS),
-        color,
     );
 }
 
@@ -319,6 +393,25 @@ pub(super) fn radial_menu(
         (Some(v), Some(pa)) => Some(nearest_variant(angle, pa, v.len())),
         _ => None,
     };
+
+    // The hub shows the label of the deepest thing currently hovered.
+    let hub_label: Option<String> =
+        if let (Some(sub), Some(si)) = (&variant_entries, variant_hovered) {
+            Some(short_label(sub[si].1).to_string())
+        } else if variant_entries.is_none() {
+            if let (Some(entries), Some(idx)) = (&category_entries, category_hovered) {
+                Some(short_label(entries[idx].1).to_string())
+            } else if category.is_none() && dist > DEAD_ZONE {
+                Some(if root_idx == 0 { "Tools" } else { "Modifiers" }.to_string())
+            } else {
+                None
+            }
+        } else {
+            None
+        };
+
+    let active_name = app.tool.name();
+    let has_sel = app.has_selection();
     let catch = egui::Area::new(egui::Id::new("radial_menu"))
         .order(egui::Order::Tooltip)
         .fixed_pos(canvas_rect.min)
@@ -326,53 +419,75 @@ pub(super) fn radial_menu(
             let catch = ui.allocate_rect(ctx.content_rect(), egui::Sense::click());
             let painter = ui.painter();
             let outer_r = if variant_entries.is_some() {
-                VARIANT_RADIUS + 40.0
-            } else if category_entries.is_some() {
-                CATEGORY_RADIUS + 40.0
+                VARIANT_RADIUS + 34.0
             } else {
-                ROOT_BACKDROP_RADIUS
+                RING_OUTER + 28.0
             };
             painter.circle_filled(center, outer_r, theme::PANEL_GLASS);
-            painter.circle_stroke(center, outer_r, Stroke::new(1.0_f32, theme::OUTLINE));
-            painter.circle_filled(center, DEAD_ZONE, theme::WIDGET_BG);
-            let root_dimmed = category.is_some();
-            for (i, label) in ["Tools", "Modifiers"].iter().enumerate() {
-                let pos = wedge_point(center, i, 2, ROOT_RADIUS);
-                let hovered = !root_dimmed && i == root_idx && dist > DEAD_ZONE;
-                draw_root_wedge(painter, pos, label, hovered, root_dimmed);
-            }
-            let active_name = app.tool.name();
-            let has_sel = app.has_selection();
+            painter.circle_stroke(center, outer_r, Stroke::new(1.0, DIVIDER));
+
             if let Some(entries) = &category_entries {
+                // A category was chosen: a full ring of tool wedges.
                 let count = entries.len();
-                let category_dimmed = variant_entries.is_some();
+                let half = std::f32::consts::PI / count as f32 - WEDGE_HALF_GAP;
+                let dimmed = variant_entries.is_some();
                 for (i, (icon, label, act)) in entries.iter().enumerate() {
-                    let pos = wedge_point(center, i, count, CATEGORY_RADIUS);
-                    let hovered =
-                        !category_dimmed && category_hovered == Some(i) && dist > ROOT_EXPAND;
-                    let active = matches!(
-                        act, Act::Tool(t) if active_name == t.name()
-                    );
+                    let ca = wedge_center_angle(i, count);
+                    let hovered = !dimmed && category_hovered == Some(i) && dist > ROOT_EXPAND;
+                    let active = matches!(act, Act::Tool(t) if active_name == t.name());
                     let enabled = has_sel || !act_needs_selection(act);
-                    draw_wedge_icon(painter, ctx, pos, *icon, label, hovered, active, enabled);
+                    draw_sector(
+                        painter,
+                        ctx,
+                        center,
+                        ca,
+                        half,
+                        hovered,
+                        active,
+                        enabled,
+                        Some(*icon),
+                        None,
+                    );
+                    let _ = label;
+                    // Marks a wedge whose group fans into variants.
                     if group_id(act).is_some() {
-                        let tick = wedge_point(center, i, count, CATEGORY_RADIUS + 20.0);
+                        let tick = center + dir_of(ca) * (RING_OUTER + 9.0);
                         painter.circle_filled(tick, 2.5, theme::TEXT_DIM);
                     }
                 }
-            }
-            if let (Some(sub), Some(pa)) = (&variant_entries, parent_angle) {
-                let sub_count = sub.len();
-                for (i, (icon, label, act)) in sub.iter().enumerate() {
-                    let pos = variant_point(center, pa, i, sub_count, VARIANT_RADIUS);
-                    let hovered = variant_hovered == Some(i);
-                    let active = matches!(
-                        act, Act::Tool(t) if active_name == t.name()
+            } else {
+                // Root: the circle split into two big halves — Tools / Modifiers.
+                let half = std::f32::consts::PI / 2.0 - WEDGE_HALF_GAP;
+                for (i, label) in ["Tools", "Modifiers"].iter().enumerate() {
+                    let ca = wedge_center_angle(i, 2);
+                    let hovered = i == root_idx && dist > DEAD_ZONE;
+                    draw_sector(
+                        painter,
+                        ctx,
+                        center,
+                        ca,
+                        half,
+                        hovered,
+                        false,
+                        true,
+                        None,
+                        Some(label),
                     );
-                    let enabled = has_sel || !act_needs_selection(act);
-                    draw_wedge_icon(painter, ctx, pos, *icon, label, hovered, active, enabled);
                 }
             }
+
+            if let (Some(sub), Some(pa)) = (&variant_entries, parent_angle) {
+                let sub_count = sub.len();
+                for (i, (icon, _label, act)) in sub.iter().enumerate() {
+                    let pos = variant_point(center, pa, i, sub_count, VARIANT_RADIUS);
+                    let hovered = variant_hovered == Some(i);
+                    let active = matches!(act, Act::Tool(t) if active_name == t.name());
+                    let enabled = has_sel || !act_needs_selection(act);
+                    draw_variant_button(painter, ctx, pos, *icon, hovered, active, enabled);
+                }
+            }
+
+            draw_hub(painter, center, hub_label.as_deref());
             catch
         })
         .inner;
