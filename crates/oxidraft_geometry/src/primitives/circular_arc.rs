@@ -1,12 +1,24 @@
+//! The circular arc primitive, [`CircularArc`]. Angles are measured
+//! counter-clockwise from the +x axis; the arc sweeps linearly from
+//! `start_angle` to `end_angle`, so `end < start` is a legitimate reversed arc
+//! (as produced by reversing/joining) covering the same span as its forward twin.
+
 use crate::curve::CurveSegment;
 use crate::error::GeomError;
 use crate::point::{BoundingBox, Point2d};
 
+/// A circular arc: a portion of a circle, or a full circle when the sweep is a
+/// whole turn.
 #[derive(Clone, Copy, Debug)]
 pub struct CircularArc {
+    /// Centre of the circle the arc lies on.
     pub center: Point2d,
+    /// Radius (strictly positive; enforced by the constructors).
     pub radius: f64,
+    /// Angle of the start point, in radians.
     pub start_angle: f64,
+    /// Angle of the end point, in radians (the domain parameter runs from
+    /// `start_angle` to `end_angle`).
     pub end_angle: f64,
 }
 
@@ -35,6 +47,9 @@ impl CircularArc {
         })
     }
 
+    /// The arc passing through three points in order, or `None` when they are
+    /// collinear (no finite circle through them). `p2` is used to pick which of
+    /// the two possible arcs between `p1` and `p3` is meant.
     pub fn from_three_points(p1: &Point2d, p2: &Point2d, p3: &Point2d) -> Option<Self> {
         let ax = p2.x - p1.x;
         let ay = p2.y - p1.y;
@@ -95,10 +110,12 @@ impl CircularArc {
         })
     }
 
+    /// The arc's start point (at `start_angle`).
     pub fn start_point(&self) -> (f64, f64) {
         self.evaluate_f64(self.start_angle)
     }
 
+    /// The arc's end point (at `end_angle`).
     pub fn end_point(&self) -> (f64, f64) {
         self.evaluate_f64(self.end_angle)
     }
@@ -122,6 +139,8 @@ impl CircularArc {
         crate::util::wrap_tau(angle - lo) <= self.included_angle() + 1e-9
     }
 
+    /// The sagitta — the height of the arc above the chord joining its
+    /// endpoints (`r − r·cos(θ/2)` for included angle `θ`).
     pub fn sagitta(&self) -> f64 {
         let r = self.radius;
         r - r * (self.included_angle() / 2.0).cos()

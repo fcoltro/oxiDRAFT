@@ -1,3 +1,12 @@
+//! Geometric operations over curves.
+//!
+//! The verbs of the kernel: curve–curve [intersection](mod@intersect),
+//! point/curve [`distance`] and projection, [`offset`]ting, [`blend`]ing two curves with a
+//! chosen continuity, [`tangent`] constructions (tangent lines and circles),
+//! [`curvature`], [`winding`] angle, and [`split_reverse`] for cutting and
+//! reversing curves. Kept separate from the primitive types so the shapes stay
+//! small and the algorithms live in one place.
+
 pub mod blend;
 pub mod curvature;
 pub mod distance;

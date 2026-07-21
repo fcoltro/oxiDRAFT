@@ -1,7 +1,13 @@
+//! Cutting a curve at a parameter ([`split_curve`]) and reversing its direction
+//! ([`reverse_curve`]), each preserving the exact shape of the input.
+
 use crate::curve::Curve;
 use crate::nurbs::NurbsCurve;
 use crate::primitives::{CircularArc, CubicBezier, EllipticalArc, PolyCurve};
 
+/// Cuts `curve` at parameter `t ∈ [0, 1]`, returning the `[0, t]` and `[t, 1]`
+/// pieces. Each piece has the same kind as the input (a split polycurve stays a
+/// polycurve) and together they trace exactly the original shape.
 pub fn split_curve(curve: &Curve, t: f64) -> (Curve, Curve) {
     match curve {
         Curve::Line(l) => {
@@ -73,6 +79,9 @@ pub fn split_curve(curve: &Curve, t: f64) -> (Curve, Curve) {
     }
 }
 
+/// Returns `curve` traced in the opposite direction — same geometry, swapped
+/// start and end. Arcs come back with `end < start` (a reversed arc), which the
+/// kernel treats as a first-class span, not an error.
 pub fn reverse_curve(curve: &Curve) -> Curve {
     match curve {
         Curve::Line(l) => Curve::Line(l.reverse()),

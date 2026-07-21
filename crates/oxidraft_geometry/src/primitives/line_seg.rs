@@ -1,47 +1,63 @@
+//! The straight line segment primitive, [`LineSeg`], parameterised over
+//! `t ∈ [0, 1]` from `p0` to `p1`.
+
 use crate::curve::CurveSegment;
 use crate::point::{BoundingBox, Point2d};
 
+/// A straight segment between two endpoints.
 #[derive(Clone, Debug, PartialEq)]
 pub struct LineSeg {
+    /// Start point (parameter `t = 0`).
     pub p0: Point2d,
+    /// End point (parameter `t = 1`).
     pub p1: Point2d,
 }
 
 impl LineSeg {
+    /// Builds a segment from its two endpoints.
     pub fn from_endpoints(p0: Point2d, p1: Point2d) -> Self {
         LineSeg { p0, p1 }
     }
 
+    /// The `p1 − p0` direction vector (not normalised; its length is the
+    /// segment's length).
     #[inline]
     pub fn direction(&self) -> (f64, f64) {
         (self.p1.x - self.p0.x, self.p1.y - self.p0.y)
     }
 
+    /// The point halfway along the segment.
     pub fn midpoint(&self) -> Point2d {
         self.p0.midpoint(&self.p1)
     }
 
+    /// Squared length — avoids the square root when only comparing lengths.
     pub fn length_sq(&self) -> f64 {
         self.p0.dist_sq(&self.p1)
     }
 
+    /// The segment's length.
     pub fn length_f64(&self) -> f64 {
         self.length_sq().sqrt()
     }
 
+    /// Exact tangent — for a line this is just its (constant) direction vector.
     pub fn tangent_exact(&self) -> (f64, f64) {
         self.direction()
     }
 
+    /// Exact normal — the direction rotated 90° counter-clockwise.
     pub fn normal_exact(&self) -> (f64, f64) {
         let (dx, dy) = self.direction();
         (-dy, dx)
     }
 
+    /// The point at parameter `t` (exact linear interpolation from `p0` to `p1`).
     pub fn evaluate_exact(&self, t: f64) -> Point2d {
         self.p0.lerp(&self.p1, t)
     }
 
+    /// Splits the segment at parameter `t` into the `p0..t` and `t..p1` pieces.
     pub fn split_at_exact(&self, t: f64) -> (LineSeg, LineSeg) {
         let mid = self.evaluate_exact(t);
         (
@@ -56,6 +72,7 @@ impl LineSeg {
         )
     }
 
+    /// Returns the segment with its endpoints swapped (reversed direction).
     pub fn reverse(&self) -> LineSeg {
         LineSeg {
             p0: self.p1,
@@ -63,6 +80,8 @@ impl LineSeg {
         }
     }
 
+    /// The segment shifted sideways by `dist` along its left normal. A
+    /// zero-length segment has no direction, so it is returned unmoved.
     pub fn offset_exact(&self, dist: f64) -> LineSeg {
         let (nx, ny) = self.normal_exact();
         let len = self.length_f64();

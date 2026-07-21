@@ -1,3 +1,7 @@
+//! Small numeric helpers shared across the kernel: total angle-wrapping
+//! functions (safe even for NaN/±∞ from corrupt input), point-to-segment
+//! distance, and a tiny "keep the smallest" accumulator.
+
 const TAU: f64 = std::f64::consts::TAU;
 const PI: f64 = std::f64::consts::PI;
 
@@ -36,10 +40,14 @@ pub fn positive_sweep(a: f64) -> f64 {
     if r == 0.0 { TAU } else { r }
 }
 
+/// Wraps `a` into the half-open turn `[start, start + τ)` — the representative
+/// of `a` that is ≥ `start`. Used to test whether an angle lies on an arc.
 pub fn wrap_from(a: f64, start: f64) -> f64 {
     start + wrap_tau(a - start)
 }
 
+/// Squared distance from point `p` to the segment `a→b`, clamped to the
+/// segment's endpoints (a degenerate zero-length segment measures to `a`).
 pub fn point_segment_dist_sq(p: (f64, f64), a: (f64, f64), b: (f64, f64)) -> f64 {
     let (dx, dy) = (b.0 - a.0, b.1 - a.1);
     let len_sq = dx * dx + dy * dy;
@@ -52,6 +60,8 @@ pub fn point_segment_dist_sq(p: (f64, f64), a: (f64, f64), b: (f64, f64)) -> f64
     (p.0 - fx).powi(2) + (p.1 - fy).powi(2)
 }
 
+/// Distance from point `p` to the segment `a→b` (the square root of
+/// [`point_segment_dist_sq`]).
 pub fn point_segment_dist(p: (f64, f64), a: (f64, f64), b: (f64, f64)) -> f64 {
     point_segment_dist_sq(p, a, b).sqrt()
 }
@@ -72,6 +82,7 @@ impl<T> Default for MinTracker<T> {
 }
 
 impl<T> MinTracker<T> {
+    /// A fresh tracker holding no candidate yet.
     pub fn new() -> Self {
         Self::default()
     }

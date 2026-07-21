@@ -1,24 +1,37 @@
+//! The cubic Bézier primitive, [`CubicBezier`] — a segment defined by two
+//! endpoints (`p0`, `p3`) and two control points (`p1`, `p2`), over `t ∈ [0, 1]`.
+
 use crate::curve::CurveSegment;
 use crate::point::{BoundingBox, Point2d};
 
+/// A single cubic Bézier segment, `p0 → p3` shaped by control points `p1`, `p2`.
 #[derive(Clone, Debug, PartialEq)]
 pub struct CubicBezier {
+    /// Start point (`t = 0`).
     pub p0: Point2d,
+    /// First control point.
     pub p1: Point2d,
+    /// Second control point.
     pub p2: Point2d,
+    /// End point (`t = 1`).
     pub p3: Point2d,
 }
 
 impl CubicBezier {
+    /// Builds a cubic Bézier from its four control points in order.
     pub fn new(p0: Point2d, p1: Point2d, p2: Point2d, p3: Point2d) -> Self {
         CubicBezier { p0, p1, p2, p3 }
     }
 
+    /// The point at parameter `t`, returned as a [`Point2d`].
     pub fn evaluate_exact(&self, t: f64) -> Point2d {
         let (x, y) = self.evaluate_f64(t);
         Point2d::new(x, y)
     }
 
+    /// Splits the curve at `t` into two Béziers via de Casteljau subdivision;
+    /// each piece traces exactly the same shape as the corresponding part of
+    /// the original.
     pub fn split_at_exact(&self, t: f64) -> (CubicBezier, CubicBezier) {
         let lerp = |a: &Point2d, b: &Point2d| a.lerp(b, t);
 
@@ -45,6 +58,8 @@ impl CubicBezier {
         )
     }
 
+    /// Re-expresses this cubic as an equivalent quartic, returning the five
+    /// degree-elevated control points that trace the identical curve.
     pub fn degree_elevate(&self) -> [Point2d; 5] {
         let q0 = self.p0;
         let q1 = self.p0.lerp(&self.p1, 0.75);

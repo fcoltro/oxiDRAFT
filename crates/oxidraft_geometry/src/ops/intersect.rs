@@ -1,14 +1,23 @@
+//! Curve–curve intersection. Closed-form solvers for the line/circle pairs and
+//! a general subdivision-based solver ([`intersect`]) for everything else,
+//! reporting each crossing as a point plus the parameter on each input curve.
+
 use crate::curve::{Curve, CurveSegment};
 use crate::point::Point2d;
 use crate::primitives::{CircularArc, LineSeg};
 
+/// A single crossing between two curves.
 #[derive(Clone, Debug)]
 pub struct CurveIntersection {
+    /// The intersection point, in world coordinates.
     pub point: (f64, f64),
+    /// Parameter of the crossing on the first curve.
     pub t1: f64,
+    /// Parameter of the crossing on the second curve.
     pub t2: f64,
 }
 
+/// Intersection of two bounded segments, or `None` if they are parallel or miss.
 pub fn intersect_line_line(l1: &LineSeg, l2: &LineSeg) -> Option<CurveIntersection> {
     intersect_segments_f64(
         l1.p0.to_f64(),
@@ -19,6 +28,8 @@ pub fn intersect_line_line(l1: &LineSeg, l2: &LineSeg) -> Option<CurveIntersecti
     .map(|(point, t1, t2)| CurveIntersection { point, t1, t2 })
 }
 
+/// Intersection of the two infinite lines through the segments — ignores the
+/// endpoints, so it finds where the lines *would* cross. `None` when parallel.
 pub fn intersect_lines_unbounded(l1: &LineSeg, l2: &LineSeg) -> Option<Point2d> {
     let (x1, y1) = l1.p0.to_f64();
     let (x2, y2) = l1.p1.to_f64();
@@ -33,6 +44,8 @@ pub fn intersect_lines_unbounded(l1: &LineSeg, l2: &LineSeg) -> Option<Point2d> 
     Some(Point2d::from_f64(x1 + t * (x2 - x1), y1 + t * (y2 - y1)))
 }
 
+/// Intersections of a segment with an arc (0, 1, or 2), keeping only crossings
+/// that lie within both the segment's extent and the arc's swept span.
 pub fn intersect_line_circle(line: &LineSeg, arc: &CircularArc) -> Vec<CurveIntersection> {
     let (ax, ay) = line.p0.to_f64();
     let (bx, by) = line.p1.to_f64();
@@ -112,6 +125,8 @@ fn angle_on_domain(angle: f64, start: f64, end: f64) -> f64 {
     lo + a.min(span)
 }
 
+/// Intersections of two arcs (0, 1, or 2), restricted to the spans both arcs
+/// actually sweep.
 pub fn intersect_circle_circle(c1: &CircularArc, c2: &CircularArc) -> Vec<CurveIntersection> {
     let (cx1, cy1) = c1.center.to_f64();
     let (cx2, cy2) = c2.center.to_f64();
@@ -261,6 +276,10 @@ fn refine_intersection(c1: &Curve, c2: &Curve, t1_init: f64, t2_init: f64) -> Cu
     CurveIntersection { point, t1, t2 }
 }
 
+/// General fallback solver: recursively subdivides both curves by bounding box
+/// until crossings localise, used for pairs with no closed form (Béziers,
+/// splines, mixed kinds). Prefer [`intersect`], which dispatches here only when
+/// needed.
 pub fn intersect_general(c1: &Curve, c2: &Curve) -> Vec<CurveIntersection> {
     if let Curve::Poly(p) = c1 {
         let n = p.segments.len().max(1) as f64;
@@ -410,6 +429,9 @@ fn flatten_params_rec(
     }
 }
 
+/// All intersections between any two curves — the general entry point. Routes
+/// line/arc pairs to their closed-form solvers and everything else to
+/// [`intersect_general`].
 pub fn intersect(c1: &Curve, c2: &Curve) -> Vec<CurveIntersection> {
     match (c1, c2) {
         (Curve::Line(l1), Curve::Line(l2)) => intersect_line_line(l1, l2).into_iter().collect(),

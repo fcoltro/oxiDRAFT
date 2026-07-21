@@ -1,16 +1,27 @@
+//! Closest-point queries: projecting a point onto a curve, the point-to-curve
+//! distance, and the minimum distance between two curves.
+
 use crate::curve::{Curve, CurveSegment};
 
+/// The nearest point found on a curve when projecting a query point.
 #[derive(Clone, Debug)]
 pub struct ProjectionResult {
+    /// The closest point on the curve, in world coordinates.
     pub point: (f64, f64),
+    /// The curve parameter at that point.
     pub t: f64,
+    /// Distance from the query point to `point`.
     pub distance: f64,
 }
 
+/// Shortest distance from the point `(px, py)` to `curve`.
 pub fn point_to_curve_distance(curve: &Curve, px: f64, py: f64) -> f64 {
     project_point_onto_curve(curve, px, py).distance
 }
 
+/// Projects `(px, py)` onto `curve`, returning the nearest point, its parameter,
+/// and the distance. Closed-form for lines/arcs, a bounded numeric search for
+/// free-form curves.
 pub fn project_point_onto_curve(curve: &Curve, px: f64, py: f64) -> ProjectionResult {
     use Curve::*;
 
@@ -201,6 +212,7 @@ fn golden_section_projection_fn(
     }
 }
 
+/// Minimum distance between two curves — `0` when they intersect.
 pub fn curve_to_curve_distance(c1: &Curve, c2: &Curve) -> f64 {
     let (t0_1, t1_1) = c1.domain();
     let (t0_2, t1_2) = c2.domain();

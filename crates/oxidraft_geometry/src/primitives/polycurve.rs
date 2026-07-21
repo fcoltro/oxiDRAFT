@@ -1,16 +1,26 @@
+//! The polycurve primitive, [`PolyCurve`] — an ordered chain of [`Curve`]
+//! segments (lines, arcs, Béziers, …) treated as one curve. Its `[0, 1]` domain
+//! is split evenly across the segments by index, not by arc length.
+
 use crate::curve::{Curve, CurveSegment};
 use crate::point::BoundingBox;
 
+/// A connected chain of curve segments treated as a single curve.
 #[derive(Clone, Debug)]
 pub struct PolyCurve {
+    /// The child segments, in traversal order.
     pub segments: Vec<Curve>,
 }
 
 impl PolyCurve {
+    /// Builds a polycurve from an ordered list of segments (not validated for
+    /// connectivity here — see [`PolyCurve::check_g0`]).
     pub fn new(segments: Vec<Curve>) -> Self {
         PolyCurve { segments }
     }
 
+    /// True when the chain is G0-continuous: each segment's end meets the next
+    /// segment's start within `tol`, so there are no gaps between links.
     pub fn check_g0(&self, tol: f64) -> bool {
         for i in 0..self.segments.len().saturating_sub(1) {
             let (_, t1) = self.segments[i].domain();
@@ -25,6 +35,9 @@ impl PolyCurve {
         true
     }
 
+    /// Collapses runs of consecutive, near-collinear line segments into single
+    /// segments (a straightness test scaled by `tol`), leaving non-line
+    /// segments untouched. Useful for tidying up exported/offset polylines.
     pub fn merge_collinear(&self, tol: f64) -> PolyCurve {
         use crate::primitives::LineSeg;
         let mut result: Vec<Curve> = Vec::new();

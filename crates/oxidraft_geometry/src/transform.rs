@@ -1,25 +1,43 @@
+//! Affine transforms of the plane, [`Transform2d`] — the 2×3 matrix behind
+//! move/rotate/scale/mirror, applied to points, vectors, and whole curves.
+//! [`Transform2d::compose`] combines two transforms; the arc/ellipse fast paths
+//! in [`Transform2d::apply_curve`] rely on [`Transform2d::is_conformal`].
+
 use crate::curve::Curve;
 use crate::nurbs::{NurbsCurve, RationalBezier};
 use crate::point::Point2d;
 use crate::primitives::{CircularArc, CubicBezier, EllipticalArc, LineSeg, PolyCurve};
 
+/// A 2D affine transform: the linear 2×2 part (`m00 m01 / m10 m11`) plus a
+/// translation (`tx`, `ty`). Maps `(x, y)` to
+/// `(m00·x + m01·y + tx, m10·x + m11·y + ty)`.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Transform2d {
+    /// Row 0, column 0 of the linear part.
     pub m00: f64,
+    /// Row 0, column 1 of the linear part.
     pub m01: f64,
+    /// Horizontal translation.
     pub tx: f64,
+    /// Row 1, column 0 of the linear part.
     pub m10: f64,
+    /// Row 1, column 1 of the linear part.
     pub m11: f64,
+    /// Vertical translation.
     pub ty: f64,
 }
 
 impl Transform2d {
+    /// True when every matrix entry is finite — callers gate application on
+    /// this, since degenerate constructors (e.g. a mirror across a zero-length
+    /// line) can yield non-finite transforms rather than panicking.
     pub fn is_finite(&self) -> bool {
         [self.m00, self.m01, self.tx, self.m10, self.m11, self.ty]
             .iter()
             .all(|v| v.is_finite())
     }
 
+    /// The identity transform (leaves every point unchanged).
     pub fn identity() -> Self {
         Transform2d {
             m00: 1.0,
@@ -31,6 +49,7 @@ impl Transform2d {
         }
     }
 
+    /// A pure translation by `(dx, dy)`.
     pub fn translation(dx: f64, dy: f64) -> Self {
         let mut t = Self::identity();
         t.tx = dx;
@@ -38,6 +57,7 @@ impl Transform2d {
         t
     }
 
+    /// A scaling about the origin by `sx` horizontally and `sy` vertically.
     pub fn scale(sx: f64, sy: f64) -> Self {
         Transform2d {
             m00: sx,
@@ -49,16 +69,20 @@ impl Transform2d {
         }
     }
 
+    /// A uniform scaling about the origin by factor `s` on both axes.
     pub fn scale_uniform(s: f64) -> Self {
         Self::scale(s, s)
     }
 
+    /// A scaling by `(sx, sy)` about `center` instead of the origin (the point
+    /// stays fixed).
     pub fn scale_about(center: &Point2d, sx: f64, sy: f64) -> Self {
         Self::translation(center.x, center.y)
             .compose(&Self::scale(sx, sy))
             .compose(&Self::translation(-center.x, -center.y))
     }
 
+    /// Reflection across the x-axis (flips y).
     pub fn mirror_x() -> Self {
         Self::scale(1.0, -1.0)
     }
@@ -87,6 +111,8 @@ impl Transform2d {
             .compose(&Self::translation(-p0.x, -p0.y))
     }
 
+    /// Rotation by `n` quarter turns (90° each) about the origin, using exact
+    /// `0`/`±1` matrix entries so right-angle rotations stay exact.
     pub fn rotation_quarter_turns(n: i32) -> Self {
         let (c, s) = match n.rem_euclid(4) {
             0 => (1.0, 0.0),
@@ -104,6 +130,7 @@ impl Transform2d {
         }
     }
 
+    /// Rotation by `angle` radians (counter-clockwise) about the origin.
     pub fn rotation(angle: f64) -> Self {
         let c = angle.cos();
         let s = angle.sin();
@@ -117,12 +144,15 @@ impl Transform2d {
         }
     }
 
+    /// Rotation by `angle` about `center` instead of the origin.
     pub fn rotation_about(center: &Point2d, angle: f64) -> Self {
         Self::translation(center.x, center.y)
             .compose(&Self::rotation(angle))
             .compose(&Self::translation(-center.x, -center.y))
     }
 
+    /// Composition `self ∘ other`: the transform that applies `other` first,
+    /// then `self`.
     pub fn compose(&self, other: &Transform2d) -> Transform2d {
         Transform2d {
             m00: self.m00 * other.m00 + self.m01 * other.m10,
@@ -134,6 +164,7 @@ impl Transform2d {
         }
     }
 
+    /// Maps a position through the full transform (linear part + translation).
     #[inline]
     pub fn apply_point(&self, p: &Point2d) -> Point2d {
         Point2d {
@@ -149,19 +180,26 @@ impl Transform2d {
         (self.m00 * dx + self.m01 * dy, self.m10 * dx + self.m11 * dy)
     }
 
+    /// Determinant of the linear part: the signed area-scaling factor (negative
+    /// under a reflection).
     #[inline]
     pub fn determinant(&self) -> f64 {
         self.m00 * self.m11 - self.m01 * self.m10
     }
 
+    /// The uniform length-scaling factor `√|det|` — exact for a similarity,
+    /// a reasonable summary otherwise.
     pub fn scale_factor(&self) -> f64 {
         self.determinant().abs().sqrt()
     }
 
+    /// The rotation angle of the linear part, in radians.
     pub fn rotation_angle(&self) -> f64 {
         self.m10.atan2(self.m00)
     }
 
+    /// True when the transform flips orientation (mirrors), i.e. its
+    /// determinant is negative.
     pub fn is_reflection(&self) -> bool {
         self.determinant() < 0.0
     }
@@ -183,6 +221,9 @@ impl Transform2d {
 }
 
 impl Transform2d {
+    /// Maps a whole curve through the transform, returning the transformed
+    /// curve. Arcs/ellipses under a similarity keep their kind via a closed-form
+    /// fast path; a general affine lowers them to rational form first.
     pub fn apply_curve(&self, curve: &Curve) -> Curve {
         match curve {
             Curve::Line(l) => Curve::Line(LineSeg::from_endpoints(

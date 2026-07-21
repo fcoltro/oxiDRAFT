@@ -1,14 +1,25 @@
+//! The kernel's point and bounding-box types.
+//!
+//! [`Point2d`] is the plain `f64` planar point every other primitive is built
+//! from; [`BoundingBox`] is the axis-aligned extent used for culling, picking,
+//! and zoom-to-fit.
+
+/// A point in the plane, stored as two `f64` coordinates.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Point2d {
+    /// Horizontal coordinate.
     pub x: f64,
+    /// Vertical coordinate.
     pub y: f64,
 }
 
 impl Point2d {
+    /// Builds a point from `f64` coordinates.
     pub fn new(x: f64, y: f64) -> Self {
         Point2d { x, y }
     }
 
+    /// Builds a point from integer coordinates, widening them to `f64`.
     pub fn from_i64(x: i64, y: i64) -> Self {
         Point2d {
             x: x as f64,
@@ -16,20 +27,26 @@ impl Point2d {
         }
     }
 
+    /// Builds a point from `f64` coordinates (alias of [`Point2d::new`], kept
+    /// for symmetry with [`Point2d::from_i64`] at call sites).
     pub fn from_f64(x: f64, y: f64) -> Self {
         Point2d { x, y }
     }
 
+    /// Returns the coordinates as a plain `(x, y)` tuple.
     #[inline]
     pub fn to_f64(&self) -> (f64, f64) {
         (self.x, self.y)
     }
 
+    /// True when both coordinates are finite (neither NaN nor infinity).
     #[inline]
     pub fn is_finite(&self) -> bool {
         self.x.is_finite() && self.y.is_finite()
     }
 
+    /// Squared distance to `other` — cheaper than [`Point2d::dist_f64`] when only
+    /// comparing distances, since it skips the square root.
     #[inline]
     pub fn dist_sq(&self, other: &Point2d) -> f64 {
         let dx = self.x - other.x;
@@ -37,11 +54,13 @@ impl Point2d {
         dx * dx + dy * dy
     }
 
+    /// Euclidean distance to `other`.
     #[inline]
     pub fn dist_f64(&self, other: &Point2d) -> f64 {
         self.dist_sq(other).sqrt()
     }
 
+    /// The point halfway between `self` and `other`.
     #[inline]
     pub fn midpoint(&self, other: &Point2d) -> Point2d {
         Point2d {
@@ -50,6 +69,8 @@ impl Point2d {
         }
     }
 
+    /// Linearly interpolates toward `other`: `t = 0` returns `self`, `t = 1`
+    /// returns `other`, values outside `[0, 1]` extrapolate.
     #[inline]
     pub fn lerp(&self, other: &Point2d, t: f64) -> Point2d {
         Point2d {
@@ -65,17 +86,24 @@ impl std::fmt::Display for Point2d {
     }
 }
 
+/// An axis-aligned bounding box, held as its lower-left (`min`) and upper-right
+/// (`max`) corners.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct BoundingBox {
+    /// Corner with the smallest x and y.
     pub min: Point2d,
+    /// Corner with the largest x and y.
     pub max: Point2d,
 }
 
 impl BoundingBox {
+    /// Builds a box from already-sorted corners (`min` ≤ `max` on each axis).
     pub fn new(min: Point2d, max: Point2d) -> Self {
         BoundingBox { min, max }
     }
 
+    /// Builds a box from two arbitrary corners, sorting the coordinates so the
+    /// result is well-formed regardless of which corner was passed first.
     pub fn from_corners(x0: f64, y0: f64, x1: f64, y1: f64) -> Self {
         BoundingBox {
             min: Point2d::from_f64(x0.min(x1), y0.min(y1)),
@@ -83,10 +111,12 @@ impl BoundingBox {
         }
     }
 
+    /// True when `(x, y)` lies inside or on the boundary of the box.
     pub fn contains_point_f64(&self, x: f64, y: f64) -> bool {
         x >= self.min.x && x <= self.max.x && y >= self.min.y && y <= self.max.y
     }
 
+    /// True when the two boxes overlap (touching edges count as overlapping).
     pub fn intersects(&self, other: &BoundingBox) -> bool {
         self.max.x >= other.min.x
             && self.min.x <= other.max.x
@@ -103,6 +133,7 @@ impl BoundingBox {
             && self.max.y.is_finite()
     }
 
+    /// The smallest box containing both `self` and `other`.
     pub fn union(&self, other: &BoundingBox) -> BoundingBox {
         BoundingBox {
             min: Point2d {

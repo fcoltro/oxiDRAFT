@@ -1,3 +1,8 @@
+//! Tangent constructions: circles tangent to given entities (the CAD
+//! "tangent-tangent-radius" and "tangent-tangent-tangent" tools, the latter an
+//! Apollonius solve), tangent lines from a point to a circle, and the common
+//! tangent segments between two circles.
+
 use crate::curve::Curve;
 use crate::point::Point2d;
 use crate::primitives::{CircularArc, LineSeg};
@@ -5,10 +10,14 @@ use crate::util::MinTracker;
 
 const EPS: f64 = 1e-9;
 
+/// Centre and radius of the circle through three points, or `None` when they
+/// are collinear.
 pub fn circle_through_three_points(a: Point2d, b: Point2d, c: Point2d) -> Option<(Point2d, f64)> {
     CircularArc::from_three_points(&a, &b, &c).map(|arc| (arc.center, arc.radius))
 }
 
+/// A circle of the given `radius` tangent to both `c1` and `c2`, choosing the
+/// solution whose centre is closest to `near`. `None` if no such circle exists.
 pub fn tangent_circle_ttr(
     c1: &Curve,
     c2: &Curve,
@@ -31,6 +40,8 @@ pub fn tangent_circle_ttr(
     best.value().map(|c| (c, radius))
 }
 
+/// A circle tangent to all three of `c1`, `c2`, `c3` (an Apollonius problem —
+/// up to eight solutions), picking the one whose centre is nearest `near`.
 pub fn tangent_circle_ttt(
     c1: &Curve,
     c2: &Curve,
@@ -161,6 +172,9 @@ fn solve_quadratic(a: f64, b: f64, c: f64) -> Vec<f64> {
     vec![(-b + s) / (2.0 * a), (-b - s) / (2.0 * a)]
 }
 
+/// The points on the circle (centre `o`, radius `r`) where the tangent lines
+/// from external point `p` touch: two points when `p` is outside, one when on
+/// the circle, none when inside.
 pub fn tangent_points_from_point(o: Point2d, r: f64, p: Point2d) -> Vec<Point2d> {
     let d = o.dist_f64(&p);
     if d < r - EPS || r <= EPS {
@@ -180,6 +194,9 @@ pub fn tangent_points_from_point(o: Point2d, r: f64, p: Point2d) -> Vec<Point2d>
         .collect()
 }
 
+/// The common tangent segments between two circles, each as its pair of touch
+/// points. Returns the outer tangents always and the inner ("crossing")
+/// tangents too when the circles are far enough apart not to overlap.
 pub fn common_tangent_segments(
     o1: Point2d,
     r1: f64,

@@ -1,3 +1,7 @@
+//! The primitive curve types — the concrete shapes the [`crate::Curve`] enum
+//! wraps: straight segments, circular and elliptical arcs, cubic Béziers, and
+//! polycurves (chains of the others). Each implements [`crate::CurveSegment`].
+
 pub mod circular_arc;
 pub mod cubic_bezier;
 pub mod elliptical_arc;

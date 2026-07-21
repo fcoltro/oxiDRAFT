@@ -7,6 +7,7 @@
 
 use std::fmt;
 
+/// Why a fallible geometry constructor rejected its input.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum GeomError {
     /// A radius that was not strictly positive.

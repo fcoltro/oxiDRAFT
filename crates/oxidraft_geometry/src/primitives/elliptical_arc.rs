@@ -1,18 +1,33 @@
+//! The elliptical arc primitive, [`EllipticalArc`]. The arc is a rotated,
+//! non-uniformly scaled circle; its `[start_angle, end_angle]` parameter is the
+//! eccentric angle, and the sweep direction follows the same signed convention
+//! as [`crate::CircularArc`].
+
 use crate::curve::CurveSegment;
 use crate::error::GeomError;
 use crate::point::{BoundingBox, Point2d};
 
+/// An elliptical arc: an ellipse (semi-axes `semi_major`/`semi_minor`, tilted by
+/// `rotation`) swept between two eccentric angles.
 #[derive(Clone, Copy, Debug)]
 pub struct EllipticalArc {
+    /// Centre of the ellipse.
     pub center: Point2d,
+    /// Semi-axis length along the (rotated) major direction.
     pub semi_major: f64,
+    /// Semi-axis length along the (rotated) minor direction.
     pub semi_minor: f64,
+    /// Rotation of the major axis from +x, in radians.
     pub rotation: f64,
+    /// Eccentric angle of the start point.
     pub start_angle: f64,
+    /// Eccentric angle of the end point.
     pub end_angle: f64,
 }
 
 impl EllipticalArc {
+    /// Builds a rotated elliptical arc from all six parameters (trusted caller;
+    /// use [`EllipticalArc::try_new`] for untrusted input).
     pub fn new(
         center: Point2d,
         semi_major: f64,
@@ -31,6 +46,7 @@ impl EllipticalArc {
         }
     }
 
+    /// Builds an axis-aligned elliptical arc (zero rotation).
     pub fn axis_aligned(
         center: Point2d,
         semi_major: f64,
@@ -83,6 +99,8 @@ impl EllipticalArc {
         })
     }
 
+    /// The ellipse's two focal points, in world coordinates. For a circle (or
+    /// where `semi_minor ≥ semi_major`) both foci coincide with the centre.
     pub fn foci(&self) -> ((f64, f64), (f64, f64)) {
         let a = self.semi_major;
         let b = self.semi_minor;
@@ -94,6 +112,8 @@ impl EllipticalArc {
         (f1, f2)
     }
 
+    /// The ellipse's eccentricity in `[0, 1)` — `0` for a circle, approaching
+    /// `1` as it flattens.
     pub fn eccentricity(&self) -> f64 {
         let a = self.semi_major;
         let b = self.semi_minor;

@@ -1,3 +1,9 @@
+//! Rational curves: the [`RationalBezier`] (a Bézier with per-control-point
+//! weights, so conics are exact) and the [`NurbsCurve`] (a non-uniform rational
+//! B-spline, decomposed into rational Bézier segments for evaluation). Also the
+//! free helpers that [`lower`] any [`Curve`] to rational form, [`tessellate_curve`]
+//! into a polyline, and build Catmull-Rom-style splines from control vertices.
+
 use crate::curve::{Curve, CurveSegment};
 use crate::error::GeomError;
 use crate::point::{BoundingBox, Point2d};
@@ -22,9 +28,14 @@ fn validate_rational(points: usize, weights: &[f64]) -> Result<(), GeomError> {
     Ok(())
 }
 
+/// A rational Bézier curve: control points with matching positive weights, over
+/// `t ∈ [0, 1]`. Weights let it represent conics (arcs, ellipses) exactly.
 #[derive(Clone, Debug, PartialEq)]
 pub struct RationalBezier {
+    /// Control points, in order.
     pub points: Vec<Point2d>,
+    /// Weight of each control point (strictly positive, same length as
+    /// `points`).
     pub weights: Vec<f64>,
 }
 
@@ -41,11 +52,13 @@ impl RationalBezier {
         Ok(RationalBezier { points, weights })
     }
 
+    /// A non-rational (all-weights-1) Bézier through the given control points.
     pub fn polynomial(points: Vec<Point2d>) -> Self {
         let weights = vec![1.0; points.len()];
         RationalBezier::new(points, weights)
     }
 
+    /// The curve's polynomial degree (`control point count − 1`).
     pub fn degree(&self) -> usize {
         self.points.len() - 1
     }
@@ -67,11 +80,14 @@ impl RationalBezier {
         RationalBezier { points, weights }
     }
 
+    /// The point at parameter `t`, via de Casteljau on homogeneous coordinates.
     pub fn evaluate(&self, t: f64) -> Point2d {
         let [x, y, w] = de_casteljau(&self.homogeneous(), t);
         Point2d::new(x / w, y / w)
     }
 
+    /// The tangent vector at `t` (the quotient-rule derivative of the rational
+    /// curve).
     pub fn tangent(&self, t: f64) -> (f64, f64) {
         let h = self.homogeneous();
         let [hx, hy, hw] = de_casteljau(&h, t);
@@ -95,6 +111,8 @@ impl RationalBezier {
         ((dx * hw - hx * dw) * inv, (dy * hw - hy * dw) * inv)
     }
 
+    /// Splits the curve at `t` into two rational Béziers (de Casteljau
+    /// subdivision) that together trace the original.
     pub fn split(&self, t: f64) -> (RationalBezier, RationalBezier) {
         let mut level = self.homogeneous();
         let mut left = vec![level[0]];
@@ -121,6 +139,7 @@ impl RationalBezier {
         )
     }
 
+    /// The same curve traced in reverse (control points and weights reversed).
     pub fn reverse(&self) -> RationalBezier {
         let mut points = self.points.clone();
         let mut weights = self.weights.clone();
@@ -129,6 +148,8 @@ impl RationalBezier {
         RationalBezier { points, weights }
     }
 
+    /// The control-polygon bounding box — a conservative bound that encloses the
+    /// curve (a Bézier lies within the convex hull of its control points).
     pub fn bounding_box(&self) -> BoundingBox {
         let mut xmin = f64::INFINITY;
         let mut xmax = f64::NEG_INFINITY;
@@ -143,6 +164,8 @@ impl RationalBezier {
         BoundingBox::from_corners(xmin, ymin, xmax, ymax)
     }
 
+    /// Arc length, approximated by 5-point Gauss–Legendre quadrature of the
+    /// speed over `[0, 1]`.
     pub fn arc_length(&self) -> f64 {
         const NODES: [f64; 5] = [0.046910077, 0.230765346, 0.5, 0.769234654, 0.953089923];
         const WEIGHTS: [f64; 5] = [
@@ -158,6 +181,8 @@ impl RationalBezier {
         })
     }
 
+    /// Flattens the curve to a polyline whose points stay within `tol` of the
+    /// true curve, subdividing more where the curvature is higher.
     pub fn to_polyline(&self, tol: f64) -> Vec<Point2d> {
         // The flatness cutoff below is `dev <= tol`, which a negative or NaN
         // tolerance never satisfies — even a straight segment then expands
@@ -256,6 +281,9 @@ fn de_casteljau_inplace(h: &mut [[f64; 3]], t: f64) -> [f64; 3] {
     h[0]
 }
 
+/// Decomposes any [`Curve`] into the exact sequence of rational Bézier segments
+/// that trace it — the common representation the winding, PDF, and boolean code
+/// works over. Arcs and ellipses become weighted quadratics (conics, exact).
 pub fn lower(curve: &Curve) -> Vec<RationalBezier> {
     match curve {
         Curve::Line(l) => vec![RationalBezier::polynomial(vec![l.p0, l.p1])],
@@ -299,6 +327,8 @@ pub fn lower(curve: &Curve) -> Vec<RationalBezier> {
     }
 }
 
+/// Flattens any curve to a polyline within `tol` of it — used by the renderer
+/// and exporters that need line segments rather than parametric curves.
 pub fn tessellate_curve(curve: &Curve, tol: f64) -> Vec<Point2d> {
     // Circular arcs have a closed-form optimal flattening (uniform angle
     // steps sized by the exact sagitta bound), which produces the minimum
@@ -376,8 +406,14 @@ fn unit_arc_segments(a0: f64, a1: f64) -> Vec<([[f64; 2]; 3], f64)> {
         .collect()
 }
 
+/// A non-uniform rational B-spline curve. Evaluation decomposes it into
+/// rational Bézier segments (cached), so it shares the same machinery as
+/// [`RationalBezier`].
 pub struct NurbsCurve {
+    /// Control points (control vertices), in order.
     pub control: Vec<Point2d>,
+    /// Weight of each control point (strictly positive, same length as
+    /// `control`).
     pub weights: Vec<f64>,
     // Cached Bézier decomposition, keyed by a content hash of control/weights.
     // Evaluation used to re-run the full knot-insertion decomposition on every
@@ -436,11 +472,14 @@ impl NurbsCurve {
         })
     }
 
+    /// A uniform (all-weights-1) NURBS through the given control points.
     pub fn uniform(control: Vec<Point2d>) -> Self {
         let weights = vec![1.0; control.len()];
         NurbsCurve::new(control, weights)
     }
 
+    /// The curve's rational Bézier decomposition (cached and reused until the
+    /// control points or weights change).
     pub fn segments(&self) -> Vec<RationalBezier> {
         self.segments_arc().as_ref().clone()
     }
@@ -596,10 +635,15 @@ fn bspline_basis_all(n: usize, t: f64) -> Vec<f64> {
     out
 }
 
+/// The rational Bézier segments of a smooth spline through the given control
+/// vertices (all weights 1) — the curve the spline draw tool produces from its
+/// clicked points.
 pub fn cv_spline_segments(cvs: &[Point2d]) -> Vec<RationalBezier> {
     cv_spline_segments_weighted(cvs, &vec![1.0; cvs.len()])
 }
 
+/// As [`cv_spline_segments`], but with a per-vertex weight, so conic control
+/// vertices can pull the spline exactly.
 pub fn cv_spline_segments_weighted(cvs: &[Point2d], weights: &[f64]) -> Vec<RationalBezier> {
     match cvs.len() {
         0 | 1 => vec![],

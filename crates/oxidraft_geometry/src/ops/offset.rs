@@ -1,8 +1,15 @@
+//! Curve offsetting — the parallel curve at a signed perpendicular distance —
+//! plus the NURBS fitting helpers it relies on to represent offset free-form
+//! curves.
+
 use crate::curve::{Curve, CurveSegment};
 use crate::nurbs::NurbsCurve;
 use crate::point::Point2d;
 use crate::primitives::{CircularArc, CubicBezier, LineSeg};
 
+/// The curve parallel to `curve` at signed distance `dist` (positive to the
+/// left of the direction of travel). Lines and arcs offset exactly; free-form
+/// curves are sampled and refit, and self-intersection loops are trimmed out.
 pub fn offset_curve(curve: &Curve, dist: f64) -> Curve {
     match curve {
         Curve::Line(l) => Curve::Line(l.offset_exact(dist)),
@@ -326,6 +333,8 @@ fn offset_nurbs(nc: &NurbsCurve, dist: f64) -> Curve {
     }
 }
 
+/// Fits a NURBS curve passing through the given data points with the given
+/// weights, or `None` when there are too few points to interpolate.
 pub fn interpolate_nurbs(data: &[Point2d], weights: &[f64]) -> Option<NurbsCurve> {
     let m = data.len();
     if m < 2 || weights.len() != m {
@@ -360,6 +369,8 @@ pub fn interpolate_nurbs(data: &[Point2d], weights: &[f64]) -> Option<NurbsCurve
     Some(NurbsCurve::new(control, weights.to_vec()))
 }
 
+/// Re-expresses the portion of `nc` between parameters `a` and `b` as a fresh
+/// NURBS curve over its own `[0, 1]` domain — used when trimming splines.
 pub fn refit_nurbs_subcurve(nc: &NurbsCurve, a: f64, b: f64) -> NurbsCurve {
     let m = nc.control.len().max(2);
     let data: Vec<Point2d> = (0..m)

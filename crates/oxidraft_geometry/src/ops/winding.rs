@@ -1,3 +1,6 @@
+//! Winding-angle contribution of a rational Bézier piece — the signed angle it
+//! subtends at a query point, summed over a closed region to test containment.
+
 use crate::nurbs::RationalBezier;
 
 /// Signed angle subtended at `(qx, qy)` by one rational Bézier piece, after

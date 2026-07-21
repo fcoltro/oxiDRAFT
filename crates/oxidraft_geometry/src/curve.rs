@@ -1,21 +1,36 @@
+//! The [`Curve`] enum and the [`CurveSegment`] trait every curve kind
+//! implements — the common parametric interface (evaluate, tangent, bounding
+//! box, arc length, arc-length parameterisation) that the rest of the kernel
+//! and the application program against without caring which concrete shape a
+//! curve is.
+
 use crate::nurbs::{NurbsCurve, RationalBezier};
 use crate::point::BoundingBox;
 use crate::primitives::{CircularArc, CubicBezier, EllipticalArc, LineSeg, PolyCurve};
 
+/// The parametric interface shared by every curve kind: a shape that can be
+/// evaluated over a parameter domain and answer the geometric questions the
+/// kernel needs.
 pub trait CurveSegment {
+    /// The `(start, end)` parameter values the curve is defined over.
     fn domain(&self) -> (f64, f64);
 
+    /// The point on the curve at parameter `t`.
     fn evaluate_f64(&self, t: f64) -> (f64, f64);
 
+    /// The axis-aligned box tightly enclosing the curve.
     fn bounding_box(&self) -> BoundingBox;
 
+    /// The (unnormalised) tangent vector at parameter `t`.
     fn tangent_f64(&self, t: f64) -> (f64, f64);
 
+    /// The normal at `t`: the tangent rotated 90° counter-clockwise.
     fn normal_f64(&self, t: f64) -> (f64, f64) {
         let (tx, ty) = self.tangent_f64(t);
         (-ty, tx)
     }
 
+    /// Total length of the curve.
     fn arc_length(&self) -> f64;
 
     /// The domain parameter `t` as a clamped 0..1 fraction, or `None` when
@@ -106,19 +121,29 @@ pub trait CurveSegment {
     }
 }
 
+/// Any curve the kernel can hold: one enum over every concrete kind, so
+/// documents, operations, and the UI can pass "a curve" around uniformly.
 #[derive(Clone, Debug)]
 #[allow(clippy::large_enum_variant)]
 pub enum Curve {
+    /// A straight line segment.
     Line(LineSeg),
+    /// A circular arc (or full circle).
     Arc(CircularArc),
+    /// An elliptical arc (or full ellipse).
     Ellipse(EllipticalArc),
+    /// A single cubic Bézier segment.
     Bezier(CubicBezier),
+    /// A chain of connected segments (boxed, as it owns a `Vec` of curves).
     Poly(Box<PolyCurve>),
+    /// A rational Bézier (weighted control points — conics live here exactly).
     Rational(RationalBezier),
+    /// A NURBS curve (non-uniform rational B-spline).
     Nurbs(NurbsCurve),
 }
 
 impl Curve {
+    /// Borrows the inner [`LineSeg`] when this curve is a `Line`, else `None`.
     pub fn as_line(&self) -> Option<&LineSeg> {
         if let Curve::Line(v) = self {
             Some(v)

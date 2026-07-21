@@ -1,3 +1,18 @@
+//! oxiDRAFT's 2D geometry kernel.
+//!
+//! An `f64`-with-tolerance kernel for planar CAD geometry: points and bounding
+//! boxes ([`point`]), the primitive curves lines/arcs/ellipses/Béziers
+//! ([`primitives`]), rational Béziers and NURBS ([`nurbs`]), the unifying
+//! [`Curve`] enum and its [`CurveSegment`] trait ([`curve`]), affine transforms
+//! ([`transform`]), and the geometric operations — intersection, distance,
+//! offset, blend, tangency, curvature, winding, split/reverse ([`ops`]).
+//!
+//! The kernel is deliberately float-based rather than exact-arithmetic: every
+//! comparison that matters is made against an explicit tolerance, which keeps it
+//! fast and NURBS-ready while staying robust to the degenerate inputs a drawing
+//! program throws at it. The commonly used types and functions are re-exported
+//! at the crate root.
+
 pub mod curve;
 pub mod error;
 pub mod nurbs;

@@ -1,14 +1,21 @@
+//! Differential quantities at a point on a curve: unit tangent, unit normal,
+//! and signed curvature.
+
 use crate::curve::{Curve, CurveSegment};
 
+/// The unit tangent direction of `curve` at parameter `t`.
 pub fn tangent_at(curve: &Curve, t: f64) -> (f64, f64) {
     curve.tangent_f64(t)
 }
 
+/// The unit normal of `curve` at `t` (the tangent rotated 90° CCW).
 pub fn normal_at(curve: &Curve, t: f64) -> (f64, f64) {
     let (tx, ty) = curve.tangent_f64(t);
     (-ty, tx)
 }
 
+/// Signed curvature of `curve` at `t` (positive where it turns left), or `None`
+/// at a degenerate point where the tangent vanishes.
 pub fn curvature_at(curve: &Curve, t: f64) -> Option<f64> {
     let (t0, t1) = curve.domain();
     let (lo, hi) = (t0.min(t1), t0.max(t1));
