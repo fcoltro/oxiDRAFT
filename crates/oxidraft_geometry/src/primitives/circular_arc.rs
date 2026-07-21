@@ -103,8 +103,23 @@ impl CircularArc {
         self.evaluate_f64(self.end_angle)
     }
 
+    /// Absolute angular span of the arc, independent of traversal
+    /// direction. A reversed arc (`end_angle < start_angle`, as
+    /// `reverse_curve` produces) covers the same angle set as its forward
+    /// twin — `positive_sweep` here would report the complementary "long
+    /// way around" instead, poisoning `arc_length`, `bounding_box`,
+    /// `sagitta`, and every angle-inclusion test downstream.
     pub fn included_angle(&self) -> f64 {
-        crate::util::positive_sweep(self.end_angle - self.start_angle)
+        (self.end_angle - self.start_angle).abs()
+    }
+
+    /// Whether `angle` (any 2π-representative) lies on the arc's swept
+    /// span. Correct for both traversal directions: the wrap base is the
+    /// lower domain end, not `start_angle`, so reversed arcs test the
+    /// span they actually cover.
+    pub fn contains_angle(&self, angle: f64) -> bool {
+        let lo = self.start_angle.min(self.end_angle);
+        crate::util::wrap_tau(angle - lo) <= self.included_angle() + 1e-9
     }
 
     pub fn sagitta(&self) -> f64 {
@@ -134,12 +149,14 @@ impl CurveSegment for CircularArc {
         let mut ymax = sy.max(ey);
 
         // The extrema of a circular arc are its endpoints plus whichever of the four
-        // cardinal directions (k·90°) fall inside the swept range.
+        // cardinal directions (k·90°) fall inside the swept range. Walk from the
+        // lower domain end so reversed arcs (end < start) test their true span.
+        let lo = self.start_angle.min(self.end_angle);
         for k in 0..4 {
             let angle = k as f64 * std::f64::consts::FRAC_PI_2;
-            let rel = crate::util::wrap_tau(angle - self.start_angle);
-            if rel <= self.included_angle() + 1e-12 {
-                let (x, y) = self.evaluate_f64(self.start_angle + rel);
+            let rel = crate::util::wrap_tau(angle - lo);
+            if rel <= self.included_angle() + 1e-9 {
+                let (x, y) = self.evaluate_f64(lo + rel);
                 xmin = xmin.min(x);
                 xmax = xmax.max(x);
                 ymin = ymin.min(y);
@@ -220,5 +237,67 @@ mod tests {
     fn sagitta_semicircle() {
         let arc = CircularArc::new(Point2d::from_i64(0, 0), 4.0, 0.0, std::f64::consts::PI);
         assert!((arc.sagitta() - 4.0).abs() < 1e-10);
+    }
+
+    #[test]
+    fn reversed_arc_has_the_same_metrics_as_its_forward_twin() {
+        // reverse_curve swaps start/end; the arc covers the same points, so
+        // every direction-independent metric must match the forward form.
+        let fwd = CircularArc::new(
+            Point2d::from_i64(0, 0),
+            5.0,
+            0.0,
+            std::f64::consts::FRAC_PI_2,
+        );
+        let rev = CircularArc::new(
+            Point2d::from_i64(0, 0),
+            5.0,
+            std::f64::consts::FRAC_PI_2,
+            0.0,
+        );
+        assert!(
+            (rev.included_angle() - fwd.included_angle()).abs() < 1e-12,
+            "included angle must be the span, not its complement: {}",
+            rev.included_angle()
+        );
+        assert!((rev.arc_length() - fwd.arc_length()).abs() < 1e-12);
+        assert!((rev.sagitta() - fwd.sagitta()).abs() < 1e-12);
+        let (bf, br) = (fwd.bounding_box(), rev.bounding_box());
+        assert!(
+            (bf.min.x - br.min.x).abs() < 1e-9
+                && (bf.min.y - br.min.y).abs() < 1e-9
+                && (bf.max.x - br.max.x).abs() < 1e-9
+                && (bf.max.y - br.max.y).abs() < 1e-9,
+            "reversed bbox {br:?} must equal forward bbox {bf:?}"
+        );
+    }
+
+    #[test]
+    fn reversed_semicircle_bbox_includes_its_interior_cardinal() {
+        // Upper semicircle traversed backwards (π → 0): the top point (0, 1)
+        // is an interior extremum and must still be admitted.
+        let rev = CircularArc::new(Point2d::from_i64(0, 0), 1.0, std::f64::consts::PI, 0.0);
+        let bb = rev.bounding_box();
+        assert!(
+            (bb.max.y - 1.0).abs() < 1e-9,
+            "top of the semicircle missing from bbox: {bb:?}"
+        );
+        assert!(
+            bb.min.y > -1e-9,
+            "bbox must not include the uncovered lower half: {bb:?}"
+        );
+    }
+
+    #[test]
+    fn contains_angle_respects_traversal_direction() {
+        let rev = CircularArc::new(
+            Point2d::from_i64(0, 0),
+            1.0,
+            std::f64::consts::FRAC_PI_2,
+            0.0,
+        );
+        assert!(rev.contains_angle(std::f64::consts::FRAC_PI_4));
+        assert!(!rev.contains_angle(std::f64::consts::PI));
+        assert!(!rev.contains_angle(-std::f64::consts::FRAC_PI_2));
     }
 }

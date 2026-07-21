@@ -286,3 +286,26 @@ fn polycurve_offset_trims_self_intersection_loops() {
         }
     }
 }
+
+#[test]
+fn projection_onto_a_reversed_arc_uses_its_true_span() {
+    // Quarter arc traversed backwards (pi/2 -> 0), as reverse_curve
+    // produces. The nearest point to (1.5, 1.5) is the arc's midpoint
+    // (sqrt(2)/2, sqrt(2)/2); clamping against the complementary sweep
+    // would instead snap to an endpoint.
+    let rev = Curve::Arc(CircularArc::new(
+        pt(0, 0),
+        1.0,
+        std::f64::consts::FRAC_PI_2,
+        0.0,
+    ));
+    let pr = project_point_onto_curve(&rev, 1.5, 1.5);
+    let m = std::f64::consts::FRAC_1_SQRT_2;
+    assert!(
+        (pr.point.0 - m).abs() < 1e-9 && (pr.point.1 - m).abs() < 1e-9,
+        "nearest point must be the arc midpoint, got {:?}",
+        pr.point
+    );
+    let expected = (1.5f64 * 1.5 * 2.0).sqrt() - 1.0;
+    assert!((pr.distance - expected).abs() < 1e-9);
+}

@@ -301,7 +301,15 @@ fn parse_arc(rec: &[Pair]) -> Vec<EntityKind> {
         return vec![];
     };
     let start = get(rec, 50).unwrap_or(0.0) * DEG;
-    let end = get(rec, 51).unwrap_or(360.0) * DEG;
+    let mut end = get(rec, 51).unwrap_or(360.0) * DEG;
+    // DXF arcs always run counter-clockwise from start to end, wrapping
+    // through 0° when end < start (e.g. 350°..10° is a small 20° arc).
+    // The kernel's convention is a signed linear sweep from start to end,
+    // which would instead traverse the 340° complement — lift the end
+    // angle above the start so the stored arc covers the DXF arc's span.
+    if end <= start {
+        end += TAU;
+    }
     CircularArc::try_new(Point2d::from_f64(cx, cy), r, start, end)
         .map(|a| EntityKind::Curve(Curve::Arc(a)))
         .into_iter()
@@ -316,7 +324,11 @@ fn parse_ellipse(rec: &[Pair]) -> Vec<EntityKind> {
     };
     let ratio = get(rec, 40).unwrap_or(1.0);
     let start = get(rec, 41).unwrap_or(0.0);
-    let end = get(rec, 42).unwrap_or(TAU);
+    let mut end = get(rec, 42).unwrap_or(TAU);
+    // Same counter-clockwise wrap convention as ARC (see parse_arc).
+    if end <= start {
+        end += TAU;
+    }
     let major = (mx * mx + my * my).sqrt();
     let minor = major * ratio;
     if !(major > 0.0 && minor > 0.0) {
@@ -1178,6 +1190,33 @@ mod tests {
         if let Curve::Arc(a) = arcs[1] {
             assert!((a.included_angle() - std::f64::consts::FRAC_PI_2).abs() < 1e-6);
         }
+    }
+
+    #[test]
+    fn import_zero_crossing_arc_covers_the_short_span() {
+        // DXF arcs run CCW from start to end, wrapping through 0°:
+        // 350°..10° is a small 20° arc straddling the +x axis, NOT the
+        // 340° complement. r=2 centered at the origin.
+        let dxf = "0\nSECTION\n2\nENTITIES\n\
+                   0\nARC\n8\n0\n10\n0.0\n20\n0.0\n40\n2.0\n50\n350.0\n51\n10.0\n\
+                   0\nENDSEC\n0\nEOF\n";
+        let doc = import_dxf(dxf);
+        assert_eq!(doc.len(), 1);
+        let Some(Curve::Arc(a)) = doc.iter().next().unwrap().as_curve() else {
+            panic!("expected an arc");
+        };
+        assert!(
+            (a.included_angle() - 20.0 * DEG).abs() < 1e-9,
+            "span must be 20°, got {}°",
+            a.included_angle() / DEG
+        );
+        // The arc's midpoint sits on the +x axis at (r, 0).
+        let (t0, t1) = (a.start_angle, a.end_angle);
+        let (mx, my) = a.evaluate_f64(0.5 * (t0 + t1));
+        assert!(
+            (mx - 2.0).abs() < 1e-9 && my.abs() < 1e-9,
+            "midpoint must be (2, 0), got ({mx}, {my})"
+        );
     }
 
     #[test]

@@ -430,15 +430,7 @@ fn perpendicular_foot(c: &Curve, reference: (f64, f64)) -> Option<(f64, f64)> {
                 return None;
             }
             let angle = dy.atan2(dx);
-            let pi2 = 2.0 * std::f64::consts::PI;
-            let mut diff = angle - a.start_angle;
-            while diff < 0.0 {
-                diff += pi2;
-            }
-            while diff >= pi2 {
-                diff -= pi2;
-            }
-            if diff <= a.included_angle() + 1e-9 {
+            if a.contains_angle(angle) {
                 Some((cx + r * dx / len, cy + r * dy / len))
             } else {
                 None
@@ -463,18 +455,9 @@ fn tangent_points(c: &Curve, reference: (f64, f64)) -> Vec<(f64, f64)> {
             }
             let base = dy.atan2(dx);
             let off = (r / d).acos();
-            let pi2 = 2.0 * std::f64::consts::PI;
-            let inc = a.included_angle();
             let mut result = Vec::new();
             for angle in [base + off, base - off] {
-                let mut diff = angle - a.start_angle;
-                while diff < 0.0 {
-                    diff += pi2;
-                }
-                while diff >= pi2 {
-                    diff -= pi2;
-                }
-                if diff <= inc + 1e-9 {
+                if a.contains_angle(angle) {
                     result.push((cx + r * angle.cos(), cy + r * angle.sin()));
                 }
             }

@@ -273,7 +273,9 @@ fn arc_path(a: &CircularArc, fx: &impl Fn(f64) -> f64, fy: &impl Fn(f64) -> f64)
     } else {
         0
     };
-    let sweep = 0;
+    // World-CCW arcs render clockwise in SVG's y-down frame (sweep 0); a
+    // reversed arc (end < start, from reverse_curve) runs the other way.
+    let sweep = if a.end_angle >= a.start_angle { 0 } else { 1 };
     format!(
         "M {:.6} {:.6} A {:.6} {:.6} 0 {} {} {:.6} {:.6}",
         fx(sx),
@@ -348,9 +350,12 @@ fn polycurve_path(pc: &PolyCurve, fx: &impl Fn(f64) -> f64, fy: &impl Fn(f64) ->
                 } else {
                     0
                 };
+                // Reversed segments (end < start) occur routinely inside
+                // joined polycurves; their sweep runs the other way.
+                let sweep = if a.end_angle >= a.start_angle { 0 } else { 1 };
                 let _ = write!(
                     d,
-                    "A {r:.6} {r:.6} 0 {large} 0 {:.6} {:.6} ",
+                    "A {r:.6} {r:.6} 0 {large} {sweep} {:.6} {:.6} ",
                     fx(ex),
                     fy(ey)
                 );
@@ -1256,6 +1261,33 @@ mod tests {
             assert!(ok, "got {:?} {:?}", p0, p1);
         } else {
             panic!()
+        }
+    }
+
+    #[test]
+    fn reversed_arc_roundtrips_as_its_short_span() {
+        // A quarter arc traversed backwards (π/2 → 0), as reverse_curve
+        // produces. Export must emit the 90° span (small-arc, opposite
+        // sweep), not the 270° complement.
+        let mut doc = Document::new();
+        doc.add(EntityKind::Curve(Curve::Arc(CircularArc::new(
+            pt(0, 0),
+            4.0,
+            std::f64::consts::FRAC_PI_2,
+            0.0,
+        ))));
+        let svg = export_svg(&doc);
+        let doc2 = import_svg(&svg);
+        let es: Vec<_> = doc2.iter().collect();
+        if let Some(Curve::Arc(a)) = es[0].as_curve() {
+            assert!(
+                (a.included_angle() - std::f64::consts::FRAC_PI_2).abs() < 1e-3,
+                "must reimport as a quarter arc, got {} rad",
+                a.included_angle()
+            );
+            assert!((a.radius - 4.0).abs() < 1e-6);
+        } else {
+            panic!("expected an arc back");
         }
     }
 

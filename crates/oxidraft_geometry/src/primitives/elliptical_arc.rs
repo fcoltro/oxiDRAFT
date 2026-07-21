@@ -65,8 +65,11 @@ impl EllipticalArc {
         c / a
     }
 
+    /// Absolute angular span, independent of traversal direction — see
+    /// [`crate::CircularArc::included_angle`] for why `positive_sweep`
+    /// is wrong here (reversed arcs would report the complement).
     pub fn included_angle(&self) -> f64 {
-        crate::util::positive_sweep(self.end_angle - self.start_angle)
+        (self.end_angle - self.start_angle).abs()
     }
 }
 
@@ -89,7 +92,10 @@ impl CurveSegment for EllipticalArc {
 
     fn bounding_box(&self) -> BoundingBox {
         let steps = 64usize;
-        let (t0, t1) = (self.start_angle, self.start_angle + self.included_angle());
+        // Sample from the lower domain end so a reversed arc (end < start)
+        // samples the span it actually covers.
+        let lo = self.start_angle.min(self.end_angle);
+        let (t0, t1) = (lo, lo + self.included_angle());
         let mut xmin = f64::INFINITY;
         let mut xmax = f64::NEG_INFINITY;
         let mut ymin = f64::INFINITY;
@@ -118,7 +124,8 @@ impl CurveSegment for EllipticalArc {
 
     fn arc_length(&self) -> f64 {
         let steps = 128usize;
-        let (t0, t1) = (self.start_angle, self.start_angle + self.included_angle());
+        let lo = self.start_angle.min(self.end_angle);
+        let (t0, t1) = (lo, lo + self.included_angle());
         let dt = (t1 - t0) / steps as f64;
         let mut length = 0.0;
         for i in 0..steps {
@@ -133,6 +140,38 @@ impl CurveSegment for EllipticalArc {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn reversed_elliptical_arc_matches_forward_metrics() {
+        let fwd = EllipticalArc::axis_aligned(
+            Point2d::from_i64(0, 0),
+            5.0,
+            3.0,
+            0.0,
+            std::f64::consts::FRAC_PI_2,
+        );
+        let rev = EllipticalArc::axis_aligned(
+            Point2d::from_i64(0, 0),
+            5.0,
+            3.0,
+            std::f64::consts::FRAC_PI_2,
+            0.0,
+        );
+        assert!(
+            (rev.included_angle() - fwd.included_angle()).abs() < 1e-12,
+            "included angle must be the span, not its complement: {}",
+            rev.included_angle()
+        );
+        assert!((rev.arc_length() - fwd.arc_length()).abs() < 1e-9);
+        let (bf, br) = (fwd.bounding_box(), rev.bounding_box());
+        assert!(
+            (bf.min.x - br.min.x).abs() < 1e-9
+                && (bf.min.y - br.min.y).abs() < 1e-9
+                && (bf.max.x - br.max.x).abs() < 1e-9
+                && (bf.max.y - br.max.y).abs() < 1e-9,
+            "reversed bbox {br:?} must equal forward bbox {bf:?}"
+        );
+    }
 
     #[test]
     fn foci_axis_aligned() {

@@ -126,14 +126,18 @@ pub fn project_point_onto_curve(curve: &Curve, px: f64, py: f64) -> ProjectionRe
 
 fn clamp_angle(angle: f64, start: f64, end: f64) -> f64 {
     let pi2 = 2.0 * std::f64::consts::PI;
-    let a = crate::util::wrap_tau(angle - start);
-    let span = crate::util::positive_sweep(end - start);
+    // Wrap from the lower domain end so reversed arcs (end < start, as
+    // reverse_curve produces) clamp onto the span they actually cover
+    // rather than its complement.
+    let lo = start.min(end);
+    let a = crate::util::wrap_tau(angle - lo);
+    let span = (end - start).abs();
     if a <= span {
-        start + a
+        lo + a
     } else {
-        let d_start = a.min(pi2 - a);
-        let d_end = a - span;
-        if d_start < d_end { start } else { end }
+        let d_lo = a.min(pi2 - a);
+        let d_hi = a - span;
+        if d_lo < d_hi { lo } else { lo + span }
     }
 }
 
