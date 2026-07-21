@@ -1,31 +1,40 @@
+//! The draw commands: factory functions that create entities in a document and
+//! return their new ids. Each corresponds to a drawing tool (LINE, CIRCLE, ARC,
+//! …).
+
 use oxidraft_document::{Document, EntityId, EntityKind};
 use oxidraft_geometry::{
     CircularArc, CubicBezier, Curve, EllipticalArc, LineSeg, Point2d, PolyCurve,
 };
 
+/// Adds a line segment from `a` to `b`.
 pub fn line(doc: &mut Document, a: Point2d, b: Point2d) -> EntityId {
     doc.add(EntityKind::Curve(Curve::Line(LineSeg::from_endpoints(
         a, b,
     ))))
 }
 
+/// Adds a full circle at `center` with the given `radius`.
 pub fn circle(doc: &mut Document, center: Point2d, radius: f64) -> EntityId {
     let arc = CircularArc::new(center, radius, 0.0, 2.0 * std::f64::consts::PI);
     doc.add(EntityKind::Curve(Curve::Arc(arc)))
 }
 
+/// Adds a full circle through three points, or `None` if they're collinear.
 pub fn circle_3p(doc: &mut Document, p1: &Point2d, p2: &Point2d, p3: &Point2d) -> Option<EntityId> {
     let arc = CircularArc::from_three_points(p1, p2, p3)?;
     let full = CircularArc::new(arc.center, arc.radius, 0.0, 2.0 * std::f64::consts::PI);
     Some(doc.add(EntityKind::Curve(Curve::Arc(full))))
 }
 
+/// Adds a circular arc from `start` to `end` angle.
 pub fn arc(doc: &mut Document, center: Point2d, radius: f64, start: f64, end: f64) -> EntityId {
     doc.add(EntityKind::Curve(Curve::Arc(CircularArc::new(
         center, radius, start, end,
     ))))
 }
 
+/// Adds a full ellipse with the given semi-axes and rotation.
 pub fn ellipse(
     doc: &mut Document,
     center: Point2d,
@@ -44,6 +53,7 @@ pub fn ellipse(
     doc.add(EntityKind::Curve(Curve::Ellipse(e)))
 }
 
+/// Adds a rectangle (four line segments) spanning the two opposite corners.
 pub fn rectangle(doc: &mut Document, c0: &Point2d, c1: &Point2d) -> Vec<EntityId> {
     let (x0, x1) = order(c0.x, c1.x);
     let (y0, y1) = order(c0.y, c1.y);
@@ -54,6 +64,9 @@ pub fn rectangle(doc: &mut Document, c0: &Point2d, c1: &Point2d) -> Vec<EntityId
         .collect()
 }
 
+/// Adds a regular `n`-gon (as line segments) about `center`. `inscribed`
+/// chooses whether `radius` is to a vertex (inscribed) or an edge midpoint
+/// (circumscribed). Declines invalid side counts or non-finite inputs.
 pub fn polygon(
     doc: &mut Document,
     center: &Point2d,
@@ -90,22 +103,27 @@ pub fn polygon(
         .collect()
 }
 
+/// Adds a cubic Bézier through the four control points.
 pub fn bezier(doc: &mut Document, p0: Point2d, p1: Point2d, p2: Point2d, p3: Point2d) -> EntityId {
     doc.add(EntityKind::Curve(Curve::Bezier(CubicBezier::new(
         p0, p1, p2, p3,
     ))))
 }
 
+/// Adds a polycurve from a chain of segments.
 pub fn polycurve(doc: &mut Document, segments: Vec<Curve>) -> EntityId {
     doc.add(EntityKind::Curve(Curve::Poly(Box::new(PolyCurve::new(
         segments,
     )))))
 }
 
+/// Adds a standalone point entity.
 pub fn point(doc: &mut Document, p: Point2d) -> EntityId {
     doc.add(EntityKind::Point(p))
 }
 
+/// Places `n − 1` point entities dividing `curve` into `n` equal-length parts;
+/// returns the new point ids. (The DIVIDE command.)
 pub fn divide(doc: &mut Document, curve: &Curve, n: u32) -> Vec<EntityId> {
     use oxidraft_geometry::CurveSegment;
     // Matches AutoCAD's DIVIDE segment cap; a corrupt count would balloon

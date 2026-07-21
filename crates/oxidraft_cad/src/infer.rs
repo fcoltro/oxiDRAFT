@@ -1,9 +1,15 @@
+//! Inference guides shown while drawing: alignment lines the cursor snaps to,
+//! such as the extension of the segment being drawn.
+
+/// The kind of inference guide.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum GuideKind {
+    /// The extension line of a segment beyond its endpoint.
     Extension,
 }
 
 impl GuideKind {
+    /// A short human-readable name for the guide.
     pub fn label(self) -> &'static str {
         match self {
             GuideKind::Extension => "Extension",
@@ -11,16 +17,24 @@ impl GuideKind {
     }
 }
 
+/// An inference guide line: an infinite alignment line the cursor can snap to.
 #[derive(Clone, Copy, Debug)]
 pub struct Guide {
+    /// What kind of guide this is.
     pub kind: GuideKind,
+    /// A point the guide line passes through.
     pub origin: (f64, f64),
+    /// The guide's unit direction.
     pub dir: (f64, f64),
 }
 
+/// The outcome of inference: the (possibly snapped) point and the guides that
+/// influenced it.
 #[derive(Clone, Debug)]
 pub struct InferResult {
+    /// The resolved point after snapping to any guide.
     pub point: (f64, f64),
+    /// The active guide lines.
     pub guides: Vec<Guide>,
 }
 
@@ -44,6 +58,9 @@ fn project_on(g: &Guide, p: P) -> P {
     (g.origin.0 + g.dir.0 * t, g.origin.1 + g.dir.1 * t)
 }
 
+/// Given a segment `p0→p1` and the current `cursor`, returns a snapped point
+/// and the alignment guide when the cursor is within `tol` of the segment's
+/// extension line, else `None`.
 pub fn infer_axis(p0: P, p1: P, cursor: P, tol: f64) -> Option<InferResult> {
     if tol <= 0.0 {
         return None;

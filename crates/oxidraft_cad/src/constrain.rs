@@ -22,7 +22,10 @@ use std::f64::consts::TAU;
 /// selection, non-finite value) carry an empty culprit list.
 #[derive(Debug, Clone)]
 pub struct ConstrainError {
+    /// The user-facing explanation of why the action was rejected.
     pub message: String,
+    /// Entities carrying the conflicting constraints, for the UI to highlight
+    /// (empty when there's nothing specific to point at).
     pub culprits: Vec<EntityId>,
 }
 

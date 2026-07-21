@@ -1,21 +1,37 @@
+//! Object snapping: finding the significant points on nearby geometry the
+//! cursor should latch onto (endpoints, midpoints, centres, intersections, …)
+//! and choosing the best one under a tolerance.
+
 use oxidraft_document::{Document, EntityId, EntityKind};
 use oxidraft_geometry::{Curve, CurveSegment, Point2d, intersect, project_point_onto_curve};
 
+/// A kind of snap point that can be offered on geometry.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum SnapKind {
+    /// A curve's endpoint.
     Endpoint,
+    /// A curve's midpoint.
     Midpoint,
+    /// A circle/arc centre.
     Center,
+    /// A circle/arc quadrant point (0/90/180/270°).
     Quadrant,
+    /// An intersection between two curves.
     Intersection,
+    /// The foot of a perpendicular from a reference point.
     Perpendicular,
+    /// A tangent point on a circle/arc from a reference point.
     Tangent,
+    /// The nearest point on a curve.
     Nearest,
+    /// A standalone point entity.
     Node,
+    /// A block insertion point.
     Insertion,
 }
 
 impl SnapKind {
+    /// Tie-break priority when several snaps land under the cursor (lower wins).
     pub fn priority(self) -> u8 {
         match self {
             SnapKind::Endpoint => 0,
@@ -27,6 +43,7 @@ impl SnapKind {
     }
 }
 
+/// All snap kinds paired with their display names, for the snap settings UI.
 pub const SNAP_KINDS: [(SnapKind, &str); 10] = [
     (SnapKind::Endpoint, "Endpoint"),
     (SnapKind::Midpoint, "Midpoint"),
@@ -40,16 +57,23 @@ pub const SNAP_KINDS: [(SnapKind, &str); 10] = [
     (SnapKind::Insertion, "Insertion"),
 ];
 
+/// A candidate snap: its kind, world position, and the entity it belongs to.
 #[derive(Clone, Debug)]
 pub struct SnapPoint {
+    /// Which kind of snap this is.
     pub kind: SnapKind,
+    /// The snap position, in world coordinates.
     pub pos: (f64, f64),
+    /// The entity the snap sits on.
     pub entity: EntityId,
 }
 
+/// Which snap kinds are active and how close the cursor must be to snap.
 #[derive(Clone, Debug)]
 pub struct SnapSettings {
+    /// The snap kinds currently enabled.
     pub enabled: Vec<SnapKind>,
+    /// Snap distance in world units.
     pub tolerance: f64,
 }
 
@@ -75,6 +99,8 @@ fn dist((ax, ay): (f64, f64), (bx, by): (f64, f64)) -> f64 {
     ((ax - bx).powi(2) + (ay - by).powi(2)).sqrt()
 }
 
+/// All snap candidates near `cursor` given the enabled kinds in `settings`.
+/// `reference` is the prior point, needed for perpendicular/tangent snaps.
 pub fn find_snaps(
     doc: &Document,
     cursor: (f64, f64),
@@ -84,6 +110,8 @@ pub fn find_snaps(
     find_snaps_excluding(doc, cursor, settings, reference, None)
 }
 
+/// Like [`find_snaps`], but skips entity `exclude` — used so a curve being
+/// drawn doesn't snap to itself.
 pub fn find_snaps_excluding(
     doc: &Document,
     cursor: (f64, f64),
@@ -228,6 +256,8 @@ pub fn find_snaps_excluding(
     out
 }
 
+/// The single best snap under `cursor` (highest priority, then nearest), or
+/// `None` if nothing is within tolerance.
 pub fn best_snap(
     doc: &Document,
     cursor: (f64, f64),

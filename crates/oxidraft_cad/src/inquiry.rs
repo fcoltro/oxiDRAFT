@@ -1,3 +1,6 @@
+//! Measurement / inquiry queries: distances, areas, lengths, and a
+//! human-readable listing of an entity — the LIST/AREA/DIST commands.
+
 use oxidraft_document::{Document, EntityId, EntityKind, HatchPattern};
 use oxidraft_geometry::{Curve, CurveSegment, Point2d, curve_to_curve_distance};
 
@@ -10,17 +13,22 @@ fn hatch_pattern_name(p: &HatchPattern) -> &'static str {
     }
 }
 
+/// The `(squared, straight-line)` distance between two points.
 pub fn distance_points(a: &Point2d, b: &Point2d) -> (f64, f64) {
     let dsq = a.dist_sq(b);
     (dsq, dsq.sqrt())
 }
 
+/// The minimum distance between two curve entities, or `None` if either isn't a
+/// curve.
 pub fn distance_entities(doc: &Document, a: EntityId, b: EntityId) -> Option<f64> {
     let ca = doc.get(a)?.as_curve()?;
     let cb = doc.get(b)?.as_curve()?;
     Some(curve_to_curve_distance(ca, cb))
 }
 
+/// The area enclosed by the loop formed by `ids` (shoelace over sampled
+/// points), taken as unsigned.
 pub fn area_of_loop(doc: &Document, ids: &[EntityId]) -> f64 {
     let mut area = 0.0;
     let steps = 32usize;
@@ -38,6 +46,7 @@ pub fn area_of_loop(doc: &Document, ids: &[EntityId]) -> f64 {
     (area / 2.0).abs()
 }
 
+/// The summed arc length of all curve entities in `ids`.
 pub fn total_length(doc: &Document, ids: &[EntityId]) -> f64 {
     ids.iter()
         .filter_map(|&id| doc.get(id).and_then(|e| e.as_curve()))
@@ -45,6 +54,8 @@ pub fn total_length(doc: &Document, ids: &[EntityId]) -> f64 {
         .sum()
 }
 
+/// A human-readable multi-line description of an entity (kind, layer, key
+/// geometry) for the LIST command, or `None` if the id is unknown.
 pub fn list_entity(doc: &Document, id: EntityId) -> Option<String> {
     let e = doc.get(id)?;
     let layer_name = doc

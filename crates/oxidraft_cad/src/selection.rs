@@ -1,9 +1,14 @@
+//! Selecting entities: single-click picking under a tolerance, and window /
+//! crossing / fence / predicate selection over regions.
+
 use oxidraft_document::{Document, EntityId, EntityKind};
 use oxidraft_geometry::{
     BoundingBox, Curve, CurveSegment, LineSeg, Point2d, intersect,
     point_segment_dist as point_seg_dist,
 };
 
+/// The topmost editable entity within `tol` of `(x, y)`, or `None`. Picks the
+/// frontmost when several overlap.
 pub fn pick_at(doc: &Document, x: f64, y: f64, tol: f64) -> Option<EntityId> {
     for e in doc.editable_entities().rev() {
         if let Some(bb) = e.bounding_box()
@@ -138,6 +143,7 @@ fn dimension_hit(
         || ((x - (mid.0 - nx * gap)).powi(2) + (y - (mid.1 - ny * gap)).powi(2)).sqrt() <= r
 }
 
+/// Window selection: entities lying *entirely* inside `rect`.
 pub fn select_window(doc: &Document, rect: &BoundingBox) -> Vec<EntityId> {
     doc.editable_entities()
         .filter(|e| e.bounding_box().is_some_and(|bb| bbox_inside(&bb, rect)))
@@ -145,6 +151,7 @@ pub fn select_window(doc: &Document, rect: &BoundingBox) -> Vec<EntityId> {
         .collect()
 }
 
+/// Crossing selection: entities inside *or* touching `rect`.
 pub fn select_crossing(doc: &Document, rect: &BoundingBox) -> Vec<EntityId> {
     doc.editable_entities()
         .filter(|e| match &e.kind {
@@ -155,6 +162,7 @@ pub fn select_crossing(doc: &Document, rect: &BoundingBox) -> Vec<EntityId> {
         .collect()
 }
 
+/// Fence selection: entities crossed by the open polyline `fence`.
 pub fn select_fence(doc: &Document, fence: &[Point2d]) -> Vec<EntityId> {
     if fence.len() < 2 {
         return vec![];
@@ -177,6 +185,7 @@ pub fn select_fence(doc: &Document, fence: &[Point2d]) -> Vec<EntityId> {
         .collect()
 }
 
+/// Selects every editable entity for which `pred` returns true.
 pub fn select_by<F: Fn(&oxidraft_document::Entity) -> bool>(
     doc: &Document,
     pred: F,

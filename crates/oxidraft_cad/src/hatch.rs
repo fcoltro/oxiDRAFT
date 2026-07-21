@@ -1,3 +1,7 @@
+//! Hatching: finding the region under a pick, filling it with a pattern, and
+//! triangulating it for rendering. Includes closed-loop boundary detection and
+//! a planar-arrangement fallback that traces a face out of unjoined edges.
+
 use oxidraft_boolean::{Region, intersection, union};
 use oxidraft_document::{Document, Entity, EntityId, EntityKind, HatchPattern};
 use oxidraft_geometry::{Curve, CurveSegment, LineSeg, MinTracker, Point2d, tessellate_curve};
@@ -7,6 +11,8 @@ const TAU: f64 = std::f64::consts::TAU;
 
 type P = (f64, f64);
 
+/// The closed boundary loop of an entity that can bound a hatch (a closed
+/// polycurve, full circle/ellipse, or existing hatch), or `None`.
 pub fn boundary_loop(e: &Entity) -> Option<Vec<Curve>> {
     match &e.kind {
         EntityKind::Curve(Curve::Poly(pc)) if is_closed_poly(pc) => Some(pc.segments.clone()),
@@ -37,6 +43,7 @@ fn is_closed_poly(pc: &oxidraft_geometry::PolyCurve) -> bool {
     (start.0 - end.0).hypot(start.1 - end.1) < 1e-6
 }
 
+/// True when `(x, y)` is inside `boundary` but outside all `holes`.
 pub fn region_contains(boundary: &[Curve], holes: &[Vec<Curve>], x: f64, y: f64) -> bool {
     let (outer, hole_regions) = regions_of(boundary, holes);
     regions_contain(&outer, &hole_regions, x, y)
@@ -140,6 +147,8 @@ fn clip_to_region(
     out
 }
 
+/// The hatch line segments (clipped to the region) for a `Lines`/`Cross`
+/// pattern. Empty for other patterns or an absurdly dense fill.
 pub fn pattern_lines(
     boundary: &[Curve],
     holes: &[Vec<Curve>],
@@ -191,6 +200,8 @@ pub fn pattern_lines(
     out
 }
 
+/// The dot positions (inside the region) for a `Dots` pattern. Empty for other
+/// patterns or an absurdly dense grid.
 pub fn pattern_dots(
     boundary: &[Curve],
     holes: &[Vec<Curve>],
@@ -228,10 +239,13 @@ pub fn pattern_dots(
     out
 }
 
+/// Triangulates the filled region (boundary minus holes) for solid rendering,
+/// choosing a flatten tolerance from the region size.
 pub fn triangulate(boundary: &[Curve], holes: &[Vec<Curve>]) -> Vec<[Point2d; 3]> {
     triangulate_with_tol(boundary, holes, default_flatten_tol(boundary))
 }
 
+/// [`triangulate`] with an explicit curve-flattening tolerance `tol`.
 pub fn triangulate_with_tol(
     boundary: &[Curve],
     holes: &[Vec<Curve>],
@@ -265,6 +279,8 @@ pub fn triangulate_with_tol(
     ear_clip(&merged)
 }
 
+/// Triangulates a set of nested contour loops, classifying each as fill or hole
+/// by its containment depth (even depth fills, odd depth is a hole).
 pub fn triangulate_contours(contours: &[Curve], tol: f64) -> Vec<[Point2d; 3]> {
     let polys: Vec<Vec<P>> = contours
         .iter()
@@ -316,6 +332,8 @@ pub fn triangulate_contours(contours: &[Curve], tol: f64) -> Vec<[Point2d; 3]> {
     tris
 }
 
+/// The region's boundary and hole loops flattened to point rings (for drawing
+/// the hatch outline).
 pub fn outline_loops(boundary: &[Curve], holes: &[Vec<Curve>], tol: f64) -> Vec<Vec<Point2d>> {
     let floor = (region_diag(boundary) * 1e-7).max(1e-9);
     let tol = tol.max(floor);
@@ -465,12 +483,18 @@ fn ear_clip(poly: &[P]) -> Vec<[Point2d; 3]> {
     tris
 }
 
+/// Why [`trace_pick_region`] could not produce a fillable region.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum PickRegionError {
+    /// No enclosed region surrounds the pick point.
     NotFound,
+    /// Too many edges to trace an arrangement within the budget.
     TooComplex,
 }
 
+/// Finds the region enclosing the pick `(px, py)`: its outer boundary and any
+/// island holes, recovering the original curves. Tries closed loops first, then
+/// a planar-arrangement trace over unjoined edges.
 pub fn trace_pick_region(
     doc: &Document,
     px: f64,

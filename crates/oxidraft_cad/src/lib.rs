@@ -1,3 +1,15 @@
+//! The CAD operations layer: the editing logic sitting between the document
+//! model and the UI.
+//!
+//! [`draw`] creates entities, [`edit`] transforms and modifies them (move,
+//! trim, fillet, offset, array, …), [`grips`] handles direct grip dragging,
+//! [`snap`] finds snap points under the cursor, [`selection`] resolves picks and
+//! window/crossing/fence selection, [`hatch`] fills regions, [`inquiry`]
+//! measures, [`infer`] guesses constraints while drawing, and [`constrain`]
+//! validates and applies sketch constraints (driving the solver). Everything
+//! here operates on an [`oxidraft_document::Document`] and stays free of UI
+//! concerns.
+
 pub mod constrain;
 pub mod draw;
 pub mod edit;

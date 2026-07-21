@@ -1,26 +1,44 @@
+//! Direct grip editing: the draggable handles an entity exposes (endpoints,
+//! centre, radius, vertices, …) and applying a drag or a typed value to one.
+
 use oxidraft_document::EntityKind;
 use oxidraft_geometry::{
     CircularArc, Curve, CurveSegment, EllipticalArc, LineSeg, NurbsCurve, Point2d, PolyCurve,
     RationalBezier,
 };
 
+/// What a grip controls on its entity — determines how dragging it reshapes the
+/// geometry.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum GripRole {
+    /// A line/dimension endpoint by index.
     Endpoint(usize),
+    /// A circle/arc/ellipse centre.
     Center,
+    /// A circle/arc radius handle.
     Radius,
+    /// An arc's start-angle handle.
     AngleStart,
+    /// An arc's end-angle handle.
     AngleEnd,
+    /// A control vertex by index (Bézier/NURBS/dimension).
     Vertex(usize),
+    /// A polycurve edit point by index.
     PolyPoint(usize),
+    /// A text rotation handle.
     Rotation,
+    /// An ellipse major-axis handle.
     AxisMajor,
+    /// An ellipse minor-axis handle.
     AxisMinor,
 }
 
+/// A single draggable handle: its role and its current world position.
 #[derive(Clone, Copy, Debug)]
 pub struct Grip {
+    /// What this grip controls.
     pub role: GripRole,
+    /// Its position in world coordinates.
     pub world: Point2d,
 }
 
@@ -34,6 +52,7 @@ fn is_full_circle(arc: &CircularArc) -> bool {
     (arc.end_angle - arc.start_angle).abs() >= 2.0 * std::f64::consts::PI - 1e-9
 }
 
+/// The draggable grips an entity of `kind` exposes.
 pub fn grips_for(kind: &EntityKind) -> Vec<Grip> {
     match kind {
         EntityKind::Curve(Curve::Line(l)) => vec![
@@ -179,6 +198,8 @@ fn point_on_circle(arc: &CircularArc, a: f64) -> Point2d {
     )
 }
 
+/// Reshapes `start` by dragging `grip` to `to`, returning the new geometry. A
+/// non-finite or geometry-breaking target leaves the entity unchanged.
 pub fn apply_grip(start: &EntityKind, grip: &Grip, to: Point2d) -> EntityKind {
     // A non-finite drag target (bad unproject, corrupt event) must leave
     // the entity untouched, not overwrite a coordinate with NaN — and a
@@ -573,6 +594,8 @@ fn move_polyline_vertex(poly: &PolyCurve, k: usize, to: Point2d) -> Option<PolyC
 
 const MIN_RADIUS: f64 = 1e-6;
 
+/// Reshapes `start` by setting the grip's associated value (a typed length,
+/// radius, or angle) rather than dragging, using `cursor` to resolve direction.
 pub fn apply_grip_value(
     start: &EntityKind,
     grip: &Grip,
@@ -658,6 +681,8 @@ fn apply_grip_value_inner(
     }
 }
 
+/// The label for a grip's typed-value field (e.g. "Length", "Radius",
+/// "Angle"), or empty when the role takes no scalar value.
 pub fn grip_value_label(role: GripRole) -> &'static str {
     match role {
         GripRole::Radius => "R",

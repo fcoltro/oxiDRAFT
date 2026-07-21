@@ -1,3 +1,8 @@
+//! The modify commands: transforming and reshaping existing entities — erase,
+//! move/copy/rotate/scale/mirror, offset, rectangular/polar arrays, join,
+//! explode, trim, extend, break, fillet, chamfer, blend, and stretch. Each
+//! operates in place on a [`Document`], re-satisfying any constraints touched.
+
 use oxidraft_document::{
     ANCHOR_DERIVED, ConstraintKind, Document, EntityId, EntityKind, SketchConstraint,
 };
@@ -189,12 +194,15 @@ fn remap_constraints_to_pieces(
     }
 }
 
+/// Deletes the given entities (and any constraints on them) from the document.
 pub fn erase(doc: &mut Document, ids: &[EntityId]) {
     for &id in ids {
         doc.remove(id);
     }
 }
 
+/// Breaks polycurves into their individual segment entities; returns the new
+/// segment ids. Non-polycurve entities are left untouched.
 pub fn explode(doc: &mut Document, ids: &[EntityId]) -> Vec<EntityId> {
     let mut new_ids = Vec::new();
     for &id in ids {
@@ -211,26 +219,31 @@ pub fn explode(doc: &mut Document, ids: &[EntityId]) -> Vec<EntityId> {
     new_ids
 }
 
+/// Translates the given entities by `(dx, dy)` in place.
 pub fn move_by(doc: &mut Document, ids: &[EntityId], dx: f64, dy: f64) {
     let t = Transform2d::translation(dx, dy);
     apply_to(doc, ids, &t);
 }
 
+/// Duplicates the given entities translated by `(dx, dy)`; returns the copies.
 pub fn copy_by(doc: &mut Document, ids: &[EntityId], dx: f64, dy: f64) -> Vec<EntityId> {
     let t = Transform2d::translation(dx, dy);
     duplicate_with(doc, ids, &t)
 }
 
+/// Rotates the given entities about `center` by `angle` radians.
 pub fn rotate(doc: &mut Document, ids: &[EntityId], center: &Point2d, angle: f64) {
     let t = Transform2d::rotation_about(center, angle);
     apply_to(doc, ids, &t);
 }
 
+/// Uniformly scales the given entities about `base` by factor `s`.
 pub fn scale(doc: &mut Document, ids: &[EntityId], base: &Point2d, s: f64) {
     let t = Transform2d::scale_about(base, s, s);
     apply_to(doc, ids, &t);
 }
 
+/// Mirrors the given entities across a line; optionally keeps the originals.
 pub fn mirror(
     doc: &mut Document,
     ids: &[EntityId],
@@ -247,6 +260,8 @@ pub fn mirror(
     }
 }
 
+/// Adds offset copies of the given curves at signed distance `dist`; returns
+/// the new entities.
 pub fn offset(doc: &mut Document, ids: &[EntityId], dist: f64) -> Vec<EntityId> {
     // offset_curve survives a non-finite distance but its output is
     // unspecified; there is no meaningful offset to add anyway.
@@ -269,6 +284,8 @@ pub fn offset(doc: &mut Document, ids: &[EntityId], dist: f64) -> Vec<EntityId> 
 /// Upper bound on the elements a single array command may create.
 const MAX_ARRAY_ELEMENTS: u64 = 100_000;
 
+/// Creates a rectangular grid of copies of the given entities; returns the new
+/// copies (the originals stay put).
 pub fn array_rect(
     doc: &mut Document,
     ids: &[EntityId],
@@ -297,6 +314,8 @@ pub fn array_rect(
     new_ids
 }
 
+/// Creates copies of the given entities arrayed around `center` over
+/// `total_angle`; returns the new copies.
 pub fn array_polar(
     doc: &mut Document,
     ids: &[EntityId],
@@ -385,6 +404,8 @@ fn trim_outcome(
     TrimOutcome::RemoveSpan { lo, hi }
 }
 
+/// Joins connected curves end-to-end into polycurves; returns the ids of the
+/// resulting joined entities (empty when nothing could be joined).
 pub fn join(doc: &mut Document, ids: &[EntityId]) -> Vec<EntityId> {
     const EPS: f64 = 1e-6;
     let mut segs: Vec<(Curve, EntityId, usize)> = Vec::new();
@@ -569,6 +590,9 @@ fn conic_arc(curve: &Curve, fa: f64, fb: f64) -> Curve {
     }
 }
 
+/// Trims `target` at the point `(px, py)` against the cutting `cutters`,
+/// removing the picked span; returns the surviving piece ids (unchanged when
+/// there's nothing to cut).
 pub fn trim(
     doc: &mut Document,
     target: EntityId,
@@ -617,6 +641,8 @@ pub fn trim(
     }
 }
 
+/// The span [`trim`] would remove for this pick, without modifying the
+/// document — for live highlight. `None` when trimming would do nothing.
 pub fn trim_preview(
     doc: &Document,
     target: EntityId,
@@ -635,6 +661,7 @@ pub fn trim_preview(
     }
 }
 
+/// Splits `target` into two entities at parameter `t`; returns the piece ids.
 pub fn break_at(doc: &mut Document, target: EntityId, t: f64) -> Vec<EntityId> {
     // Breaking at an undefined parameter is a no-op, not two junk pieces.
     if !t.is_finite() {
@@ -820,6 +847,8 @@ fn norm_pos(x: f64) -> f64 {
     v
 }
 
+/// Extends `target` from the end nearest the pick `(px, py)` until it meets one
+/// of the `boundaries`; returns whether it changed.
 pub fn extend(
     doc: &mut Document,
     target: EntityId,
@@ -845,6 +874,8 @@ pub fn extend(
     done
 }
 
+/// The curve [`extend`] would produce for this pick, without modifying the
+/// document — for live preview. `None` when it wouldn't reach a boundary.
 pub fn extend_preview(
     doc: &Document,
     target: EntityId,
@@ -866,6 +897,9 @@ pub fn extend_preview(
     }
 }
 
+/// Rounds the corner between entities `a` and `b` with an arc of the given
+/// `radius`, trimming both to meet it; returns the new arc's id, or `None` when
+/// no valid fillet exists. `(px, py)` picks the corner side.
 pub fn fillet(
     doc: &mut Document,
     a: EntityId,
@@ -963,6 +997,9 @@ fn nearest_ends(a: &Curve, b: &Curve) -> (bool, bool) {
     choice
 }
 
+/// Bevels the corner between entities `a` and `b` with a straight segment,
+/// cutting `dist_a`/`dist_b` back along each; returns the new segment's id, or
+/// `None` for a non-positive distance or invalid corner.
 pub fn chamfer(
     doc: &mut Document,
     a: EntityId,
@@ -1135,12 +1172,13 @@ fn chamfer_cut(c: &Curve, t: f64, dist: f64) -> Option<(Curve, (f64, f64))> {
     (keep.is_finite() && end.0.is_finite() && end.1.is_finite()).then_some((keep, end))
 }
 
+/// One of the two edges meeting at a corner, reduced to the minimal geometry
+/// the fillet/chamfer solvers need (a line or an arc).
 #[derive(Clone, Copy, Debug)]
 pub enum CornerEdge {
-    Line {
-        p0: (f64, f64),
-        p1: (f64, f64),
-    },
+    /// A straight edge between two points.
+    Line { p0: (f64, f64), p1: (f64, f64) },
+    /// A circular edge.
     Arc {
         cx: f64,
         cy: f64,
@@ -1151,6 +1189,7 @@ pub enum CornerEdge {
 }
 
 impl CornerEdge {
+    /// Builds a corner edge from a line or arc curve, or `None` for other kinds.
     pub fn from_curve(c: &Curve) -> Option<CornerEdge> {
         match c {
             Curve::Line(l) => Some(CornerEdge::Line {
@@ -1171,27 +1210,42 @@ impl CornerEdge {
         }
     }
 
+    /// True when this edge is a straight line.
     pub fn is_line(&self) -> bool {
         matches!(self, CornerEdge::Line { .. })
     }
 }
 
+/// The geometry of a solved fillet: the arc's centre and radius, the two
+/// tangent points on the edges, and the trim angle on each arc edge (if any).
 #[derive(Clone, Copy, Debug)]
 pub struct FilletSolution {
+    /// Centre of the fillet arc.
     pub center: (f64, f64),
+    /// Radius of the fillet arc.
     pub radius: f64,
+    /// Tangent point on the first edge.
     pub ta: (f64, f64),
+    /// Tangent point on the second edge.
     pub tb: (f64, f64),
+    /// Trim angle on the first edge, when it is an arc.
     pub a_angle: Option<f64>,
+    /// Trim angle on the second edge, when it is an arc.
     pub b_angle: Option<f64>,
 }
 
+/// The geometry of a solved chamfer: the two cut points on the edges the bevel
+/// segment connects.
 #[derive(Clone, Copy, Debug)]
 pub struct ChamferSolution {
+    /// Cut point on the first edge.
     pub pa: (f64, f64),
+    /// Cut point on the second edge.
     pub pb: (f64, f64),
 }
 
+/// Solves the fillet arc of the given `radius` between two edges, near `pick`;
+/// returns its geometry or `None` when no valid fillet fits.
 pub fn solve_fillet(
     a: CornerEdge,
     b: CornerEdge,
@@ -1285,6 +1339,8 @@ pub fn solve_fillet(
     }
 }
 
+/// Solves the chamfer bevel between two edges cut back by `dist_a`/`dist_b`;
+/// returns its two cut points, or `None` for a non-positive distance.
 pub fn solve_chamfer(
     a: CornerEdge,
     b: CornerEdge,
@@ -1517,10 +1573,14 @@ fn edge_endpoints(e: CornerEdge) -> [(f64, f64); 2] {
     }
 }
 
+/// Fillets the corner between segments `seg_i` and `seg_i + 1` of a polycurve
+/// in place, splicing in the arc; returns whether it succeeded.
 pub fn fillet_poly_corner(doc: &mut Document, id: EntityId, seg_i: usize, radius: f64) -> bool {
     apply_poly_corner(doc, id, seg_i, PolyCorner::Fillet(radius))
 }
 
+/// Chamfers the corner between segments `seg_i` and `seg_i + 1` of a polycurve
+/// in place, splicing in the bevel; returns whether it succeeded.
 pub fn chamfer_poly_corner(doc: &mut Document, id: EntityId, seg_i: usize, dist: f64) -> bool {
     apply_poly_corner(doc, id, seg_i, PolyCorner::Chamfer(dist))
 }
