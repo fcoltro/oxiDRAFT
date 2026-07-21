@@ -93,8 +93,16 @@ fn session_is_live(recovery: &Path) -> bool {
 }
 
 /// Called once per frame; writes at most every [`AUTOSAVE_INTERVAL`], and
-/// only while unsaved changes exist.
+/// only while unsaved changes exist. The timer stays disarmed while the
+/// document is clean: the first frame with unsaved changes writes
+/// immediately, so a quick sketch made right after startup (or right after
+/// a save) is protected within one frame instead of riding a free-running
+/// interval that could leave it unprotected for the full period.
 pub fn tick(app: &AppState, last: &mut Option<Instant>) {
+    if !app.is_dirty() {
+        *last = None;
+        return;
+    }
     let due = last
         .map(|t| t.elapsed() >= AUTOSAVE_INTERVAL)
         .unwrap_or(true);
@@ -102,9 +110,6 @@ pub fn tick(app: &AppState, last: &mut Option<Instant>) {
         return;
     }
     *last = Some(Instant::now());
-    if !app.is_dirty() {
-        return;
-    }
     let mut doc = app.document.clone();
     doc.remove(app.origin_id);
     for dir in candidate_dirs() {
@@ -129,6 +134,18 @@ pub fn discard_recovery() {
 pub fn remove_recovery_file(path: &Path) {
     let _ = std::fs::remove_file(sidecar(path));
     let _ = std::fs::remove_file(path);
+}
+
+/// Retires a recovery file that FAILED to restore. Renamed aside (`.bad`)
+/// rather than deleted, so the bytes stay available for inspection — but
+/// out of `pending_recovery`'s discovery set, so a corrupt file isn't
+/// re-offered at every launch forever.
+pub fn quarantine_recovery_file(path: &Path) {
+    let _ = std::fs::remove_file(sidecar(path));
+    let bad = path.with_extension("o2d.bad");
+    if std::fs::rename(path, &bad).is_err() {
+        let _ = std::fs::remove_file(path);
+    }
 }
 
 /// A leftover recovery file with content, whose writer no longer runs, means
@@ -238,5 +255,47 @@ mod tests {
         );
         remove_recovery_file(&dead);
         assert!(!dead.exists(), "declining the offer removes the file");
+
+        // While the document is clean the timer must stay disarmed, so the
+        // very first edit after a long idle period is written immediately —
+        // a free-running timer could leave a quick sketch unprotected for
+        // the whole interval.
+        let clean = AppState::new(800.0, 600.0);
+        let mut armed = None;
+        tick(&clean, &mut armed);
+        assert!(armed.is_none(), "a clean document must not arm the timer");
+        assert!(
+            own_recovery_file().is_none(),
+            "a clean document must not write a recovery file"
+        );
+        tick(&app, &mut armed);
+        assert!(
+            own_recovery_file().is_some(),
+            "the first dirty tick after idling must write immediately"
+        );
+        discard_recovery();
+
+        // A corrupt recovery file that failed to restore must be moved out
+        // of the discovery set, or it is re-offered at every launch forever.
+        let corrupt = candidate_dirs()[0].join(format!("{RECOVERY_PREFIX}_1.o2d"));
+        std::fs::write(&corrupt, "not an o2d file at all").expect("plant corrupt file");
+        let mut broken = AppState::new(800.0, 600.0);
+        assert!(
+            !broken.restore_recovery(&corrupt),
+            "garbage must fail to restore"
+        );
+        quarantine_recovery_file(&corrupt);
+        assert!(
+            !corrupt.exists(),
+            "the corrupt file must leave the discovery set"
+        );
+        assert_ne!(
+            pending_recovery().as_deref(),
+            Some(corrupt.as_path()),
+            "a quarantined file must not be offered again"
+        );
+        let bad = corrupt.with_extension("o2d.bad");
+        assert!(bad.exists(), "the bytes are kept aside for inspection");
+        let _ = std::fs::remove_file(&bad);
     }
 }

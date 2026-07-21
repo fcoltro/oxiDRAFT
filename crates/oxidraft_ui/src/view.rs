@@ -90,6 +90,9 @@ pub struct UiState {
     pub last_autosave: Option<std::time::Instant>,
     pub recovery_offer: Option<std::path::PathBuf>,
     pub recovery_checked: bool,
+    /// Set once the user has answered the unsaved-changes prompt for a
+    /// window close, so re-sending the close doesn't re-prompt.
+    pub close_confirmed: bool,
     pub radial_open: bool,
     pub radial_center: Option<egui::Pos2>,
     pub radial_category: Option<RadialRing>,
@@ -108,6 +111,23 @@ pub fn draw_ui(ui: &mut egui::Ui, app: &mut AppState, ui_state: &mut UiState) {
         ui_state.recovery_offer = crate::autosave::pending_recovery();
     }
     crate::autosave::tick(app, &mut ui_state.last_autosave);
+    app.trim_command_log();
+    // Closing the window (X button, Alt+F4) must get the same unsaved-changes
+    // prompt New and Open already have — otherwise all work since the last
+    // save is silently gone. eframe (0.35, epi_integration.rs) captures the
+    // close request before this fn runs and only aborts the close if it sees
+    // a CancelClose command afterward — so we veto ONLY when the user picks
+    // Cancel, and let the close proceed untouched when they Save or Discard.
+    // `close_confirmed` latches that decision so a re-sent close (or a
+    // Discard that leaves the doc dirty) can't re-prompt.
+    if ctx.input(|i| i.viewport().close_requested()) && !ui_state.close_confirmed && app.is_dirty()
+    {
+        if chrome::maybe_save(app) {
+            ui_state.close_confirmed = true;
+        } else {
+            ctx.send_viewport_cmd(egui::ViewportCommand::CancelClose);
+        }
+    }
     if let Some(path) = ui_state.recovery_offer.clone() {
         egui::Window::new("Recover unsaved work")
             .collapsible(false)
@@ -124,6 +144,10 @@ pub fn draw_ui(ui: &mut egui::Ui, app: &mut AppState, ui_state: &mut UiState) {
                         if app.restore_recovery(&path) {
                             crate::autosave::remove_recovery_file(&path);
                             ui_state.last_autosave = None;
+                        } else {
+                            // A file that can't be parsed will never restore;
+                            // move it aside or it is re-offered every launch.
+                            crate::autosave::quarantine_recovery_file(&path);
                         }
                         ui_state.recovery_offer = None;
                     }

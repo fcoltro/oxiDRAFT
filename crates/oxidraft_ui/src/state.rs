@@ -2475,6 +2475,19 @@ impl AppState {
         self.history.current_revision() != self.saved_revision
     }
 
+    /// Caps the command log so a long session can't grow it without bound —
+    /// only the newest entry is ever displayed (the toast), the rest exist
+    /// for context. Trimmed with slack so the drain runs rarely, not on
+    /// every push past the cap.
+    pub fn trim_command_log(&mut self) {
+        const CAP: usize = 400;
+        const SLACK: usize = 200;
+        if self.command_log.len() > CAP + SLACK {
+            let cut = self.command_log.len() - CAP;
+            self.command_log.drain(..cut);
+        }
+    }
+
     pub fn restore_recovery(&mut self, path: &std::path::Path) -> bool {
         match oxidraft_io::load_native(path) {
             Ok(mut doc) => {
@@ -4404,6 +4417,25 @@ mod tests {
             a.history.undo_depth(),
             depth,
             "a rejected chamfer must not leave a phantom undo entry"
+        );
+    }
+
+    #[test]
+    fn command_log_is_capped_and_keeps_the_newest_entries() {
+        let mut a = app();
+        for i in 0..1000 {
+            a.command_log.push(format!("entry {i}"));
+            a.trim_command_log();
+        }
+        assert!(
+            a.command_log.len() <= 600,
+            "the log must stay bounded: {}",
+            a.command_log.len()
+        );
+        assert_eq!(
+            a.command_log.last().map(String::as_str),
+            Some("entry 999"),
+            "trimming drops the oldest entries, never the newest"
         );
     }
 

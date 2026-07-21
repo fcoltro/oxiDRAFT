@@ -4466,7 +4466,7 @@ fn hatch_pattern_editor(ui: &mut egui::Ui, pattern: &mut oxidraft_document::Hatc
     changed
 }
 
-fn maybe_save(app: &mut AppState) -> bool {
+pub(super) fn maybe_save(app: &mut AppState) -> bool {
     if !app.is_dirty() {
         return true;
     }
