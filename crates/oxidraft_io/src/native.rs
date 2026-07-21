@@ -612,11 +612,11 @@ fn parse_entity<'a>(
             let rot = next_parse(tok, 0.0);
             let start = next_parse(tok, 0.0);
             let end = next_parse(tok, TAU);
-            (major > 0.0 && minor > 0.0).then(|| {
-                EntityKind::Curve(Curve::Ellipse(EllipticalArc::new(
-                    c, major, minor, rot, start, end,
-                )))
-            })
+            // try_new also rejects non-finite rotation/angles ("inf" parses
+            // as a valid f64), which the old positivity check let through.
+            EllipticalArc::try_new(c, major, minor, rot, start, end)
+                .ok()
+                .map(|e| EntityKind::Curve(Curve::Ellipse(e)))
         }
         "BEZIER" => {
             let p0 = parse_pt(tok.next());
@@ -806,8 +806,9 @@ fn parse_segment(line: &str) -> Option<Curve> {
             let rot = next_parse(&mut tok, 0.0);
             let start = next_parse(&mut tok, 0.0);
             let end = next_parse(&mut tok, TAU);
-            (major > 0.0 && minor > 0.0)
-                .then(|| Curve::Ellipse(EllipticalArc::new(c, major, minor, rot, start, end)))
+            EllipticalArc::try_new(c, major, minor, rot, start, end)
+                .ok()
+                .map(Curve::Ellipse)
         }
         _ => None,
     }
@@ -1639,6 +1640,26 @@ mod tests {
         let text = doc2.get(id).unwrap();
         assert!(
             matches!(&text.kind, EntityKind::Text { content, .. } if content == "line one\nline two\nline three")
+        );
+    }
+
+    #[test]
+    fn ellipse_with_non_finite_rotation_is_dropped_not_stored() {
+        // "inf" parses as a valid f64, so the old positivity-only guard let a
+        // non-finite rotation through; the stored ellipse then evaluated to
+        // NaN and poisoned every bounding box union it touched.
+        let text = "O2D 1\nLAYER 0 0,0,0 1 0 0 Continuous\n\
+                    E ELLIPSE 0 bylayer 0;0 5 3 inf 0 6.28 - -\n\
+                    E LINE 0 bylayer 0;0 5;5 - -\n";
+        let doc = from_string(text).unwrap();
+        assert_eq!(
+            doc.len(),
+            1,
+            "the junk ellipse is dropped, the line survives"
+        );
+        assert!(
+            doc.iter()
+                .all(|e| matches!(&e.kind, EntityKind::Curve(Curve::Line(_))))
         );
     }
 

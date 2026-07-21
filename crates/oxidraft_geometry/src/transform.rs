@@ -227,7 +227,13 @@ impl Transform2d {
         } else {
             (a.start_angle + rot, a.end_angle + rot)
         };
-        Curve::Arc(CircularArc::new(new_center, new_radius, start, end))
+        // A degenerate conformal map (zero or non-finite scale) collapses the
+        // radius below CircularArc's positivity contract; lower to the exact
+        // rational form instead of panicking in the trusted constructor.
+        match CircularArc::try_new(new_center, new_radius, start, end) {
+            Ok(arc) => Curve::Arc(arc),
+            Err(_) => self.apply_lowered(&Curve::Arc(*a)),
+        }
     }
 
     fn apply_ellipse(&self, e: &EllipticalArc) -> Curve {
@@ -248,14 +254,12 @@ impl Transform2d {
         } else {
             (e.start_angle + rot, e.end_angle + rot)
         };
-        Curve::Ellipse(EllipticalArc::new(
-            new_center,
-            new_major,
-            new_minor,
-            new_rotation,
-            start,
-            end,
-        ))
+        // Same degenerate-scale guard as apply_arc: don't hand back an
+        // ellipse with collapsed axes that evaluates to NaN downstream.
+        match EllipticalArc::try_new(new_center, new_major, new_minor, new_rotation, start, end) {
+            Ok(el) => Curve::Ellipse(el),
+            Err(_) => self.apply_lowered(&Curve::Ellipse(*e)),
+        }
     }
 
     /// Lowers a conic to its exact rational-Bézier segments and transforms those,
@@ -309,6 +313,20 @@ mod tests {
     fn mirror_diagonal_line() {
         let t = Transform2d::mirror_line(&pt(0, 0), &pt(1, 1));
         assert_eq!(t.apply_point(&pt(3, 0)), pt(0, 3));
+    }
+
+    #[test]
+    fn zero_scale_collapses_conics_without_panicking() {
+        // scale_uniform(0.0) is conformal (nothing to preserve), so the arc
+        // fast path used to compute radius 0 and panic in CircularArc::new;
+        // the ellipse fast path silently produced zero axes instead. Both
+        // must fall back to the lowered rational form: finite, no panic.
+        let zero = Transform2d::scale_uniform(0.0);
+        let arc = Curve::Arc(CircularArc::new(pt(1, 2), 5.0, 0.0, 1.0));
+        let ell = Curve::Ellipse(EllipticalArc::new(pt(1, 2), 5.0, 3.0, 0.3, 0.0, 1.0));
+        for c in [zero.apply_curve(&arc), zero.apply_curve(&ell)] {
+            assert!(c.is_finite(), "collapsed conic must stay finite: {c:?}");
+        }
     }
 
     #[test]

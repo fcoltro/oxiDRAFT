@@ -738,15 +738,18 @@ fn shape_curves(name: &str, attrs: &[(String, String)]) -> Vec<Curve> {
             let (rx, ry) = (attrf(attrs, "rx"), attrf(attrs, "ry"));
             (rx > 1e-9 && ry > 1e-9)
                 .then(|| {
-                    Curve::Ellipse(EllipticalArc::new(
+                    EllipticalArc::try_new(
                         p(attrf(attrs, "cx"), attrf(attrs, "cy")),
                         rx,
                         ry,
                         0.0,
                         0.0,
                         TAU,
-                    ))
+                    )
+                    .ok()
+                    .map(Curve::Ellipse)
                 })
+                .flatten()
                 .into_iter()
                 .collect()
         }

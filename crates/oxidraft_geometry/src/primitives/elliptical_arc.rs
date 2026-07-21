@@ -1,4 +1,5 @@
 use crate::curve::CurveSegment;
+use crate::error::GeomError;
 use crate::point::{BoundingBox, Point2d};
 
 #[derive(Clone, Copy, Debug)]
@@ -45,6 +46,41 @@ impl EllipticalArc {
             start_angle,
             end_angle,
         }
+    }
+
+    /// Fallible constructor for untrusted input (file import, transforms of
+    /// unknown provenance), mirroring [`crate::CircularArc::try_new`]:
+    /// rejects non-positive/NaN semi-axes and any non-finite coordinate or
+    /// angle, so degenerate geometry can't evaluate to NaN downstream.
+    pub fn try_new(
+        center: Point2d,
+        semi_major: f64,
+        semi_minor: f64,
+        rotation: f64,
+        start_angle: f64,
+        end_angle: f64,
+    ) -> Result<Self, GeomError> {
+        if !semi_major.is_finite() || semi_major <= 0.0 {
+            return Err(GeomError::NonPositiveAxis(semi_major));
+        }
+        if !semi_minor.is_finite() || semi_minor <= 0.0 {
+            return Err(GeomError::NonPositiveAxis(semi_minor));
+        }
+        if !center.is_finite()
+            || !rotation.is_finite()
+            || !start_angle.is_finite()
+            || !end_angle.is_finite()
+        {
+            return Err(GeomError::NonFiniteValue);
+        }
+        Ok(EllipticalArc {
+            center,
+            semi_major,
+            semi_minor,
+            rotation,
+            start_angle,
+            end_angle,
+        })
     }
 
     pub fn foci(&self) -> ((f64, f64), (f64, f64)) {
@@ -140,6 +176,24 @@ impl CurveSegment for EllipticalArc {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn try_new_rejects_degenerate_and_non_finite_input() {
+        let c = Point2d::from_i64(0, 0);
+        assert!(matches!(
+            EllipticalArc::try_new(c, 0.0, 1.0, 0.0, 0.0, 1.0),
+            Err(GeomError::NonPositiveAxis(_))
+        ));
+        assert!(matches!(
+            EllipticalArc::try_new(c, 2.0, f64::NAN, 0.0, 0.0, 1.0),
+            Err(GeomError::NonPositiveAxis(_))
+        ));
+        assert!(matches!(
+            EllipticalArc::try_new(c, 2.0, 1.0, f64::INFINITY, 0.0, 1.0),
+            Err(GeomError::NonFiniteValue)
+        ));
+        assert!(EllipticalArc::try_new(c, 2.0, 1.0, 0.0, 0.0, 1.0).is_ok());
+    }
 
     #[test]
     fn reversed_elliptical_arc_matches_forward_metrics() {

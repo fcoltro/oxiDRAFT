@@ -331,18 +331,20 @@ fn parse_ellipse(rec: &[Pair]) -> Vec<EntityKind> {
     }
     let major = (mx * mx + my * my).sqrt();
     let minor = major * ratio;
-    if !(major > 0.0 && minor > 0.0) {
-        return vec![];
-    }
     let rotation = my.atan2(mx);
-    vec![EntityKind::Curve(Curve::Ellipse(EllipticalArc::new(
+    // Rejects degenerate axes and non-finite angles from junk records.
+    EllipticalArc::try_new(
         Point2d::from_f64(cx, cy),
         major,
         minor,
         rotation,
         start,
         end,
-    )))]
+    )
+    .ok()
+    .map(|e| EntityKind::Curve(Curve::Ellipse(e)))
+    .into_iter()
+    .collect()
 }
 
 fn parse_point(rec: &[Pair]) -> Vec<EntityKind> {

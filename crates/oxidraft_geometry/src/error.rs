@@ -19,6 +19,10 @@ pub enum GeomError {
     NonPositiveWeight(f64),
     /// Two points that had to be distinct coincided.
     CoincidentPoints,
+    /// An ellipse semi-axis that was not strictly positive.
+    NonPositiveAxis(f64),
+    /// A coordinate or angle that was not finite.
+    NonFiniteValue,
 }
 
 impl fmt::Display for GeomError {
@@ -36,6 +40,8 @@ impl fmt::Display for GeomError {
             }
             GeomError::NonPositiveWeight(w) => write!(f, "weights must be positive, got {w}"),
             GeomError::CoincidentPoints => write!(f, "points must be distinct"),
+            GeomError::NonPositiveAxis(a) => write!(f, "semi-axes must be positive, got {a}"),
+            GeomError::NonFiniteValue => write!(f, "coordinates and angles must be finite"),
         }
     }
 }
