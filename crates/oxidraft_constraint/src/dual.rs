@@ -9,9 +9,14 @@
 
 use std::ops::{Add, Div, Mul, Neg, Sub};
 
+/// A dual number: a value paired with its gradient (one partial derivative per
+/// sketch variable), propagated through arithmetic to differentiate residuals
+/// exactly.
 #[derive(Clone, Debug)]
 pub struct Dual {
+    /// The value.
     pub val: f64,
+    /// Partial derivative with respect to each sketch variable.
     pub d: Vec<f64>,
 }
 
@@ -32,6 +37,8 @@ impl Dual {
         Dual { val, d }
     }
 
+    /// Absolute value, with the derivative carried through the active branch
+    /// (the sign of `val`).
     pub fn abs(&self) -> Dual {
         let s = if self.val >= 0.0 { 1.0 } else { -1.0 };
         Dual {

@@ -30,6 +30,9 @@ pub struct PointVar(usize);
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct ScalarVar(usize);
 
+/// One equation the solver enforces, expressed over point and scalar variable
+/// handles. The higher-level document `SketchConstraint`s lower into these;
+/// each variant's residual is zero exactly when it is satisfied.
 #[derive(Clone, Debug)]
 pub enum Constraint {
     /// The two points coincide.
@@ -94,14 +97,19 @@ pub enum Constraint {
     },
 }
 
+/// The outcome of a [`Sketch::solve`].
 #[derive(Clone, Copy, Debug)]
 pub struct SolveResult {
+    /// Whether the residual fell below tolerance.
     pub converged: bool,
     /// Infinity norm of the residual vector at exit.
     pub residual: f64,
+    /// How many Newton iterations were taken.
     pub iterations: u32,
 }
 
+/// A constraint sketch: a flat vector of point/scalar variables plus the
+/// constraints over them. Built up with `add_*`/`constrain`, then solved.
 #[derive(Clone, Default)]
 pub struct Sketch {
     vars: Vec<f64>,
@@ -115,10 +123,12 @@ pub struct Sketch {
 }
 
 impl Sketch {
+    /// A new, empty sketch.
     pub fn new() -> Self {
         Sketch::default()
     }
 
+    /// Adds a 2D point variable initialised to `(x, y)`; returns its handle.
     pub fn add_point(&mut self, x: f64, y: f64) -> PointVar {
         let idx = self.vars.len();
         self.vars.push(x);
@@ -127,15 +137,19 @@ impl Sketch {
         PointVar(idx)
     }
 
+    /// The current `(x, y)` of a point variable.
     pub fn point(&self, p: PointVar) -> (f64, f64) {
         (self.vars[p.0], self.vars[p.0 + 1])
     }
 
+    /// Overwrites a point variable's value (e.g. to seed the solve).
     pub fn set_point(&mut self, p: PointVar, x: f64, y: f64) {
         self.vars[p.0] = x;
         self.vars[p.0 + 1] = y;
     }
 
+    /// Adds a scalar variable (typically a radius) initialised to `v`; returns
+    /// its handle.
     pub fn add_scalar(&mut self, v: f64) -> ScalarVar {
         let idx = self.vars.len();
         self.vars.push(v);
@@ -164,14 +178,17 @@ impl Sketch {
         spread.max(scalar_mag)
     }
 
+    /// The current value of a scalar variable.
     pub fn scalar(&self, s: ScalarVar) -> f64 {
         self.vars[s.0]
     }
 
+    /// Overwrites a scalar variable's value.
     pub fn set_scalar(&mut self, s: ScalarVar, v: f64) {
         self.vars[s.0] = v;
     }
 
+    /// Adds a constraint to the sketch.
     pub fn constrain(&mut self, c: Constraint) {
         self.constraints.push(c);
     }
@@ -795,14 +812,19 @@ fn perturb(vars: &[f64]) -> Vec<f64> {
         .collect()
 }
 
+/// The result of [`Sketch::analyze`]: how under-constrained the sketch is and
+/// which constraints add nothing.
 #[derive(Clone, Debug)]
 pub struct DofReport {
+    /// Remaining degrees of freedom (0 means fully constrained).
     pub dof: usize,
     /// Constraint indices (in this sketch's insertion order) that are
     /// numerically redundant given the others.
     pub redundant: Vec<usize>,
 }
 
+/// The result of [`Sketch::diagnose_conflict`]: which constraints most likely
+/// make an over-constrained sketch unsolvable.
 #[derive(Clone, Debug)]
 pub struct ConflictReport {
     /// Constraint indices whose removal alone lets the rest of the system
