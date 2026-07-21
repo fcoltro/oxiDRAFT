@@ -1,11 +1,20 @@
+//! Per-entity display properties: colour, line weight, line type, and extended
+//! (application) data — each supporting the CAD `ByLayer`/`ByBlock`
+//! inheritance model.
+
+/// An entity's colour: an explicit RGB, or inherited from its layer/block.
 #[derive(Clone, Debug, PartialEq)]
 pub enum Color {
+    /// Inherit the layer's colour.
     ByLayer,
+    /// Inherit the containing block's colour.
     ByBlock,
+    /// An explicit red/green/blue colour.
     Rgb(u8, u8, u8),
 }
 
 impl Color {
+    /// Maps an AutoCAD Color Index (ACI) to an RGB colour.
     pub fn from_aci(index: u8) -> Color {
         match index {
             1 => Color::Rgb(255, 0, 0),
@@ -19,6 +28,7 @@ impl Color {
         }
     }
 
+    /// The concrete RGB, resolving `ByLayer`/`ByBlock` against `layer_color`.
     pub fn resolve(&self, layer_color: (u8, u8, u8)) -> (u8, u8, u8) {
         match self {
             Color::Rgb(r, g, b) => (*r, *g, *b),
@@ -27,14 +37,20 @@ impl Color {
     }
 }
 
+/// An entity's line weight (thickness): explicit or inherited.
 #[derive(Clone, Debug, PartialEq)]
 pub enum LineWeight {
+    /// Inherit the layer's line weight.
     ByLayer,
+    /// Inherit the containing block's line weight.
     ByBlock,
+    /// An explicit weight in hundredths of a millimetre.
     Hundredths(i16),
 }
 
 impl LineWeight {
+    /// The concrete weight in millimetres, resolving inheritance against
+    /// `layer_weight_mm`.
     pub fn to_mm(&self, layer_weight_mm: f64) -> f64 {
         match self {
             LineWeight::Hundredths(h) => *h as f64 / 100.0,
@@ -43,21 +59,30 @@ impl LineWeight {
     }
 }
 
+/// A reference to a line type (dash pattern): explicit, or inherited.
 #[derive(Clone, Debug, PartialEq)]
 pub enum LineTypeRef {
+    /// Inherit the layer's line type.
     ByLayer,
+    /// Inherit the containing block's line type.
     ByBlock,
+    /// A named line type, defined in the document's line-type table.
     Named(String),
 }
 
+/// The definition of a named line type: its dash/gap pattern.
 #[derive(Clone, Debug, PartialEq)]
 pub struct LineTypeDef {
+    /// Unique name.
     pub name: String,
+    /// Human-readable description (often an ASCII preview).
     pub description: String,
+    /// Dash lengths: positive = drawn dash, negative = gap; empty = solid.
     pub pattern: Vec<f64>,
 }
 
 impl LineTypeDef {
+    /// The built-in continuous (solid) line type.
     pub fn continuous() -> Self {
         LineTypeDef {
             name: "Continuous".into(),
@@ -65,6 +90,7 @@ impl LineTypeDef {
             pattern: vec![],
         }
     }
+    /// The built-in dashed line type.
     pub fn dashed() -> Self {
         LineTypeDef {
             name: "Dashed".into(),
@@ -72,6 +98,7 @@ impl LineTypeDef {
             pattern: vec![0.5, -0.25],
         }
     }
+    /// The built-in dotted line type.
     pub fn dotted() -> Self {
         LineTypeDef {
             name: "Dotted".into(),
@@ -79,6 +106,7 @@ impl LineTypeDef {
             pattern: vec![0.0, -0.2],
         }
     }
+    /// The built-in centre-line type (long-short-long dashes).
     pub fn center() -> Self {
         LineTypeDef {
             name: "Center".into(),
@@ -88,18 +116,23 @@ impl LineTypeDef {
     }
 }
 
+/// Extended application data attached to an entity: arbitrary key/value string
+/// pairs preserved through the document.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct XData {
+    /// The key/value pairs, in insertion order.
     pub entries: Vec<(String, String)>,
 }
 
 impl XData {
+    /// The value for `key`, or `None` when absent.
     pub fn get(&self, key: &str) -> Option<&str> {
         self.entries
             .iter()
             .find(|(k, _)| k == key)
             .map(|(_, v)| v.as_str())
     }
+    /// Sets `key` to `value`, overwriting any existing entry.
     pub fn set(&mut self, key: &str, value: &str) {
         if let Some(e) = self.entries.iter_mut().find(|(k, _)| k == key) {
             e.1 = value.to_string();

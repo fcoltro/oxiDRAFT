@@ -1,30 +1,38 @@
+//! Drawing entities: [`EntityKind`] (the tagged union of everything a drawing
+//! can hold — curves, text, dimensions, hatches, block inserts), the stable
+//! [`EntityId`] handle, and the per-entity attributes ([`Entity`]).
+
 use crate::properties::{Color, LineTypeRef, LineWeight, XData};
 use oxidraft_geometry::{BoundingBox, Curve, CurveSegment, Point2d, Transform2d};
 
+/// A stable handle to an entity in a [`crate::Document`]; ids are never reused,
+/// so a stored id stays valid across edits.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct EntityId(pub u64);
 
+/// How a hatch region is filled.
 #[derive(Clone, Copy, Debug, PartialEq, Default)]
 pub enum HatchPattern {
+    /// A solid fill.
     #[default]
     Solid,
-    Lines {
-        angle_deg: f64,
-        spacing: f64,
-    },
-    Cross {
-        angle_deg: f64,
-        spacing: f64,
-    },
-    Dots {
-        spacing: f64,
-    },
+    /// Parallel hatch lines at `angle_deg`, `spacing` apart.
+    Lines { angle_deg: f64, spacing: f64 },
+    /// Two crossing sets of hatch lines (cross-hatch).
+    Cross { angle_deg: f64, spacing: f64 },
+    /// A grid of dots `spacing` apart.
+    Dots { spacing: f64 },
 }
 
+/// The geometry-and-content payload of an entity — one variant per kind of
+/// thing a drawing can contain.
 #[derive(Clone, Debug)]
 pub enum EntityKind {
+    /// A curve (line, arc, spline, …).
     Curve(Curve),
+    /// A standalone point.
     Point(Point2d),
+    /// A text label anchored at a point.
     Text {
         anchor: Point2d,
         content: String,
@@ -32,24 +40,23 @@ pub enum EntityKind {
         rotation: f64,
         font: Option<String>,
     },
-    XLine {
-        through: Point2d,
-        dir: (f64, f64),
-    },
-    Ray {
-        from: Point2d,
-        dir: (f64, f64),
-    },
+    /// An infinite construction line through a point in a direction.
+    XLine { through: Point2d, dir: (f64, f64) },
+    /// A semi-infinite construction ray from a point.
+    Ray { from: Point2d, dir: (f64, f64) },
+    /// A block instance placed by name under a transform.
     Insert {
         block: String,
         transform: Transform2d,
     },
+    /// A filled region bounded by `boundary`, minus any `holes`.
     Hatch {
         boundary: Vec<Curve>,
         holes: Vec<Vec<Curve>>,
         fill: (u8, u8, u8),
         pattern: HatchPattern,
     },
+    /// An aligned linear dimension between two points.
     Dimension {
         p1: Point2d,
         p2: Point2d,
@@ -57,6 +64,7 @@ pub enum EntityKind {
         height: f64,
         override_text: Option<String>,
     },
+    /// A horizontal or vertical (orthogonal) linear dimension.
     OrthoDim {
         p1: Point2d,
         p2: Point2d,
@@ -65,6 +73,7 @@ pub enum EntityKind {
         height: f64,
         override_text: Option<String>,
     },
+    /// An angular dimension of the angle at `center` between two points.
     AngularDim {
         center: Point2d,
         p1: Point2d,
@@ -73,6 +82,7 @@ pub enum EntityKind {
         height: f64,
         override_text: Option<String>,
     },
+    /// A radius or diameter dimension of a circle/arc.
     RadialDim {
         center: Point2d,
         edge: Point2d,
@@ -186,26 +196,43 @@ impl EntityKind {
     }
 }
 
+/// A recorded tangency: this entity is kept tangent to `target`, using `near`
+/// to pick which tangent solution when there are several.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct TangentRef {
+    /// The entity this one is tangent to.
     pub target: EntityId,
+    /// A hint point selecting among multiple tangent solutions.
     pub near: Point2d,
 }
 
+/// An entity as stored in the document: its geometry ([`EntityKind`]) plus all
+/// the display attributes and bookkeeping attached to it.
 #[derive(Clone, Debug)]
 pub struct Entity {
+    /// Stable identity of this entity.
     pub id: EntityId,
+    /// The geometry/content payload.
     pub kind: EntityKind,
+    /// Index of the layer this entity belongs to.
     pub layer: usize,
+    /// Colour, or `ByLayer`/`ByBlock` inheritance.
     pub color: Color,
+    /// Line type (dash pattern), or inheritance.
     pub line_type: LineTypeRef,
+    /// Line weight (thickness), or inheritance.
     pub line_weight: LineWeight,
+    /// Transparency in `0.0` (opaque) to `1.0` (invisible).
     pub transparency: f64,
+    /// Arbitrary extended application data.
     pub xdata: XData,
+    /// Tangency constraints recorded on this entity.
     pub tangents: Vec<TangentRef>,
 }
 
 impl Entity {
+    /// A new entity of `kind` on `layer`, with all attributes defaulting to
+    /// `ByLayer` inheritance.
     pub fn new(id: EntityId, kind: EntityKind, layer: usize) -> Self {
         Entity {
             id,
@@ -220,10 +247,13 @@ impl Entity {
         }
     }
 
+    /// The entity's extent (delegates to [`EntityKind::bounding_box`]).
     pub fn bounding_box(&self) -> Option<BoundingBox> {
         self.kind.bounding_box()
     }
 
+    /// Applies an affine transform to the entity's geometry in place. A
+    /// non-finite transform is rejected here, keeping the document finite.
     pub fn transform(&mut self, t: &Transform2d) {
         // The single geometry floor: a non-finite transform (NaN drag
         // delta, a mirror axis of two identical points) would poison every
@@ -336,12 +366,14 @@ impl Entity {
         };
     }
 
+    /// A transformed copy of the entity, leaving the original unchanged.
     pub fn transformed(&self, t: &Transform2d) -> Entity {
         let mut e = self.clone();
         e.transform(t);
         e
     }
 
+    /// Borrows the inner [`Curve`] when this entity is a `Curve`, else `None`.
     pub fn as_curve(&self) -> Option<&Curve> {
         if let EntityKind::Curve(c) = &self.kind {
             Some(c)

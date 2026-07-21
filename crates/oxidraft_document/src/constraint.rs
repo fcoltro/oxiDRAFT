@@ -1,12 +1,26 @@
+//! The sketch constraint model: [`ConstraintKind`] (what relationship is being
+//! held) and [`SketchConstraint`] (which entities/anchors it ties together and
+//! any driving value). The numeric solver in `oxidraft_constraint` enforces
+//! these; this crate only records them.
+
 use crate::entity::EntityId;
 
+/// The kind of geometric relationship a constraint enforces. Some are pure
+/// relations (parallel, coincident); "driving" kinds also carry a numeric
+/// value (a radius, length, or angle) that fixes a dimension.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ConstraintKind {
+    /// A line entity held horizontal.
     Horizontal,
+    /// A line entity held vertical.
     Vertical,
+    /// Two line entities held parallel.
     Parallel,
+    /// Two line entities held at a right angle.
     Perpendicular,
+    /// Two line entities held to equal length.
     EqualLength,
+    /// Two point anchors (indices in `pts`) welded together.
     Coincident,
     /// A line entity tangent to a circular-arc entity (either order).
     Tangent,
@@ -60,6 +74,8 @@ pub enum ConstraintKind {
 }
 
 impl ConstraintKind {
+    /// A short human-readable name for the constraint (for the status bar and
+    /// menus).
     pub fn label(&self) -> &'static str {
         match self {
             ConstraintKind::Horizontal => "horizontal",
@@ -146,6 +162,8 @@ impl ConstraintKind {
         )
     }
 
+    /// The short mnemonic code used on the command line and in the native
+    /// file format (e.g. `PAR`, `COI`, `RAD`).
     pub fn code(&self) -> &'static str {
         match self {
             ConstraintKind::Horizontal => "H",
@@ -174,6 +192,8 @@ impl ConstraintKind {
         }
     }
 
+    /// Parses a [`ConstraintKind::code`] mnemonic back into a kind, or `None`
+    /// if unrecognised.
     pub fn from_code(s: &str) -> Option<ConstraintKind> {
         Some(match s {
             "FIX" => ConstraintKind::Fixed,
@@ -231,13 +251,18 @@ pub const ANCHOR_DERIVED: u8 = 2;
 /// are the same relation with different values.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct SketchConstraint {
+    /// Which relationship this constraint enforces.
     pub kind: ConstraintKind,
+    /// The primary entity (the reference, picked first for pair kinds).
     pub a: EntityId,
+    /// The second entity, for pair kinds; `None` for single-entity kinds.
     pub b: Option<EntityId>,
     /// A third entity for kinds that need one — Symmetric's mirror line.
     /// `None` for every other kind.
     pub c: Option<EntityId>,
+    /// Per-entity anchor indices for point-level kinds (see [`ANCHOR_DERIVED`]).
     pub pts: Option<(u8, u8)>,
+    /// The driving value (radius/length/width/angle) for valued kinds.
     pub val: Option<f64>,
     /// Where the user placed the dimension annotation (world coordinates),
     /// for valued kinds dimensioned interactively. `None` falls back to the
@@ -246,6 +271,7 @@ pub struct SketchConstraint {
 }
 
 impl SketchConstraint {
+    /// A single-entity constraint (Horizontal, Vertical, Fixed, …) on `a`.
     pub fn single(kind: ConstraintKind, a: EntityId) -> Self {
         SketchConstraint {
             kind,
@@ -258,6 +284,7 @@ impl SketchConstraint {
         }
     }
 
+    /// A two-entity relation of `kind` between `a` (reference) and `b`.
     pub fn pair(kind: ConstraintKind, a: EntityId, b: EntityId) -> Self {
         SketchConstraint {
             kind,
@@ -270,6 +297,7 @@ impl SketchConstraint {
         }
     }
 
+    /// Welds anchor `ea` of entity `a` to anchor `eb` of entity `b`.
     pub fn coincident(a: EntityId, ea: u8, b: EntityId, eb: u8) -> Self {
         SketchConstraint {
             kind: ConstraintKind::Coincident,
@@ -318,6 +346,7 @@ impl SketchConstraint {
         }
     }
 
+    /// A driving radius `value` on a circular-arc entity.
     pub fn radius(a: EntityId, value: f64) -> Self {
         SketchConstraint {
             kind: ConstraintKind::Radius,
@@ -396,6 +425,7 @@ impl SketchConstraint {
         SketchConstraint::pair(ConstraintKind::Block, member, reference)
     }
 
+    /// True when this constraint mentions entity `id` in any of its slots.
     pub fn references(&self, id: EntityId) -> bool {
         self.a == id || self.b == Some(id) || self.c == Some(id)
     }

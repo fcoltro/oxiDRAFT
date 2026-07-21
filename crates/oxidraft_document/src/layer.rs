@@ -1,17 +1,32 @@
+//! Layers: named groups that supply default colour/line-type/weight to their
+//! entities and carry visibility flags. [`LayerTable`] is the document's set of
+//! layers plus the current one.
+
 use crate::properties::LineTypeRef;
 
+/// A drawing layer: a named group with default display properties and
+/// on/frozen/locked state.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Layer {
+    /// Unique layer name.
     pub name: String,
+    /// Default colour for `ByLayer` entities on this layer.
     pub color: (u8, u8, u8),
+    /// Default line type for `ByLayer` entities.
     pub line_type: LineTypeRef,
+    /// Default line weight in millimetres.
     pub line_weight_mm: f64,
+    /// Whether the layer is shown.
     pub on: bool,
+    /// Whether the layer is frozen (hidden and skipped by regen).
     pub frozen: bool,
+    /// Whether the layer is locked against editing.
     pub locked: bool,
 }
 
 impl Layer {
+    /// A new visible, unlocked layer with white default colour and continuous
+    /// line type.
     pub fn new(name: impl Into<String>) -> Self {
         Layer {
             name: name.into(),
@@ -24,28 +39,35 @@ impl Layer {
         }
     }
 
+    /// Builder: sets the layer's default colour.
     pub fn with_color(mut self, r: u8, g: u8, b: u8) -> Self {
         self.color = (r, g, b);
         self
     }
 
+    /// Builder: sets the layer's default (named) line type.
     pub fn with_line_type(mut self, name: impl Into<String>) -> Self {
         self.line_type = LineTypeRef::Named(name.into());
         self
     }
 
+    /// True when the layer is drawn (on and not frozen).
     pub fn is_visible(&self) -> bool {
         self.on && !self.frozen
     }
 
+    /// True when entities on the layer may be edited (visible and unlocked).
     pub fn is_editable(&self) -> bool {
         self.is_visible() && !self.locked
     }
 }
 
+/// The document's layers and which one is current for new entities.
 #[derive(Clone, Debug)]
 pub struct LayerTable {
+    /// All layers, in order; index 0 is always layer "0".
     pub layers: Vec<Layer>,
+    /// Index of the current layer.
     pub current: usize,
 }
 
@@ -59,6 +81,8 @@ impl Default for LayerTable {
 }
 
 impl LayerTable {
+    /// Adds `layer`, returning its index; if a layer of that name already
+    /// exists, returns the existing index instead of adding a duplicate.
     pub fn add(&mut self, layer: Layer) -> usize {
         if let Some(i) = self.index_of(&layer.name) {
             return i;
@@ -67,21 +91,26 @@ impl LayerTable {
         self.layers.len() - 1
     }
 
+    /// The index of the layer named `name`, if any.
     pub fn index_of(&self, name: &str) -> Option<usize> {
         self.layers.iter().position(|l| l.name == name)
     }
 
+    /// Borrows the layer at `idx`, if present.
     pub fn get(&self, idx: usize) -> Option<&Layer> {
         self.layers.get(idx)
     }
+    /// Mutably borrows the layer at `idx`, if present.
     pub fn get_mut(&mut self, idx: usize) -> Option<&mut Layer> {
         self.layers.get_mut(idx)
     }
 
+    /// The current layer new entities are placed on.
     pub fn current_layer(&self) -> &Layer {
         &self.layers[self.current]
     }
 
+    /// Makes `name` the current layer; returns `false` if no such layer.
     pub fn set_current(&mut self, name: &str) -> bool {
         if let Some(i) = self.index_of(name) {
             self.current = i;
@@ -91,6 +120,8 @@ impl LayerTable {
         }
     }
 
+    /// Removes the layer named `name`. Fails for layer "0" and for the current
+    /// layer; callers must reassign any entities on the layer first.
     pub fn delete(&mut self, name: &str) -> Result<(), &'static str> {
         if name == "0" {
             return Err("cannot delete layer 0");

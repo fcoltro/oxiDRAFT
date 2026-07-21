@@ -1,3 +1,11 @@
+//! oxiDRAFT's document model — the in-memory drawing.
+//!
+//! [`Document`] owns everything a drawing contains: [`entity`]s (curves, text,
+//! dimensions, hatches, inserts) with their display [`properties`], [`layer`]s,
+//! blocks, saved views, [`Settings`], and sketch [`constraint`]s. [`dimension`]
+//! turns dimension entities into measured values and labels. This crate is pure
+//! data and bookkeeping; the CAD, I/O, and UI crates operate on it.
+
 pub mod constraint;
 pub mod dimension;
 pub mod document;

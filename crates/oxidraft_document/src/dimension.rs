@@ -1,13 +1,24 @@
+//! Dimension geometry and text: the measured value of a dimension entity, its
+//! orientation, and the formatted label — shared by the renderer and exporters
+//! so on-screen and exported dimensions read identically.
+
 use crate::{DimStyle, EntityKind, Units};
 use oxidraft_geometry::{Point2d, wrap_pi};
 
+/// The arc an angular dimension spans: where it starts, how far it sweeps
+/// (signed), and at what radius the dimension arc is drawn.
 #[derive(Clone, Copy, Debug)]
 pub struct AngularSweep {
+    /// Start angle in radians.
     pub start: f64,
+    /// Signed sweep in radians, chosen to include the dimension-line point.
     pub sweep: f64,
+    /// Radius at which the dimension arc sits.
     pub radius: f64,
 }
 
+/// Computes the [`AngularSweep`] for an angular dimension, picking the sweep
+/// direction/side that contains the dimension-line point `line`.
 pub fn angular_sweep(center: Point2d, p1: Point2d, p2: Point2d, line: Point2d) -> AngularSweep {
     let (cx, cy) = center.to_f64();
     let ang = |p: Point2d| {
@@ -34,6 +45,9 @@ pub fn angular_sweep(center: Point2d, p1: Point2d, p2: Point2d, line: Point2d) -
     }
 }
 
+/// Whether a linear dimension reads horizontally (`Some(true)`), vertically
+/// (`Some(false)`), or is ambiguous (`None`), inferred from where the
+/// dimension line sits relative to the measured segment's midpoint.
 pub fn linear_orientation(p1: Point2d, p2: Point2d, line: Point2d) -> Option<bool> {
     let mid = p1.midpoint(&p2);
     let (mx, my) = mid.to_f64();
@@ -48,6 +62,8 @@ pub fn linear_orientation(p1: Point2d, p2: Point2d, line: Point2d) -> Option<boo
     }
 }
 
+/// The raw measured value of a dimension entity (a length, angle, or radius),
+/// or `None` for non-dimension kinds.
 pub fn measured_value(kind: &EntityKind) -> Option<f64> {
     Some(match kind {
         EntityKind::Dimension { p1, p2, .. } => p1.dist_f64(p2),
@@ -84,6 +100,9 @@ pub fn measured_value(kind: &EntityKind) -> Option<f64> {
     })
 }
 
+/// The text shown on a dimension: the manual `override_text` if set, otherwise
+/// the measured value formatted per `style` and `units` (with the appropriate
+/// unit/angle suffix). `None` for non-dimension kinds.
 pub fn label_text(kind: &EntityKind, style: &DimStyle, units: Units) -> Option<String> {
     let ovr = override_text(kind);
     if let Some(t) = ovr {
