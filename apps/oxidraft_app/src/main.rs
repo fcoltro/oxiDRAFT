@@ -1,8 +1,12 @@
+//! The oxiDRAFT executable: launches the eframe/egui desktop GUI, falling
+//! back to a small non-interactive kernel demo if the GUI can't start (e.g.
+//! no display) or if run with `demo`/`cli`/`--demo`.
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 use oxidraft_geometry::{CircularArc, Curve, LineSeg, Point2d, intersect};
 use oxidraft_ui::{AppState, UiPrefs, UiState, draw_ui, egui};
 
+/// Storage key the saved [`UiPrefs`] are persisted under between sessions.
 const PREFS_KEY: &str = "oxidraft_ui_prefs";
 
 fn main() {
@@ -27,6 +31,8 @@ fn main() {
     }
 }
 
+/// Where the crash/startup log is written: next to the executable, or the
+/// system temp dir if that location can't be determined.
 fn log_path() -> std::path::PathBuf {
     std::env::current_exe()
         .ok()
@@ -35,10 +41,12 @@ fn log_path() -> std::path::PathBuf {
         .join("oxidraft_log.txt")
 }
 
+/// Truncates the log file and writes its header, for a fresh log per run.
 fn log_init() {
     let _ = std::fs::write(log_path(), "oxiDRAFT log\n=============\n");
 }
 
+/// Appends a line to the log file and echoes it to stderr.
 fn log(msg: &str) {
     use std::io::Write;
     if let Ok(mut f) = std::fs::OpenOptions::new()
@@ -51,6 +59,8 @@ fn log(msg: &str) {
     eprintln!("{msg}");
 }
 
+/// The eframe application: owns the document/editor state and the
+/// transient UI state redrawn each frame.
 struct OxidraftCad {
     app: AppState,
     ui: UiState,
@@ -66,6 +76,8 @@ impl eframe::App for OxidraftCad {
     }
 }
 
+/// Opens the native window and runs the eframe event loop until the user
+/// closes it, restoring saved [`UiPrefs`] on startup.
 fn run_gui() -> eframe::Result<()> {
     let options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
@@ -93,6 +105,9 @@ fn run_gui() -> eframe::Result<()> {
     )
 }
 
+/// Prints a small non-interactive demo of the geometry kernel (a line/circle
+/// intersection) to stdout — the fallback when the GUI can't start, and the
+/// `demo`/`cli`/`--demo` command-line mode.
 fn run_demo() {
     println!("=== oxiDRAFT — Geometry Kernel Demo ===\n");
 
