@@ -112,7 +112,7 @@ fn initialized_id() -> egui::Id {
     egui::Id::new("fonts_initialized")
 }
 
-const ROBOTO_LIGHT: &[u8] = include_bytes!("../assets/Roboto-Light.ttf");
+const NOTO_SANS: &[u8] = include_bytes!("../assets/NotoSans-Regular.ttf");
 
 /// Makes sure every font family in `needed` (plus the bundled default) is
 /// loaded into egui's font atlas, re-registering fonts only when the
@@ -128,11 +128,11 @@ pub fn ensure_fonts(ctx: &Context, needed: &BTreeSet<String>) {
     }
     let mut fonts = egui::FontDefinitions::default();
     fonts.font_data.insert(
-        "Roboto".to_owned(),
-        std::sync::Arc::new(egui::FontData::from_static(ROBOTO_LIGHT)),
+        "Noto Sans".to_owned(),
+        std::sync::Arc::new(egui::FontData::from_static(NOTO_SANS)),
     );
     if let Some(prop) = fonts.families.get_mut(&FontFamily::Proportional) {
-        prop.insert(0, "Roboto".to_owned());
+        prop.insert(0, "Noto Sans".to_owned());
     }
     for family in &want {
         if let Some((bytes, index)) = family_bytes(family) {
