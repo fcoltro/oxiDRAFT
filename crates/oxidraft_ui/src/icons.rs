@@ -1,5 +1,10 @@
+//! Toolbar and UI icons: PNGs baked into the binary via `include_bytes!`,
+//! GPU-texture-cached per [`Icon`] variant, and the app window/taskbar icon
+//! (generated at multiple sizes, including a hand-rolled `.ico` container).
+
 use egui::{Color32, Rect, Response, Sense, Stroke, Ui, Vec2, pos2};
 use std::collections::HashMap;
+/// One toolbar or UI icon, backed by a bundled PNG.
 #[derive(Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Icon {
     Select,
@@ -211,6 +216,8 @@ fn icon_texture(ctx: &egui::Context, icon: Icon) -> Option<egui::TextureHandle> 
     Some(tex)
 }
 
+/// Draws `icon`, tinted by `tint`, into `rect` — loading and caching its GPU
+/// texture on first use.
 pub fn paint_icon(
     painter: &egui::Painter,
     ctx: &egui::Context,
@@ -250,6 +257,9 @@ fn scaled_pixmap_from_png(bytes: &[u8], w: u32, h: u32) -> Option<resvg::tiny_sk
     Some(out)
 }
 
+/// The application window icon at 256×256, straight-alpha RGBA (egui's
+/// `IconData` expects unpremultiplied color, unlike the rest of this module's
+/// premultiplied textures — hence the unpremultiply pass below).
 pub fn app_icon() -> egui::IconData {
     const SIZE: u32 = 256;
     let png = include_bytes!("../assets/logotype/oxidraft_symbol.png");
@@ -278,11 +288,14 @@ pub fn app_icon() -> egui::IconData {
     }
 }
 
+/// The app logo mark, scaled to `size`×`size` and re-encoded as PNG bytes.
 pub fn app_icon_png(size: u32) -> Option<Vec<u8>> {
     let png = include_bytes!("../assets/logotype/oxidraft_symbol.png");
     scaled_pixmap_from_png(png, size, size)?.encode_png().ok()
 }
 
+/// Packs the standard Windows icon size set (16–256px) into a `.ico` file's
+/// bytes, for use as the executable's embedded icon.
 pub fn app_icon_ico() -> Option<Vec<u8>> {
     let sizes = [16u32, 24, 32, 48, 64, 128, 256];
     let mut entries: Vec<(u32, Vec<u8>)> = Vec::with_capacity(sizes.len());
@@ -312,6 +325,7 @@ pub fn app_icon_ico() -> Option<Vec<u8>> {
     Some(out)
 }
 
+/// The app's logotype as a GPU texture, loaded and cached on first use.
 pub fn logo_texture(ctx: &egui::Context) -> Option<egui::TextureHandle> {
     let id = egui::Id::new("oxidraft_logo_tex");
     if let Some(t) = ctx.data(|d| d.get_temp::<egui::TextureHandle>(id)) {
@@ -331,10 +345,13 @@ pub fn logo_texture(ctx: &egui::Context) -> Option<egui::TextureHandle> {
 const ICON_SIZE: f32 = 30.0;
 const GLYPH_PX: f32 = 24.0;
 
+/// A clickable icon button at the default toolbar size, with hover/active
+/// highlight animation and a rich tooltip.
 pub fn icon_button(ui: &mut Ui, icon: Icon, tooltip: &str, active: bool) -> Response {
     icon_button_sized(ui, icon, tooltip, active, ICON_SIZE)
 }
 
+/// Like [`icon_button`], at an explicit pixel size.
 pub fn icon_button_sized(
     ui: &mut Ui,
     icon: Icon,

@@ -1,3 +1,9 @@
+//! Adaptive curve flattening and drawing for the canvas: turns a [`Curve`]
+//! into screen-space polylines (or dashed/dotted patterned strokes) fine
+//! enough that no chord deviates from the true curve by more than a pixel
+//! tolerance, plus a world-space variant whose flattened points can be
+//! cached per entity independent of pan/zoom.
+
 use egui::Stroke;
 use oxidraft_geometry::{Curve, CurveSegment, Point2d, point_segment_dist_sq};
 const TESS_TOL_PX: f32 = 0.3;

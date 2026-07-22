@@ -1,3 +1,8 @@
+//! System font discovery for text-entity styling, on-demand loading of
+//! chosen fonts into egui, and outlining text into [`Curve`] geometry so
+//! text entities can be drawn, exported, and boolean-ops'd like any other
+//! curve.
+
 use egui::{Context, FontFamily, FontId};
 use oxidraft_geometry::{CubicBezier, Curve, LineSeg, Point2d, PolyCurve, Transform2d};
 use std::collections::BTreeSet;
@@ -66,10 +71,14 @@ fn faces() -> &'static [FaceEntry] {
     })
 }
 
+/// Display labels for every distinct system font face (family + weight +
+/// italic), sorted alphabetically — populates the font-choice dropdown.
 pub fn system_families() -> Vec<String> {
     faces().iter().map(|f| f.label.clone()).collect()
 }
 
+/// A sensible default font label: "Arial" if installed, otherwise the first
+/// available face, or `None` if no fonts were found at all.
 pub fn default_family_label() -> Option<String> {
     if faces().iter().any(|f| f.label == "Arial") {
         Some("Arial".to_string())
@@ -78,6 +87,9 @@ pub fn default_family_label() -> Option<String> {
     }
 }
 
+/// Kicks off system font enumeration on a background thread so it's already
+/// cached by the time the font dropdown is first opened. Safe to call
+/// repeatedly — only the first call spawns the thread.
 pub fn warm() {
     static STARTED: std::sync::Once = std::sync::Once::new();
     STARTED.call_once(|| {
@@ -102,6 +114,9 @@ fn initialized_id() -> egui::Id {
 
 const ROBOTO_LIGHT: &[u8] = include_bytes!("../assets/Roboto-Light.ttf");
 
+/// Makes sure every font family in `needed` (plus the bundled default) is
+/// loaded into egui's font atlas, re-registering fonts only when the
+/// requested set actually changes.
 pub fn ensure_fonts(ctx: &Context, needed: &BTreeSet<String>) {
     let want: Vec<String> = needed.iter().cloned().collect();
     let initialized = ctx.data(|d| d.get_temp::<bool>(initialized_id()).unwrap_or(false));
@@ -142,6 +157,8 @@ pub fn ensure_fonts(ctx: &Context, needed: &BTreeSet<String>) {
     });
 }
 
+/// The egui [`FontId`] for rendering text in `family` at `size`, falling
+/// back to the default proportional font if `family` isn't loaded.
 pub fn text_font_id(ctx: &Context, family: Option<&str>, size: f32) -> FontId {
     if let Some(fam) = family {
         let target = FontFamily::Name(fam.to_owned().into());
@@ -226,6 +243,10 @@ impl ttf_parser::OutlineBuilder for ContourBuilder {
     }
 }
 
+/// Converts `content` into curve outlines (one closed contour per glyph
+/// stroke) at `height` world units, positioned at `anchor` and rotated by
+/// `rotation` radians. Returns an empty vec if `family` (or any system font)
+/// can't be loaded or parsed.
 pub fn outline_text(
     content: &str,
     family: Option<&str>,

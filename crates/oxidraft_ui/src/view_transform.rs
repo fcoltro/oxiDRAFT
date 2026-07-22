@@ -1,14 +1,27 @@
+//! The camera: maps between world coordinates and screen pixels for the
+//! canvas view, and enforces pan/zoom limits so hostile or non-finite input
+//! can never leave the viewport permanently blank.
+
+/// The canvas camera: world→screen mapping (pan + zoom) and the viewport size.
 #[derive(Clone, Debug)]
 pub struct ViewTransform {
+    /// World-space point at the center of the viewport.
     pub center: (f64, f64),
+    /// Screen pixels per world unit.
     pub zoom: f64,
+    /// Viewport width in screen pixels.
     pub width: f64,
+    /// Viewport height in screen pixels.
     pub height: f64,
+    /// Smallest world-space extent [`zoom_to_bounds`](Self::zoom_to_bounds)/zoom clamping will zoom in to.
     pub min_visible: f64,
+    /// Largest world-space extent zoom clamping will zoom out to.
     pub max_visible: f64,
 }
 
 impl ViewTransform {
+    /// Creates a camera centered on the origin at the default zoom, for a
+    /// viewport of the given pixel size.
     pub fn new(width: f64, height: f64) -> Self {
         ViewTransform {
             center: (0.0, 0.0),
@@ -20,6 +33,8 @@ impl ViewTransform {
         }
     }
 
+    /// Sets the world-space extent range zoom is clamped to, and re-clamps
+    /// the current zoom to fit within it.
     pub fn set_visible_range(&mut self, min_visible: f64, max_visible: f64) {
         self.min_visible = min_visible.max(1e-12);
         self.max_visible = max_visible.max(self.min_visible * 2.0);
@@ -33,26 +48,32 @@ impl ViewTransform {
         zoom.clamp(zoom_min, zoom_max)
     }
 
+    /// Maps a world-space point to screen pixels.
     pub fn world_to_screen(&self, wx: f64, wy: f64) -> (f64, f64) {
         let sx = (wx - self.center.0) * self.zoom + self.width / 2.0;
         let sy = (self.center.1 - wy) * self.zoom + self.height / 2.0;
         (sx, sy)
     }
 
+    /// Maps a screen-pixel point to world space.
     pub fn screen_to_world(&self, sx: f64, sy: f64) -> (f64, f64) {
         let wx = self.center.0 + (sx - self.width / 2.0) / self.zoom;
         let wy = self.center.1 - (sy - self.height / 2.0) / self.zoom;
         (wx, wy)
     }
 
+    /// World-space size of one screen pixel at the current zoom.
     pub fn pixel_world_size(&self) -> f64 {
         1.0 / self.zoom
     }
 
+    /// The current zoom expressed as a percentage for display in the UI.
     pub fn zoom_percent(&self) -> f64 {
         self.zoom * 2.0
     }
 
+    /// The world-space spacing between grid lines at the current zoom,
+    /// picked from a 1/2/5×10ⁿ sequence so on-screen spacing stays legible.
     pub fn grid_spacing(&self) -> f64 {
         let raw = 80.0 * self.pixel_world_size();
         let mag = raw.log10().floor();
@@ -68,6 +89,8 @@ impl ViewTransform {
         }
     }
 
+    /// Rounds a world-space point to the nearest grid intersection at
+    /// [`grid_spacing`](Self::grid_spacing).
     pub fn snap_to_grid(&self, wx: f64, wy: f64) -> (f64, f64) {
         let g = self.grid_spacing();
         if !(g.is_finite() && g > 0.0) {
@@ -80,6 +103,7 @@ impl ViewTransform {
     // `zoom` or `center` sticks — every later frame transforms through it and
     // the viewport goes permanently blank — so reject it at the boundary.
 
+    /// Pans the camera by a screen-pixel delta.
     pub fn pan_pixels(&mut self, dx: f64, dy: f64) {
         if !(dx.is_finite() && dy.is_finite()) {
             return;
@@ -88,6 +112,8 @@ impl ViewTransform {
         self.center.1 += dy / self.zoom;
     }
 
+    /// Multiplies the zoom by `factor`, keeping the world point `(wx, wy)`
+    /// fixed on screen (the standard "zoom under cursor" behavior).
     pub fn zoom_at(&mut self, wx: f64, wy: f64, factor: f64) {
         if !(wx.is_finite() && wy.is_finite() && factor.is_finite() && factor > 0.0) {
             return;
@@ -103,13 +129,17 @@ impl ViewTransform {
         self.center.1 = wy + (self.center.1 - wy) / eff;
     }
 
+    /// Whether the camera is already at (or past) [`max_visible`](Self::max_visible)'s zoom-in cap.
     pub fn at_zoom_in_limit(&self) -> bool {
         self.zoom >= self.clamp_zoom(self.zoom * 1.0001)
     }
+    /// Whether the camera is already at (or past) [`min_visible`](Self::min_visible)'s zoom-out cap.
     pub fn at_zoom_out_limit(&self) -> bool {
         self.zoom <= self.clamp_zoom(self.zoom * 0.9999)
     }
 
+    /// Centers and zooms so the world-space rectangle exactly fits the
+    /// viewport with a margin (the ZOOM EXTENTS / ZOOM WINDOW behavior).
     pub fn zoom_to_bounds(&mut self, x0: f64, y0: f64, x1: f64, y1: f64) {
         if ![x0, y0, x1, y1].iter().all(|v| v.is_finite()) {
             return;
@@ -123,6 +153,7 @@ impl ViewTransform {
         self.center = ((x0 + x1) / 2.0, (y0 + y1) / 2.0);
     }
 
+    /// The world-space rectangle `(x0, y0, x1, y1)` currently visible in the viewport.
     pub fn visible_bounds(&self) -> (f64, f64, f64, f64) {
         let hw = self.width / (2.0 * self.zoom);
         let hh = self.height / (2.0 * self.zoom);

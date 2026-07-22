@@ -1,6 +1,12 @@
+//! Undo/redo: keeps a capped stack of whole-document snapshots plus a
+//! monotonic revision id per state, used to detect unsaved changes even
+//! when the undo *depth* alone would alias two different states.
+
 use oxidraft_document::Document;
 use std::collections::VecDeque;
 
+/// An undo/redo stack of document snapshots with a bounded size and a
+/// monotonic revision counter for dirty-tracking.
 pub struct History {
     past: VecDeque<(Document, u64)>,
     future: Vec<(Document, u64)>,
@@ -21,9 +27,11 @@ impl Default for History {
 }
 
 impl History {
+    /// Creates an empty history with the default snapshot limit (200).
     pub fn new() -> Self {
         Self::default()
     }
+    /// Creates an empty history that keeps at most `limit` undo snapshots.
     pub fn with_limit(limit: usize) -> Self {
         History {
             past: VecDeque::new(),
@@ -34,6 +42,9 @@ impl History {
         }
     }
 
+    /// Pushes `doc`'s current state onto the undo stack (evicting the oldest
+    /// snapshot past the limit) and clears the redo stack, as any new edit
+    /// invalidates it.
     pub fn snapshot(&mut self, doc: &Document) {
         self.past.push_back((doc.clone(), self.current_rev));
         if self.past.len() > self.limit {
@@ -43,12 +54,16 @@ impl History {
         self.current_rev = self.next_rev;
         self.next_rev += 1;
     }
+    /// Pops the most recent undo snapshot, pushing `doc`'s current state onto
+    /// the redo stack, or `None` if there's nothing to undo.
     pub fn undo(&mut self, doc: &Document) -> Option<Document> {
         let (prev, rev) = self.past.pop_back()?;
         self.future.push((doc.clone(), self.current_rev));
         self.current_rev = rev;
         Some(prev)
     }
+    /// Pops the most recent redo snapshot, pushing `doc`'s current state back
+    /// onto the undo stack, or `None` if there's nothing to redo.
     pub fn redo(&mut self, doc: &Document) -> Option<Document> {
         let (next, rev) = self.future.pop()?;
         self.past.push_back((doc.clone(), self.current_rev));
@@ -74,12 +89,15 @@ impl History {
         Some(prev)
     }
 
+    /// Whether there's a snapshot to undo to.
     pub fn can_undo(&self) -> bool {
         !self.past.is_empty()
     }
+    /// Whether there's a snapshot to redo to.
     pub fn can_redo(&self) -> bool {
         !self.future.is_empty()
     }
+    /// Number of snapshots currently on the undo stack.
     pub fn undo_depth(&self) -> usize {
         self.past.len()
     }

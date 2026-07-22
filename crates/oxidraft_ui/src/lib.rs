@@ -1,3 +1,9 @@
+//! The egui-based UI layer: application state ([`state`]), the drawing
+//! canvas and panels ([`view`]), interactive drawing/edit tools ([`tools`]),
+//! the command line ([`command`]), undo/redo ([`history`]), crash-recovery
+//! autosaving ([`autosave`]), and shared visual styling ([`theme`], [`icons`],
+//! [`fonts`]).
+
 pub mod autosave;
 pub mod command;
 pub mod fonts;

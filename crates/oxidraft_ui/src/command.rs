@@ -1,6 +1,13 @@
+//! The command line: parses typed text (AutoCAD-style command names and
+//! aliases) into a [`Command`] the app dispatches, and typed coordinate
+//! entry (`x,y`, `@dx,dy`, `dist<angle`, `@dist<angle`) into a [`CoordInput`].
+
 use crate::tools::Tool;
 use oxidraft_cad::ConstraintKind;
 
+/// An action requested through the command line: activating a drawing/edit
+/// tool, an immediate action (undo, erase, …), or a constraint to apply to
+/// the current selection.
 #[allow(clippy::large_enum_variant)]
 #[derive(Clone, Debug)]
 pub enum Command {
@@ -37,6 +44,9 @@ pub enum Command {
     Unknown(String),
 }
 
+/// A coordinate typed at the command line, in one of AutoCAD's four entry
+/// styles: absolute Cartesian, relative (`@`-prefixed) Cartesian, absolute
+/// polar (`dist<angle`), or relative polar (`@dist<angle`).
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum CoordInput {
     Absolute(f64, f64),
@@ -53,6 +63,9 @@ fn parse_finite_f64(s: &str) -> Option<f64> {
     s.trim().parse::<f64>().ok().filter(|v| v.is_finite())
 }
 
+/// Parses a typed coordinate string into a [`CoordInput`], or `None` if it
+/// doesn't match any of the recognized entry styles or contains a non-finite
+/// number.
 pub fn parse_coordinate(input: &str) -> Option<CoordInput> {
     let s = input.trim();
     if s.is_empty() {
@@ -83,6 +96,9 @@ pub fn parse_coordinate(input: &str) -> Option<CoordInput> {
     None
 }
 
+/// Parses a full command-line entry (a command name/alias plus optional
+/// arguments) into a [`Command`]. An empty input is [`Command::Cancel`]; an
+/// unrecognized verb is [`Command::Unknown`].
 pub fn parse_command(input: &str) -> Command {
     let trimmed = input.trim();
     if trimmed.is_empty() {

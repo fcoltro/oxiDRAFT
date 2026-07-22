@@ -1,8 +1,16 @@
+//! The interactive corner tool: detects fillet/chamfer-able corners in the
+//! current selection (including adjacent segments of a single polycurve),
+//! drives a live drag preview, and applies the result. Backs the
+//! click-a-corner-and-drag UX rather than the FILLET/CHAMFER command-line tools.
+
 use super::AppState;
 use oxidraft_cad::edit::CornerEdge;
 use oxidraft_document::{EntityId, EntityKind};
 use oxidraft_geometry::{Curve, CurveSegment};
 
+/// The geometry of one detected corner: the two edges meeting at it, their
+/// directions and lengths away from the corner, and whether it's eligible
+/// for a chamfer (both edges must be straight).
 #[derive(Clone, Copy, Debug)]
 pub struct CornerGeom {
     pub a: EntityId,
@@ -18,12 +26,15 @@ pub struct CornerGeom {
     pub edge_b: CornerEdge,
 }
 
+/// Which corner operation is currently being applied.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum CornerKind {
     Fillet,
     Chamfer,
 }
 
+/// An in-progress fillet/chamfer drag: the corner, which operation, and the
+/// size dragged to so far.
 #[derive(Clone, Copy, Debug)]
 pub struct CornerAction {
     pub geom: CornerGeom,
@@ -32,6 +43,8 @@ pub struct CornerAction {
 }
 
 impl CornerGeom {
+    /// The largest fillet/chamfer size this corner alone can take before an
+    /// edge would be consumed entirely.
     pub fn max_size(&self, kind: CornerKind) -> f64 {
         let min_len = self.len_a.min(self.len_b);
         match kind {
@@ -43,6 +56,7 @@ impl CornerGeom {
         }
     }
 
+    /// The angle between the two edges at the corner, in radians.
     pub fn interior_angle(&self) -> f64 {
         let cos = (self.dir_a.0 * self.dir_b.0 + self.dir_a.1 * self.dir_b.1).clamp(-1.0, 1.0);
         cos.acos()
@@ -115,6 +129,10 @@ fn line_group_max_size(group: &[CornerGeom], kind: CornerKind) -> f64 {
 
 type Pt = (f64, f64);
 
+/// Given a corner and the two unit directions leaving it along its edges,
+/// returns the fillet arc's tangent points on each edge and its center, for
+/// radius `r` — or `None` if the edges are (nearly) collinear or the corner
+/// is degenerate.
 pub fn fillet_arc(corner: Pt, da: Pt, db: Pt, r: f64) -> Option<(Pt, Pt, Pt)> {
     let cos = (da.0 * db.0 + da.1 * db.1).clamp(-1.0, 1.0);
     let half = cos.acos() * 0.5;
@@ -240,6 +258,9 @@ fn edge_dir_len(edge: &CornerEdge, vertex: (f64, f64)) -> ((f64, f64), f64) {
 }
 
 impl AppState {
+    /// Finds every fillet/chamfer-able corner in the current selection: both
+    /// adjacent segments within a selected polycurve, and coincident
+    /// endpoints between separately selected entities.
     pub fn detect_corners(&self) -> Vec<CornerGeom> {
         let mut out = Vec::new();
 
@@ -344,6 +365,9 @@ impl AppState {
         }
     }
 
+    /// Other detected corners that share geometry with `geom` and must be
+    /// resized together (the other corners of the same polycurve, or of the
+    /// same chain of selected lines/arcs).
     pub fn corner_group(&self, geom: &CornerGeom, kind: CornerKind) -> Vec<CornerGeom> {
         let all = self.detect_corners();
         if geom.poly_seg.is_some() {
@@ -358,6 +382,8 @@ impl AppState {
         }
     }
 
+    /// The largest size `geom` can be dragged to without any edge in its
+    /// [`corner_group`](Self::corner_group) being consumed entirely.
     pub fn corner_group_cap(&self, geom: &CornerGeom, kind: CornerKind) -> f64 {
         let group = self.corner_group(geom, kind);
         if group.len() <= 1 {
@@ -370,6 +396,8 @@ impl AppState {
         }
     }
 
+    /// Starts an interactive fillet drag at `geom`, seeded with a starting
+    /// size derived from the group's size cap.
     pub fn begin_corner_action(&mut self, geom: CornerGeom) {
         let cap = self.corner_group_cap(&geom, CornerKind::Fillet);
         let size = (cap * 0.3).max(1e-3);
@@ -380,6 +408,9 @@ impl AppState {
         });
     }
 
+    /// Updates the in-progress corner action from the current cursor
+    /// position: picks fillet or chamfer based on which side of the corner
+    /// the cursor is on, and sets the size to the cursor's distance (capped).
     pub fn update_corner_drag(&mut self) {
         if let Some(mut ca) = self.interaction.corner_action {
             let (cx, cy) = ca.geom.corner;
@@ -395,6 +426,8 @@ impl AppState {
         }
     }
 
+    /// Sets the in-progress corner action's size directly (e.g. from typed
+    /// keyboard input), clamped to the group's cap.
     pub fn set_corner_size(&mut self, val: f64) {
         if let Some(mut ca) = self.interaction.corner_action {
             let cap = self.corner_group_cap(&ca.geom, ca.kind);
@@ -403,6 +436,8 @@ impl AppState {
         }
     }
 
+    /// Commits the in-progress corner action: applies the fillet or chamfer
+    /// to every corner in its group and snapshots the result for undo.
     pub fn apply_corner_action(&mut self) {
         let Some(ca) = self.interaction.corner_action.take() else {
             return;
@@ -459,6 +494,7 @@ impl AppState {
         }
     }
 
+    /// Aborts the in-progress corner action without modifying the document.
     pub fn cancel_corner_action(&mut self) {
         self.interaction.corner_action = None;
     }

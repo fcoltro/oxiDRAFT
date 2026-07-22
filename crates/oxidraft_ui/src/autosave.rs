@@ -17,6 +17,7 @@ use std::path::{Path, PathBuf};
 use std::sync::{LazyLock, Mutex};
 use std::time::{Duration, Instant};
 
+/// Minimum time between autosave writes while the document has unsaved changes.
 pub const AUTOSAVE_INTERVAL: Duration = Duration::from_secs(30);
 
 const RECOVERY_PREFIX: &str = "oxidraft_recovery";

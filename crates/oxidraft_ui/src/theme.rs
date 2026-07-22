@@ -1,4 +1,10 @@
+//! The app's dark "glass panel" visual theme: shared colors, spacing/radius
+//! tokens, and frame/style builders applied once at startup via [`apply`].
+
 use egui::{Color32, Context, CornerRadius, FontFamily, FontId, Stroke, TextStyle, Visuals};
+
+/// Spacing, corner-radius, and font-size tokens shared across the UI so
+/// panels and widgets stay visually consistent.
 pub mod tok {
     pub const SP_2: f32 = 6.0;
     pub const SP_3: f32 = 8.0;
@@ -9,26 +15,48 @@ pub mod tok {
     pub const T_SM: f32 = 12.5;
     pub const T_LG: f32 = 15.0;
 }
+/// The canvas's background color, behind all drawn geometry.
 pub const CANVAS_BG: Color32 = Color32::from_rgb(10, 12, 16);
+/// Opaque panel background (menus, dialogs).
 pub const PANEL_BG: Color32 = Color32::from_rgb(20, 25, 36);
+/// Translucent panel background used by [`glass`] frames (toolbars, HUDs).
 pub const PANEL_GLASS: Color32 = Color32::from_rgba_premultiplied(15, 19, 29, 222);
+/// Fill for an inactive widget.
 pub const WIDGET_BG: Color32 = Color32::from_rgba_premultiplied(12, 12, 12, 12);
+/// Fill for a hovered widget.
 pub const WIDGET_HOVER: Color32 = Color32::from_rgba_premultiplied(22, 22, 22, 22);
+/// The app's accent color, used for selection and active-state highlights.
 pub const ACCENT: Color32 = Color32::from_rgb(48, 149, 255);
+/// A brighter variant of [`ACCENT`] for hyperlinks and high-emphasis text.
 pub const ACCENT_BRIGHT: Color32 = Color32::from_rgb(120, 185, 255);
+/// A dim, translucent variant of [`ACCENT`] for subtle fills (selection background).
 pub const ACCENT_DIM: Color32 = Color32::from_rgba_premultiplied(10, 30, 52, 52);
+/// Color for snap indicators on the canvas.
 pub const SNAP: Color32 = Color32::from_rgb(43, 233, 127);
+/// Color for live drawing previews; matches [`SNAP`] so in-progress geometry
+/// reads as one visual category.
 pub const PREVIEW: Color32 = SNAP;
+/// Color for inference/alignment guide lines.
 pub const GUIDE: Color32 = Color32::from_rgb(255, 90, 160);
+/// Status-indicator color for a healthy/positive state (e.g. fully constrained).
 pub const STATUS_GREEN: Color32 = Color32::from_rgb(55, 211, 153);
+/// Status-indicator color for a warning state (e.g. under-constrained).
 pub const STATUS_AMBER: Color32 = Color32::from_rgb(245, 185, 74);
+/// Status-indicator color for an error state (e.g. over-constrained/conflicting).
 pub const STATUS_RED: Color32 = Color32::from_rgb(240, 96, 96);
+/// Muted color for small HUD labels.
 pub const HUD_LABEL: Color32 = Color32::from_gray(170);
+/// Color for construction/control lines (e.g. grip handles).
 pub const CONTROL_LINE: Color32 = Color32::from_rgb(120, 140, 170);
+/// Primary text color.
 pub const TEXT: Color32 = Color32::from_rgb(233, 239, 248);
+/// Secondary/muted text color.
 pub const TEXT_DIM: Color32 = Color32::from_rgb(140, 152, 172);
+/// Hairline stroke color for panel and widget outlines.
 pub const OUTLINE: Color32 = Color32::from_rgba_premultiplied(16, 16, 16, 16);
 
+/// A translucent "glass" panel frame with a soft drop shadow, at the given
+/// corner radius — the base look for toolbars, HUDs, and floating panels.
 pub fn glass(radius: u8) -> egui::Frame {
     egui::Frame::new()
         .fill(PANEL_GLASS)
@@ -63,6 +91,8 @@ pub fn toast_alert(radius: u8) -> egui::Frame {
         })
 }
 
+/// Applies the app's dark glass theme (visuals, spacing, text styles) to the
+/// egui context. Called once at startup.
 pub fn apply(ctx: &Context) {
     let mut v = Visuals::dark();
     v.panel_fill = CANVAS_BG;
