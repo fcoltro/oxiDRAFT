@@ -1,3 +1,7 @@
+//! The radial (pie) tool menu: a press-and-drag hub-and-wedge menu, opened
+//! on a shortcut, that expands from a root ring (Draw/Modify) into a
+//! second-tier ring of that category's tools without releasing the pointer.
+
 use super::UiState;
 use super::chrome::{self, Act, act_needs_selection, group_entries, group_id, run_act};
 use crate::icons::{self, Icon};
@@ -5,6 +9,7 @@ use crate::state::AppState;
 use crate::theme;
 use egui::{Color32, Context, Key, Pos2, Rect, Stroke, vec2};
 
+/// Which root-ring wedge of the radial menu is selected/expanded.
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub enum RadialRing {
     Draw,

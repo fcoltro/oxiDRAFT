@@ -1,3 +1,7 @@
+//! Canvas frame rendering: draws entities, selection/hover highlights, grid,
+//! HUD prompts, and per-entity styling (color/linetype/lineweight) onto the
+//! egui painter each frame.
+
 use super::tessellate::{
     draw_curve, draw_curve_patterned, draw_patterned_polyline, flatten_curve_world, is_closed_curve,
 };

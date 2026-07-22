@@ -1,3 +1,8 @@
+//! The canvas view and its surrounding chrome: assembles the toolbars,
+//! panels, dialogs, and drawing surface into one egui frame each redraw via
+//! [`draw_ui`], and holds the transient, non-undoable UI state ([`UiState`])
+//! that doesn't belong in the document or its undo history.
+
 use crate::command::Command;
 use crate::state::AppState;
 use crate::tools::Tool;
@@ -31,13 +36,22 @@ use render::{
 };
 use tessellate::draw_curve;
 
+/// Per-entity cached hatch fill triangles and outline loops, keyed with a
+/// revision so a stale entry is only recomputed when the entity actually changed.
 pub type HatchCache =
     std::collections::HashMap<EntityId, (u64, Vec<[Point2d; 3]>, Vec<Vec<Point2d>>)>;
 
+/// Per-entity cached outlined-text triangles, revisioned like [`HatchCache`].
 pub type TextCache = std::collections::HashMap<EntityId, (u64, Vec<[Point2d; 3]>)>;
 
+/// Per-entity cached world-space flattened polyline plus whether it's
+/// closed, revisioned like [`HatchCache`].
 pub type CurveCache = std::collections::HashMap<EntityId, (u64, Vec<Point2d>, bool)>;
 
+/// Transient UI state that lives alongside [`AppState`] but outside its undo
+/// history: text edit buffers, dialog open/closed flags, the dynamic-input
+/// field contents, and per-entity render caches. Rebuilt fresh at startup
+/// (`Default`), never saved to disk.
 #[derive(Default)]
 pub struct UiState {
     pub command_input: String,
@@ -99,6 +113,8 @@ pub struct UiState {
     pub radial_expanded: Option<u8>,
 }
 
+/// Draws one full frame of the app UI (menus, toolbars, panels, canvas,
+/// dialogs) and handles input for it. Called once per egui update.
 pub fn draw_ui(ui: &mut egui::Ui, app: &mut AppState, ui_state: &mut UiState) {
     let ctx = ui.ctx().clone();
     crate::theme::apply(&ctx);
