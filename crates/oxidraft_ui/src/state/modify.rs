@@ -1,3 +1,8 @@
+//! Click handling for the modify (edit) tools: dispatches a canvas click to
+//! the active tool's next step (move/copy/rotate/scale/mirror/trim/extend/
+//! fillet/chamfer/blend/stretch/…), building up multi-click interactions and
+//! committing them to the document through [`AppState`]'s undo history.
+
 use super::AppState;
 use crate::tools::Tool;
 use oxidraft_cad::pick_at;
@@ -640,6 +645,8 @@ impl AppState {
         }
     }
 
+    /// The live preview for the Trim/Extend tool's entity under the cursor:
+    /// what would be removed (Trim) or added (Extend) if clicked now.
     pub fn trim_extend_preview(&self) -> Option<TrimExtendPreview> {
         use oxidraft_cad::edit;
         let (px, py) = self.cursor_world;
@@ -671,8 +678,11 @@ impl AppState {
     }
 }
 
+/// What [`AppState::trim_extend_preview`] would do to the hovered entity.
 pub enum TrimExtendPreview {
+    /// The curve segment that would be cut away.
     Remove(oxidraft_geometry::Curve),
+    /// The curve as it would look after extending to the target boundary.
     Extension(oxidraft_geometry::Curve),
 }
 

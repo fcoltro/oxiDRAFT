@@ -1,3 +1,7 @@
+//! The command palette: a searchable, fuzzy-filtered overlay (opened by a
+//! keyboard shortcut) listing every tool and toggle by name, hint, and
+//! keywords, so any command is reachable without memorizing its keybinding.
+
 use super::UiState;
 use crate::icons::Icon;
 use crate::state::AppState;

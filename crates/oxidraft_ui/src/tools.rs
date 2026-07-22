@@ -1,3 +1,8 @@
+//! Interactive drawing and edit tools: [`Tool`] is the state machine for
+//! whichever tool is active (accumulated clicks, live preview, commit), and
+//! [`ToolEvent`] is what a click or commit produces for [`crate::state`] to
+//! apply to the document.
+
 use oxidraft_document::{ConstraintKind, EntityId, EntityKind};
 use oxidraft_geometry::{
     CircularArc, Continuity, Curve, EllipticalArc, LineSeg, NurbsCurve, Point2d, Transform2d,
@@ -189,30 +194,33 @@ pub enum Tool {
     Hatch,
 }
 
+/// What the tangent-line tool's first pick anchored to: a bare point, or a
+/// circle/arc (whose tangent point is solved for at commit time).
 #[derive(Clone, Debug)]
 pub enum TanAnchor {
     Point(Point2d),
     Circle(EntityId, Point2d),
 }
 
+/// What a completed tool interaction asks the app to do to the document.
 #[allow(clippy::large_enum_variant)]
 #[derive(Clone, Debug)]
 pub enum ToolEvent {
+    /// The tool hasn't finished its interaction yet; nothing to apply.
     Pending,
+    /// Add these new entities to the document.
     Create(Vec<EntityKind>),
-    Transform {
-        ids: Vec<EntityId>,
-        t: Transform2d,
-    },
-    CopyOf {
-        ids: Vec<EntityId>,
-        t: Transform2d,
-    },
+    /// Move/rotate/scale/mirror the given entities in place by `t`.
+    Transform { ids: Vec<EntityId>, t: Transform2d },
+    /// Duplicate the given entities, placing the copies at `t`.
+    CopyOf { ids: Vec<EntityId>, t: Transform2d },
     /// Both corners of the plot window were picked (raw, unsorted).
     PlotWindow(Point2d, Point2d),
 }
 
 impl Tool {
+    /// The tool's display name, as shown in the status bar (also the command
+    /// verb for tools activated by typed command).
     pub fn name(&self) -> &'static str {
         match self {
             Tool::Select => "SELECT",
@@ -257,10 +265,14 @@ impl Tool {
         }
     }
 
+    /// Whether the tool immediately starts its next segment after
+    /// completing one, instead of returning to Select (currently just LINE).
     pub fn is_continuous(&self) -> bool {
         matches!(self, Tool::Line { .. })
     }
 
+    /// Whether this tool's clicks pick existing entities rather than placing
+    /// new points.
     pub fn picks_entities(&self) -> bool {
         matches!(
             self,
@@ -281,6 +293,8 @@ impl Tool {
         )
     }
 
+    /// Whether the cursor should snap to geometry (endpoints, midpoints,
+    /// intersections, …) while this tool is active.
     pub fn wants_point_snap(&self) -> bool {
         !matches!(
             self,
@@ -298,6 +312,8 @@ impl Tool {
         )
     }
 
+    /// Feeds a clicked/typed point to the tool, advancing its internal state
+    /// and returning what to do with the document (if anything yet).
     pub fn on_point(&mut self, p: Point2d) -> ToolEvent {
         match self {
             Tool::Select | Tool::Text { .. } => ToolEvent::Pending,
@@ -715,6 +731,8 @@ impl Tool {
         }
     }
 
+    /// Clears the tool's accumulated clicks/picks, returning it to its
+    /// initial state without changing which tool is active.
     pub fn reset(&mut self) {
         match self {
             Tool::Line { last } => *last = None,
@@ -792,6 +810,8 @@ impl Tool {
         }
     }
 
+    /// Whether the tool has at least one click/pick accumulated (so Escape
+    /// should reset it rather than deactivate it).
     pub fn has_pending_input(&self) -> bool {
         match self {
             Tool::Line { last } => last.is_some(),
@@ -829,6 +849,8 @@ impl Tool {
         }
     }
 
+    /// The live preview geometry for the tool's current in-progress shape,
+    /// rubber-banding to `cursor`.
     pub fn preview(&self, cursor: &Point2d) -> Vec<Curve> {
         match self {
             Tool::Line { last: Some(p) } => vec![Curve::Line(LineSeg::from_endpoints(*p, *cursor))],
@@ -968,6 +990,8 @@ impl Tool {
         }
     }
 
+    /// The most recent point the tool has anchored to, used as the origin
+    /// for relative/polar coordinate entry (`@dx,dy`) at the command line.
     pub fn reference_point(&self) -> Option<Point2d> {
         match self {
             Tool::Line { last } => *last,
@@ -1012,6 +1036,8 @@ impl Tool {
         }
     }
 
+    /// Every point placed so far in a multi-point tool (polyline, spline,
+    /// arc-by-3-points, …), for drawing the in-progress vertex markers.
     pub fn in_progress_points(&self) -> Vec<Point2d> {
         match self {
             Tool::Polyline { pts } | Tool::Spline { pts } => pts.clone(),
@@ -1025,6 +1051,9 @@ impl Tool {
         }
     }
 
+    /// Finalizes an open-ended multi-point tool (polyline, spline) on an
+    /// explicit "done" action (e.g. Enter), creating an open chain from the
+    /// points placed so far.
     pub fn commit(&mut self) -> ToolEvent {
         match self {
             Tool::Polyline { pts } => {
@@ -1078,6 +1107,8 @@ impl Tool {
         }
     }
 
+    /// Like [`commit`](Self::commit), but closes the chain back to its first
+    /// point (polyline's "Close" action).
     pub fn close_and_commit(&mut self) -> ToolEvent {
         match self {
             Tool::Polyline { pts } => {
