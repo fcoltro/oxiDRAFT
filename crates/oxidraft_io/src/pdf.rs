@@ -1,13 +1,20 @@
+//! PDF plotting: fits a document (or a picked window of it) onto a page and
+//! renders it via the SVG exporter + `svg2pdf`, so PDF output automatically
+//! tracks any improvement to [`crate::export_svg`].
+
 use oxidraft_document::Document;
 
 /// A page size in millimetres, independent of the drawing's own [`Units`](oxidraft_document::Units).
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct PaperSize {
+    /// Page width in millimetres.
     pub width_mm: f64,
+    /// Page height in millimetres.
     pub height_mm: f64,
 }
 
 impl PaperSize {
+    /// Builds a paper size from millimetre dimensions, whichever edge is longer.
     pub const fn new(width_mm: f64, height_mm: f64) -> Self {
         Self {
             width_mm,
@@ -46,9 +53,13 @@ pub const PAPER_PRESETS: &[(&str, PaperSize)] = &[
 /// AutoCAD's "Window" plot area. Corner order doesn't matter.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct PlotWindow {
+    /// One corner's X coordinate, world space.
     pub x0: f64,
+    /// One corner's Y coordinate, world space.
     pub y0: f64,
+    /// The opposite corner's X coordinate, world space.
     pub x1: f64,
+    /// The opposite corner's Y coordinate, world space.
     pub y1: f64,
 }
 

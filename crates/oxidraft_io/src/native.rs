@@ -1,3 +1,8 @@
+//! The native `.o2d` file format: a full-fidelity, line-oriented text
+//! serialization of a [`Document`] (entities, layers, line types, dimension
+//! styles, sketch constraints) — the only format that round-trips everything
+//! oxiDRAFT can represent.
+
 use oxidraft_document::{
     ANCHOR_DERIVED, Color, ConstraintKind, Document, Entity, EntityId, EntityKind, HatchPattern,
     Layer, LineTypeDef, LineTypeRef, LineWeight, SketchConstraint, Units,
@@ -9,13 +14,17 @@ use oxidraft_geometry::{
 use std::fmt::Write as _;
 
 const TAU: f64 = std::f64::consts::TAU;
+/// The magic string every current `.o2d` file starts with.
 pub const MAGIC: &str = "O2D";
 /// The format's old name, from when the app was eiderFLAT — files written
 /// before the rename to oxiDRAFT still start with this instead of [`MAGIC`].
 /// Accepted on read so those files keep opening; never written.
 const LEGACY_MAGIC: &str = "E2D";
+/// The format revision written to new files; read to gate any future
+/// backward-compatible parsing changes.
 pub const VERSION: u32 = 1;
 
+/// Serializes `doc` to the native `.o2d` text format.
 pub fn to_string(doc: &Document) -> String {
     let mut s = String::new();
     let _ = writeln!(s, "{MAGIC} {VERSION}");
@@ -139,6 +148,7 @@ pub fn to_string(doc: &Document) -> String {
     s
 }
 
+/// Serializes `doc` and writes it to `path` via [`crate::write_atomic`].
 pub fn save(doc: &Document, path: &std::path::Path) -> std::io::Result<()> {
     crate::write_atomic(path, to_string(doc).as_bytes())
 }
@@ -396,6 +406,8 @@ fn control_fields(points: &[Point2d], weights: &[f64]) -> String {
     out
 }
 
+/// Parses `.o2d` text into a [`Document`], or an error describing the first
+/// malformed line.
 pub fn from_string(text: &str) -> Result<Document, String> {
     let mut lines = text.lines().peekable();
     let header = lines.next().ok_or("empty file")?;
@@ -571,6 +583,7 @@ pub fn from_string(text: &str) -> Result<Document, String> {
     Ok(doc)
 }
 
+/// Reads and parses a `.o2d` file from `path`.
 pub fn load(path: &std::path::Path) -> std::io::Result<Document> {
     let text = std::fs::read_to_string(path)?;
     from_string(&text).map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))

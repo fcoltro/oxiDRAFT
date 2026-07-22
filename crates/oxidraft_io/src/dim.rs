@@ -1,6 +1,12 @@
+//! Turns a dimension entity ([`EntityKind::Dimension`] and its ortho/angular/
+//! radial variants) into plain line segments and a label, so every exporter
+//! (SVG, DXF, PDF) draws dimensions the same way instead of each re-deriving
+//! extension lines, arrowheads, and label placement.
+
 use oxidraft_document::{DimStyle, EntityKind, Units};
 use oxidraft_geometry::Point2d;
 
+/// The label text to render for a dimension, with where and how to place it.
 pub(crate) struct DimText {
     pub content: String,
     pub anchor: Point2d,
@@ -8,11 +14,15 @@ pub(crate) struct DimText {
     pub rotation_deg: f64,
 }
 
+/// The flattened output of [`dimension_primitives`]: line segments (extension
+/// lines, the dimension line, arrowheads) plus an optional label.
 pub(crate) struct DimPrimitives {
     pub segs: Vec<(Point2d, Point2d)>,
     pub text: Option<DimText>,
 }
 
+/// Builds the line segments and label for `kind`, or `None` if it isn't a
+/// dimension entity or its label can't be computed for `style`/`units`.
 pub(crate) fn dimension_primitives(
     kind: &EntityKind,
     style: &DimStyle,

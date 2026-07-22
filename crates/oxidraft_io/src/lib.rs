@@ -1,3 +1,7 @@
+//! File format import/export: the native `.o2d` format ([`native`]), DXF
+//! ([`dxf`]), SVG ([`svg`]), and PDF plotting ([`pdf`]). The internal `dim`
+//! module holds the dimension-rendering geometry shared by the exporters.
+
 pub(crate) mod dim;
 pub mod dxf;
 pub mod native;
@@ -34,6 +38,9 @@ pub fn write_atomic(path: &std::path::Path, bytes: &[u8]) -> std::io::Result<()>
     })
 }
 
+/// Tessellates `c` into a polyline fine enough for export, using a tolerance
+/// scaled to the curve's own bounding box so tiny and huge curves both come
+/// out smooth.
 pub(crate) fn flatten_for_export(c: &Curve) -> Vec<Point2d> {
     let bb = c.bounding_box();
     let diag = ((bb.max.x - bb.min.x).powi(2) + (bb.max.y - bb.min.y).powi(2)).sqrt();

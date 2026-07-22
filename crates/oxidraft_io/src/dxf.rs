@@ -1,3 +1,7 @@
+//! DXF import/export: a minimal, dependency-free reader/writer for the
+//! AutoCAD DXF ASCII tag format (code/value pairs), covering the entity,
+//! layer, and line-type constructs oxiDRAFT understands.
+
 use oxidraft_document::{Color, Document, EntityKind, Layer, LineTypeRef, Units};
 use oxidraft_geometry::{
     CircularArc, Curve, CurveSegment, EllipticalArc, LineSeg, NurbsCurve, Point2d, PolyCurve,
@@ -31,6 +35,8 @@ fn f(p: &Pair) -> f64 {
     p.value.parse().unwrap_or(0.0)
 }
 
+/// Parses DXF ASCII tag text into a [`Document`], recovering as much as it
+/// can from malformed or partial input rather than failing outright.
 pub fn import_dxf(text: &str) -> Document {
     let pairs = tokenize(text);
     let mut doc = Document::new();
@@ -585,6 +591,7 @@ fn bulge_arc(x1: f64, y1: f64, x2: f64, y2: f64, bulge: f64) -> Curve {
         })
 }
 
+/// Serializes `doc` to DXF ASCII tag text.
 pub fn export_dxf(doc: &Document) -> String {
     let mut s = String::new();
     let mut w = |code: i32, val: &str| {

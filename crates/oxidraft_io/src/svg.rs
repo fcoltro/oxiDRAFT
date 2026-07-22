@@ -1,3 +1,7 @@
+//! SVG import/export: renders a [`Document`] to SVG markup (curves,
+//! dimensions, hatch fills, colors) and reads a constrained subset of SVG
+//! (paths, lines, circles, ellipses) back into one.
+
 use oxidraft_document::{Color, Document, EntityKind};
 use oxidraft_geometry::{
     CircularArc, CubicBezier, Curve, CurveSegment, EllipticalArc, LineSeg, Point2d, PolyCurve,
@@ -20,6 +24,8 @@ pub(crate) struct SvgFrame {
     pub h_flip: f64,
 }
 
+/// Renders `doc` to a standalone SVG document, sized and viewBox-fit to its
+/// own extents.
 pub fn export_svg(doc: &Document) -> String {
     export_svg_framed(doc).svg
 }
@@ -406,6 +412,8 @@ fn text_content_markup(content: &str, x: f64, line_height: f64) -> String {
     out
 }
 
+/// Parses `svg` markup into a [`Document`], reading the paths/shapes it
+/// understands and ignoring the rest.
 pub fn import_svg(svg: &str) -> Document {
     let mut doc = Document::new();
     let h_flip = attr(svg, "data-h-flip")
