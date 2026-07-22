@@ -1,3 +1,9 @@
+//! [`AppState`] is the whole app's mutable state — document, selection, undo
+//! history, active tool, view transform, and interaction state (grip drags,
+//! bbox drags, in-progress polylines) — plus the methods everything else in
+//! the UI dispatches through: command execution, constraint operations,
+//! clipboard, file I/O, and grip/bbox drag handling.
+
 use crate::command::{Command, CoordInput, parse_command, parse_coordinate};
 use crate::history::History;
 use crate::tools::{Tool, ToolEvent};
@@ -18,6 +24,9 @@ pub use modify::TrimExtendPreview;
 mod contextual;
 pub use contextual::{CornerAction, CornerGeom, CornerKind, fillet_arc};
 
+/// The whole app's mutable state: the document, view, active tool,
+/// selection, undo history, and every user-facing setting. Owned by the UI
+/// shell and threaded through to every input handler and renderer.
 pub struct AppState {
     pub document: Document,
     pub view: ViewTransform,
@@ -81,6 +90,10 @@ pub struct AppState {
     dof_cache: Option<(u64, oxidraft_cad::DofSummary)>,
 }
 
+/// The subset of [`AppState`] that's a persisted user preference (snap/grid
+/// toggles, colors, scales) rather than session/document state. Round-trips
+/// through [`UiPrefs::serialize`]/[`UiPrefs::deserialize`] and is applied to
+/// an `AppState` via [`AppState::apply_prefs`].
 #[derive(Clone, Debug, PartialEq)]
 pub struct UiPrefs {
     pub snap_on: bool,
@@ -148,6 +161,8 @@ fn parse_rgb(s: &str) -> Option<(u8, u8, u8)> {
 }
 
 impl UiPrefs {
+    /// Encodes the prefs as `key=value` lines for persistence to disk.
+    /// Paired with [`UiPrefs::deserialize`].
     pub fn serialize(&self) -> String {
         let b = |v: bool| if v { "1" } else { "0" };
         let rgb = |c: (u8, u8, u8)| format!("{},{},{}", c.0, c.1, c.2);
@@ -182,6 +197,9 @@ impl UiPrefs {
         )
     }
 
+    /// Parses the `key=value` format written by [`UiPrefs::serialize`].
+    /// Unrecognized keys and unparsable values are skipped, so a prefs file
+    /// from an older version still loads with defaults for anything new.
     pub fn deserialize(s: &str) -> Self {
         let mut p = UiPrefs::default();
         for line in s.lines() {
@@ -259,6 +277,7 @@ impl UiPrefs {
 }
 
 impl AppState {
+    /// Snapshots the current settings into a [`UiPrefs`] for persisting.
     pub fn ui_prefs(&self) -> UiPrefs {
         UiPrefs {
             snap_on: self.snap_on,
@@ -289,6 +308,8 @@ impl AppState {
         }
     }
 
+    /// Loads a saved [`UiPrefs`] back into this state, e.g. on startup.
+    /// Normalizes `ortho`/`polar` afterward since they're mutually exclusive.
     pub fn apply_prefs(&mut self, p: &UiPrefs) {
         self.snap_on = p.snap_on;
         self.grid_on = p.grid_on;
@@ -321,6 +342,9 @@ impl AppState {
     }
 }
 
+/// Transient per-frame/per-drag UI state that doesn't belong in the document
+/// or the undo history: an in-progress grip or bbox drag, an active corner
+/// action, alignment guides, and line-chain bookkeeping for auto-inference.
 #[derive(Default)]
 pub struct InteractionState {
     pub grip_drag: Option<GripDrag>,
@@ -333,6 +357,8 @@ pub struct InteractionState {
     pub line_chain_first: Option<EntityId>,
 }
 
+/// An in-progress drag of a single entity grip, from [`AppState::begin_grip_drag`]
+/// through to [`AppState::end_grip_drag`] or [`AppState::cancel_grip_drag`].
 #[derive(Clone, Debug)]
 pub struct GripDrag {
     pub entity_id: EntityId,
@@ -345,6 +371,11 @@ pub struct GripDrag {
     pub moved: bool,
 }
 
+/// An in-progress drag of the selection's bounding-box handle (move, corner
+/// scale, or corner rotate), from [`AppState::begin_bbox_drag`] through to
+/// [`AppState::end_bbox_drag`]. Keeps each entity's original geometry so
+/// [`AppState::apply_bbox_drag_transform`] can re-derive the transform from
+/// scratch on every cursor move instead of compounding rounding error.
 #[derive(Clone, Debug)]
 pub struct BboxDrag {
     pub handle: BboxHandle,
@@ -353,6 +384,9 @@ pub struct BboxDrag {
     pub originals: Vec<(EntityId, EntityKind)>,
 }
 
+/// Which part of the selection's bounding-box widget is being dragged: the
+/// body (move), a corner (scale from the opposite corner), or a rotate
+/// handle beyond a corner.
 #[derive(Clone, Debug, PartialEq)]
 pub enum BboxHandle {
     Body,
@@ -450,6 +484,9 @@ fn segment_endpoints(kind: &EntityKind) -> Option<[(f64, f64); 2]> {
 }
 
 impl AppState {
+    /// Builds a fresh, empty document at the given canvas size: default
+    /// layers, an origin point fixed via a constraint, default tool/settings.
+    /// The entry point for both a new-document command and app startup.
     pub fn new(canvas_w: f64, canvas_h: f64) -> Self {
         let mut document = Document::new();
         seed_default_layers(&mut document);
@@ -511,10 +548,15 @@ impl AppState {
         }
     }
 
+    /// Whether the selection contains anything besides the implicit,
+    /// user-invisible origin point.
     pub fn has_selection(&self) -> bool {
         self.selection.iter().any(|&id| id != self.origin_id)
     }
 
+    /// Copies the current selection (excluding the origin point) into the
+    /// clipboard, returning how many entities were copied. Leaves the
+    /// clipboard untouched if the selection is empty.
     pub fn clipboard_copy(&mut self) -> usize {
         let items: Vec<Entity> = self
             .selection
@@ -529,12 +571,16 @@ impl AppState {
         n
     }
 
+    /// Copies the selection to the clipboard, then erases it — the CUT
+    /// command. Only erases if the copy actually captured something.
     pub fn clipboard_cut(&mut self) {
         if self.clipboard_copy() > 0 {
             self.erase_selection();
         }
     }
 
+    /// Pastes the clipboard contents centered on the cursor and selects the
+    /// new copies. No-op if the clipboard is empty.
     pub fn clipboard_paste(&mut self) {
         if self.clipboard.is_empty() {
             return;
@@ -593,6 +639,10 @@ impl AppState {
         }
     }
 
+    /// Recomputes `cursor_world`, `active_snap`, and the active alignment
+    /// guides from a new screen-space pointer position (`sx`, `sy`). Called
+    /// on every mouse-move; folds in point snapping, grid snapping, ortho,
+    /// polar, and axis tracking in that priority order.
     pub fn pointer_moved(&mut self, sx: f64, sy: f64) {
         let (wx, wy) = self.view.screen_to_world(sx, sy);
         let dragged_entity = self.interaction.grip_drag.as_ref().map(|d| d.entity_id);
@@ -710,6 +760,8 @@ impl AppState {
         })
     }
 
+    /// The world-space point a click would place right now: the active snap
+    /// if one is live, otherwise the raw cursor position.
     pub fn resolved_point(&self) -> Point2d {
         match &self.active_snap {
             Some(sp) => Point2d::from_f64(sp.pos.0, sp.pos.1),
@@ -717,6 +769,10 @@ impl AppState {
         }
     }
 
+    /// Handles a click at screen position (`sx`, `sy`): updates the cursor,
+    /// then dispatches to modify-tool handling, text placement, selection
+    /// toggling, or the active drawing tool's point-placement, depending on
+    /// what's active. The main entry point for mouse clicks on the canvas.
     pub fn canvas_click(&mut self, sx: f64, sy: f64) {
         self.click_count = self.click_count.wrapping_add(1);
         self.pointer_moved(sx, sy);
@@ -781,6 +837,11 @@ impl AppState {
         }
     }
 
+    /// Feeds an already-resolved world point directly to the active tool,
+    /// bypassing screen-to-world conversion and snapping — used for
+    /// programmatic point entry (typed coordinates, command-line input)
+    /// rather than a raw mouse click. See [`AppState::canvas_click`] for the
+    /// pointer-driven equivalent.
     pub fn place_tool_point(&mut self, p: Point2d) {
         if self.try_close_on_start(p) {
             self.interaction.line_snap_prev = None;
@@ -1267,6 +1328,9 @@ impl AppState {
         }
     }
 
+    /// Commits the in-progress `Polygon` tool once both its center and
+    /// radius point are set — used by an explicit confirm action (e.g. Enter
+    /// key) rather than another click. No-op if the polygon isn't ready.
     pub fn confirm_pending_polygon(&mut self) {
         if !matches!(
             self.tool,
@@ -1282,6 +1346,9 @@ impl AppState {
         self.apply_tool_event(ev);
     }
 
+    /// Clears the center/radius point of an in-progress `Polygon` tool
+    /// (keeping its side count), letting the user restart placement without
+    /// leaving the tool entirely.
     pub fn cancel_pending_polygon(&mut self) {
         if let Tool::Polygon { sides, .. } = self.tool.clone() {
             self.tool = Tool::Polygon {
@@ -1408,6 +1475,12 @@ impl AppState {
         }
     }
 
+    /// Interprets a line of text typed on the command line. Tries, in
+    /// order: text-tool content entry, polyline/spline close, a polygon
+    /// side count, a numeric value for the active parametric tool (offset
+    /// distance, fillet radius, etc.), a distance-along-reference-direction,
+    /// a coordinate expression, and finally a named [`Command`] via
+    /// [`parse_command`]. The single entry point for the command bar.
     pub fn run_command(&mut self, text: &str) {
         let trimmed = text.trim();
         if let Tool::Text {
@@ -1563,12 +1636,19 @@ impl AppState {
         self.execute(cmd);
     }
 
+    /// Re-runs whatever text was last accepted by [`AppState::run_command`]
+    /// (e.g. pressing Enter on an empty command line to repeat the last
+    /// command). No-op if nothing has been run yet.
     pub fn repeat_last_command(&mut self) {
         if let Some(cmd) = self.last_command.clone() {
             self.run_command(&cmd);
         }
     }
 
+    /// Applies a parsed [`Command`] to the state — tool activation, undo/redo,
+    /// selection edits, constraint commands, zoom, and layer changes. The
+    /// non-text-parsing half of command dispatch; see [`AppState::run_command`]
+    /// for the text front-end that produces a `Command`.
     pub fn execute(&mut self, cmd: Command) {
         match cmd {
             Command::Activate(mut tool) => {
@@ -1633,6 +1713,9 @@ impl AppState {
         }
     }
 
+    /// Steps the document back one entry in [`History`], clearing the
+    /// selection and bumping `doc_epoch` so the DoF status recomputes.
+    /// No-op at the start of history.
     pub fn undo(&mut self) {
         if let Some(prev) = self.history.undo(&self.document) {
             self.document = prev;
@@ -1641,6 +1724,9 @@ impl AppState {
         }
     }
 
+    /// Steps the document forward one entry in [`History`] after an undo,
+    /// clearing the selection and bumping `doc_epoch`. No-op if there's
+    /// nothing to redo.
     pub fn redo(&mut self) {
         if let Some(next) = self.history.redo(&self.document) {
             self.document = next;
@@ -1649,6 +1735,8 @@ impl AppState {
         }
     }
 
+    /// Deletes every selected entity (excluding the origin point) and
+    /// snapshots history first. No-op if the selection is empty.
     pub fn erase_selection(&mut self) {
         if self.selection.is_empty() {
             return;
@@ -1661,6 +1749,11 @@ impl AppState {
         }
     }
 
+    /// Breaks every selected entity into its constituent segments (e.g. a
+    /// polyline into individual lines), re-welding adjacent pieces with
+    /// coincident constraints when inference is on, and selects the results.
+    /// Discards the history snapshot and restores the prior selection if
+    /// nothing was actually exploded.
     pub fn explode_selection(&mut self) {
         if self.selection.is_empty() {
             return;
@@ -1727,6 +1820,9 @@ impl AppState {
         }
     }
 
+    /// Creates a hatch fill for each closed boundary loop found among the
+    /// selected entities, on the current layer's color. Logs a hint and
+    /// leaves the document unchanged if no closed boundary is selected.
     pub fn hatch_selection(&mut self) {
         if self.selection.is_empty() {
             return;
@@ -1758,6 +1854,11 @@ impl AppState {
             .collect();
     }
 
+    /// Traces the enclosed region containing world point (`x`, `y`) and
+    /// fills it as a hatch — the click-inside-an-area variant of the HATCH
+    /// command, as opposed to [`AppState::hatch_selection`]'s pick-boundary
+    /// variant. Returns whether a hatch was created; logs a message on
+    /// failure (no enclosed area, or the boundary is too complex to trace).
     pub fn hatch_at_point(&mut self, x: f64, y: f64) -> bool {
         let (boundary, holes) = match oxidraft_cad::trace_pick_region(&self.document, x, y) {
             Ok(r) => r,
@@ -1884,6 +1985,11 @@ impl AppState {
         )
     }
 
+    /// Applies constraint `kind` to the current selection. Coincident
+    /// without exactly two lines selected switches to the interactive `Weld`
+    /// tool instead; pick-based kinds (midpoint, point-on-line, etc.)
+    /// activate `ConPick` with a prompt rather than acting immediately.
+    /// Otherwise solves and commits via `commit_constraint`.
     pub fn constrain_selection(&mut self, kind: oxidraft_cad::ConstraintKind) {
         use oxidraft_cad::ConstraintKind as K;
         if kind == K::Coincident {
@@ -1925,6 +2031,10 @@ impl AppState {
         self.commit_constraint(doc, res);
     }
 
+    /// Constrains two entity anchor points (entity id + anchor index)
+    /// coincident — the completion of the interactive `Weld` tool started by
+    /// [`AppState::constrain_selection`] when a Coincident isn't a clean
+    /// two-line selection.
     pub fn weld_points(&mut self, a: (EntityId, u8), b: (EntityId, u8)) {
         let mut doc = self.document.clone();
         let res = oxidraft_cad::constrain_coincident_points(&mut doc, a, b);
@@ -1959,24 +2069,35 @@ impl AppState {
         }
     }
 
+    /// Constrains the selected arc/circle's radius, optionally to a fixed
+    /// `value` (leave `None` to just record the current radius as-is).
     pub fn constrain_radius_selection(&mut self, value: Option<f64>) {
         let mut doc = self.document.clone();
         let res = oxidraft_cad::constrain_radius(&mut doc, &self.selection, value);
         self.commit_constraint(doc, res);
     }
 
+    /// Constrains the selected entity's length/distance, optionally to a
+    /// fixed `value` (leave `None` to record the current distance as-is).
     pub fn constrain_distance_selection(&mut self, value: Option<f64>) {
         let mut doc = self.document.clone();
         let res = oxidraft_cad::constrain_distance(&mut doc, &self.selection, value);
         self.commit_constraint(doc, res);
     }
 
+    /// Constrains the angle between the two selected entities, optionally to
+    /// a fixed `value` (leave `None` to record the current angle as-is).
     pub fn constrain_angle_selection(&mut self, value: Option<f64>) {
         let mut doc = self.document.clone();
         let res = oxidraft_cad::constrain_angle(&mut doc, &self.selection, value);
         self.commit_constraint(doc, res);
     }
 
+    /// Edits an existing valued constraint (radius, distance, line-distance,
+    /// or angle) in place to `value` — used when the user drags a dimension
+    /// grip or types a new value into a dimension's edit box, as opposed to
+    /// creating a fresh constraint. No-op for constraint kinds without a
+    /// scalar value.
     pub fn set_constraint_value(&mut self, target: SketchConstraint, value: f64) {
         let mut doc = self.document.clone();
         let res = match target.kind {
@@ -2001,6 +2122,8 @@ impl AppState {
         self.commit_constraint(doc, res);
     }
 
+    /// Constrains the selected entities (excluding the origin point) fixed
+    /// in place — they no longer move under the solver.
     pub fn fix_selection(&mut self) {
         let sel: Vec<EntityId> = self
             .selection
@@ -2013,6 +2136,13 @@ impl AppState {
         self.commit_constraint(doc, res);
     }
 
+    /// The SMARTDIM tool's commit: picks a dimension kind to apply based on
+    /// what was picked — parallel-line distance, angle between two
+    /// non-parallel entities, radius for an arc/circle, or length for a
+    /// single entity — with `b` and `place` both optional (a single-entity
+    /// pick and no explicit placement, respectively). Returns whether the
+    /// constraint was created; on success stashes it in `pending_dim_edit`
+    /// so the UI can immediately open its value editor.
     pub fn smart_dimension(
         &mut self,
         a: EntityId,
@@ -2065,6 +2195,9 @@ impl AppState {
         }
     }
 
+    /// Removes a single constraint (e.g. from clicking its dimension badge
+    /// or an explicit delete action), snapshotting history first. No-op if
+    /// the constraint isn't present.
     pub fn remove_constraint(&mut self, target: SketchConstraint) {
         if self.document.constraints.contains(&target) {
             self.history.snapshot(&self.document);
@@ -2075,6 +2208,8 @@ impl AppState {
         }
     }
 
+    /// Places point entities dividing each selected curve into `n` equal
+    /// segments. Logs a hint if `n` is missing (the command needs a count).
     pub fn divide_selection(&mut self, n: Option<u32>) {
         let Some(n) = n else {
             self.command_log
@@ -2088,6 +2223,9 @@ impl AppState {
         );
     }
 
+    /// Places point entities at fixed `interval` spacing along each selected
+    /// curve. Logs a hint if `interval` is missing (the command needs a
+    /// positive distance).
     pub fn measure_selection(&mut self, interval: Option<f64>) {
         let Some(interval) = interval else {
             self.command_log
@@ -2129,6 +2267,8 @@ impl AppState {
         }
     }
 
+    /// Removes every constraint touching any selected entity. Logs a hint
+    /// instead if the selection is empty or has no constraints on it.
     pub fn unconstrain_selection(&mut self) {
         if self.selection.is_empty() {
             self.command_log
@@ -2156,6 +2296,10 @@ impl AppState {
         self.doc_epoch = self.doc_epoch.wrapping_add(1);
     }
 
+    /// Merges the selected entities (excluding the origin point) into
+    /// combined curves where possible, e.g. touching line segments into a
+    /// polyline, and selects the result. Restores the prior selection and
+    /// discards the history snapshot if nothing could be joined.
     pub fn join_selection(&mut self) {
         if self.selection.is_empty() {
             return;
@@ -2178,6 +2322,9 @@ impl AppState {
         self.selection = survived.into_iter().chain(new_ids).collect();
     }
 
+    /// Sets `zoom_target` to frame the document's full extents; the actual
+    /// view animates toward it over subsequent frames via
+    /// [`AppState::tick_zoom_anim`]. No-op on an empty document.
     pub fn zoom_extents(&mut self) {
         if let Some(bb) = self.document.extents() {
             let (x0, y0) = bb.min.to_f64();
@@ -2188,6 +2335,10 @@ impl AppState {
         }
     }
 
+    /// Advances the view one step toward `zoom_target` (an exponential
+    /// ease), snapping exactly onto it and clearing the target once close
+    /// enough. Call once per frame; returns whether the animation is still
+    /// running so the caller knows whether to keep redrawing.
     pub fn tick_zoom_anim(&mut self) -> bool {
         let Some((tx, ty, tz)) = self.zoom_target else {
             return false;
@@ -2207,11 +2358,17 @@ impl AppState {
         true
     }
 
+    /// Snapshots history and adds a new entity directly, bypassing the tool
+    /// state machine — for callers (e.g. dialogs) that construct an
+    /// `EntityKind` themselves rather than driving a `Tool`.
     pub fn add_entity(&mut self, kind: EntityKind) -> EntityId {
         self.history.snapshot(&self.document);
         self.document.add(kind)
     }
 
+    /// The single selected NURBS curve's id, control points, and weights —
+    /// `None` unless exactly one NURBS curve is selected. Used to drive a
+    /// single-curve control-point editor.
     pub fn selected_nurbs(&self) -> Option<(EntityId, Vec<Point2d>, Vec<f64>)> {
         if self.selection.len() != 1 {
             return None;
@@ -2224,6 +2381,8 @@ impl AppState {
         }
     }
 
+    /// Every selected NURBS curve's id, control points, and weights — the
+    /// multi-selection counterpart to [`AppState::selected_nurbs`].
     pub fn selected_nurbs_all(&self) -> Vec<(EntityId, Vec<Point2d>, Vec<f64>)> {
         self.selection
             .iter()
@@ -2236,10 +2395,16 @@ impl AppState {
             .collect()
     }
 
+    /// Snapshots history before an external caller mutates the document
+    /// directly (e.g. a properties panel editing a field in place) — the
+    /// generic pre-edit hook for callers that don't go through a dedicated
+    /// `AppState` method.
     pub fn begin_edit(&mut self) {
         self.history.snapshot(&self.document);
     }
 
+    /// The custom display-text override on a dimension entity, if any —
+    /// `None` for non-dimension entities or ones using their computed text.
     pub fn dim_override(&self, id: EntityId) -> Option<String> {
         match &self.document.get(id)?.kind {
             EntityKind::Dimension { override_text, .. }
@@ -2250,6 +2415,10 @@ impl AppState {
         }
     }
 
+    /// Sets or clears a dimension entity's display-text override. Blank
+    /// text is treated as clearing it (falls back to the computed value).
+    /// Does not snapshot history — pair with [`AppState::begin_edit`] if the
+    /// change should be undoable.
     pub fn set_dim_override(&mut self, id: EntityId, text: Option<String>) {
         let text = text.filter(|t| !t.trim().is_empty());
         if let Some(e) = self.document.get_mut(id) {
@@ -2263,6 +2432,10 @@ impl AppState {
         }
     }
 
+    /// Applies edits from a text-entity editor (content, font, size) if they
+    /// actually changed anything, snapshotting history first; a no-op edit
+    /// doesn't pollute the undo stack. Also updates the sticky `text_font`
+    /// default for the next new text entity.
     pub fn commit_text_edit(
         &mut self,
         id: EntityId,
@@ -2294,6 +2467,10 @@ impl AppState {
         self.text_font = font;
     }
 
+    /// Converts each selected text entity into curve outlines on the same
+    /// layer/color and replaces the text with them, selecting the new
+    /// curves. Text entities that produce no outline (e.g. empty content)
+    /// are left untouched; discards the history snapshot if nothing changed.
     pub fn outline_text_selection(&mut self) {
         let texts: Vec<EntityId> = self
             .selection
@@ -2357,6 +2534,9 @@ impl AppState {
         }
     }
 
+    /// Moves a single NURBS control point of entity `id` to `p`. Silently
+    /// ignores an out-of-range `index` or a non-NURBS entity. Does not
+    /// snapshot history — intended for live-drag updates.
     pub fn set_nurbs_control(&mut self, id: EntityId, index: usize, p: Point2d) {
         if let Some(e) = self.document.get_mut(id)
             && let EntityKind::Curve(Curve::Nurbs(nc)) = &mut e.kind
@@ -2366,6 +2546,10 @@ impl AppState {
         }
     }
 
+    /// Multiplies a single NURBS control point's weight by `factor`,
+    /// clamped to a sane range, snapshotting history first. Returns whether
+    /// the edit applied (false for an out-of-range index or non-NURBS
+    /// entity, in which case nothing is snapshotted).
     pub fn adjust_nurbs_weight(&mut self, id: EntityId, index: usize, factor: f64) -> bool {
         let ok = matches!(
             self.document.get(id).map(| e | & e.kind),
@@ -2383,6 +2567,9 @@ impl AppState {
         true
     }
 
+    /// Resets to a blank document with fresh layers, origin, selection, and
+    /// history, and clears the current file path — the NEW command.
+    /// Unlike most edits, this is not itself undoable (it replaces history).
     pub fn new_document(&mut self) {
         self.document = Document::new();
         seed_default_layers(&mut self.document);
@@ -2394,6 +2581,11 @@ impl AppState {
         self.saved_revision = self.history.current_revision();
     }
 
+    /// Loads a document from `path`, dispatching on its extension (DXF, SVG,
+    /// or the native format; DWG is rejected with a message since oxiDRAFT
+    /// can't read that proprietary format). On success replaces the
+    /// document, resets history/selection, and remembers the path as the
+    /// current file. On failure logs the error and leaves the state as-is.
     pub fn open_file(&mut self, path: std::path::PathBuf) {
         let ext = path
             .extension()
@@ -2427,6 +2619,10 @@ impl AppState {
         }
     }
 
+    /// Saves to the current file path, if one is set. Returns `false`
+    /// without doing anything if there's no current path (the caller should
+    /// fall back to a Save As dialog and call
+    /// [`AppState::save_file_to`]).
     pub fn save_file(&mut self) -> bool {
         if let Some(path) = self.current_file_path.clone() {
             self.save_file_to(path)
@@ -2435,6 +2631,12 @@ impl AppState {
         }
     }
 
+    /// Saves the document to `path`, dispatching on its extension (DXF,
+    /// SVG, or native; DWG is rejected since oxiDRAFT can't write that
+    /// proprietary format). The implicit origin point is stripped before
+    /// export. On success remembers `path` as current and discards any
+    /// pending autosave-recovery file; on failure logs the error. Returns
+    /// whether the save succeeded.
     pub fn save_file_to(&mut self, path: std::path::PathBuf) -> bool {
         let mut save_doc = self.document.clone();
         save_doc.remove(self.origin_id);
@@ -2471,6 +2673,8 @@ impl AppState {
         }
     }
 
+    /// Whether the document has unsaved changes, compared against the
+    /// revision recorded at the last successful save/open/new.
     pub fn is_dirty(&self) -> bool {
         self.history.current_revision() != self.saved_revision
     }
@@ -2488,6 +2692,12 @@ impl AppState {
         }
     }
 
+    /// Loads a document from an autosave-recovery file at `path`, replacing
+    /// the current document and resetting history/selection. Unlike
+    /// [`AppState::open_file`], the recovered document isn't treated as
+    /// matching any file on disk (`current_file_path` is cleared and
+    /// `saved_revision` forced dirty), since the recovery file isn't itself
+    /// the user's saved document. Returns whether the load succeeded.
     pub fn restore_recovery(&mut self, path: &std::path::Path) -> bool {
         match oxidraft_io::load_native(path) {
             Ok(mut doc) => {
@@ -2508,6 +2718,8 @@ impl AppState {
         }
     }
 
+    /// The app window's title bar text: `oxiDRAFT — <filename><*>`, with a
+    /// trailing `*` when there are unsaved changes.
     pub fn window_title(&self) -> String {
         let name = self
             .current_file_path
@@ -2519,6 +2731,9 @@ impl AppState {
         format!("oxiDRAFT — {name}{star}")
     }
 
+    /// The document's short display name (filename plus a dirty-marker
+    /// `*`, no `oxiDRAFT —` prefix) — for in-UI labels like a tab title, as
+    /// opposed to [`AppState::window_title`]'s full window-bar text.
     pub fn document_label(&self) -> String {
         let name = self
             .current_file_path
@@ -2530,14 +2745,19 @@ impl AppState {
         format!("{name}{star}")
     }
 
+    /// The current cursor world position formatted for the status-bar
+    /// coordinate readout.
     pub fn coord_readout(&self) -> String {
         format!("{:.4}, {:.4}", self.cursor_world.0, self.cursor_world.1)
     }
 
+    /// The name of the document's currently-active layer.
     pub fn current_layer_name(&self) -> &str {
         &self.document.layers.current_layer().name
     }
 
+    /// The short unit abbreviation for the document's unit system (e.g.
+    /// `"mm"`), or `"none"` for a unitless document.
     pub fn units_label(&self) -> &'static str {
         match self.document.settings.units.short_name() {
             "" => "none",
@@ -2545,11 +2765,17 @@ impl AppState {
         }
     }
 
+    /// Updates the view's allowed zoom range from the document's unit
+    /// system — call after changing units (e.g. loading a document with
+    /// different settings) so zoom clamping matches the new scale.
     pub fn sync_zoom_limits(&mut self) {
         let (mn, mx) = self.document.settings.units.visible_range();
         self.view.set_visible_range(mn, mx);
     }
 
+    /// Starts a bounding-box drag on the selection from the given `handle`,
+    /// capturing each selected entity's starting geometry and snapshotting
+    /// history. No-op if the selection is empty or has no bounding box.
     pub fn begin_bbox_drag(&mut self, handle: BboxHandle, cursor: (f64, f64)) {
         if self.selection.is_empty() {
             return;
@@ -2582,10 +2808,16 @@ impl AppState {
         }
     }
 
+    /// Finishes the active bounding-box drag, if any.
     pub fn end_bbox_drag(&mut self) {
         self.interaction.bbox_drag = None;
     }
 
+    /// Re-applies the bbox drag's transform (move, scale from the opposite
+    /// corner, or rotate about center) for a new `cursor` position, always
+    /// starting fresh from the drag's captured original geometry so repeated
+    /// calls don't compound error. Reverts to the pre-call geometry if the
+    /// result fails to satisfy constraints. No-op if no bbox drag is active.
     pub fn apply_bbox_drag_transform(&mut self, cursor: (f64, f64)) {
         let Some(drag) = self.interaction.bbox_drag.as_ref() else {
             return;
@@ -2668,6 +2900,9 @@ impl AppState {
         }
     }
 
+    /// Starts a grip drag on entity `id`'s `grip`, capturing the entity's
+    /// starting geometry and snapshotting history. No-op if the entity
+    /// doesn't exist.
     pub fn begin_grip_drag(&mut self, id: EntityId, grip: Grip) {
         if let Some(e) = self.document.get(id) {
             self.history.snapshot(&self.document);
@@ -2680,6 +2915,12 @@ impl AppState {
         }
     }
 
+    /// Re-applies the active grip drag's edit for a new `cursor` position:
+    /// derives the edited geometry from the grip's starting kind, marks the
+    /// drag as having moved once the cursor departs the grip's start point,
+    /// re-solves dependent tangency and constraints, and reverts the entity
+    /// and constraints if the result isn't solvable. No-op if no grip drag
+    /// is active.
     pub fn apply_grip_drag(&mut self, cursor: (f64, f64)) {
         let Some(drag) = self.interaction.grip_drag.as_ref() else {
             return;
@@ -2785,6 +3026,8 @@ impl AppState {
         }
     }
 
+    /// Detaches the `which`-th tangency relation from arc/circle `id`,
+    /// snapshotting history first. Silently ignores an out-of-range index.
     pub fn remove_tangent(&mut self, id: EntityId, which: usize) {
         self.history.snapshot(&self.document);
         if let Some(e) = self.document.get_mut(id)
@@ -2794,6 +3037,10 @@ impl AppState {
         }
     }
 
+    /// World-space marker positions (index into the entity's tangent list,
+    /// plus the point on the arc closest to each tangent target) for
+    /// rendering arc/circle `id`'s tangency badges. Empty for a non-arc
+    /// entity or one with no tangents.
     pub fn tangent_markers(&self, id: EntityId) -> Vec<(usize, Point2d)> {
         let Some(e) = self.document.get(id) else {
             return vec![];
@@ -2821,6 +3068,10 @@ impl AppState {
             .collect()
     }
 
+    /// Finishes the active grip drag. If the grip never actually moved
+    /// (e.g. a click immediately followed by release with no drag), discards
+    /// the history snapshot [`AppState::begin_grip_drag`] took so a no-op
+    /// click doesn't pollute the undo stack.
     pub fn end_grip_drag(&mut self) {
         if let Some(drag) = self.interaction.grip_drag.take()
             && !drag.moved
@@ -2829,6 +3080,9 @@ impl AppState {
         }
     }
 
+    /// Aborts the active grip drag and rolls the document back to its state
+    /// before the drag started (e.g. on Escape mid-drag). No-op if no grip
+    /// drag is active.
     pub fn cancel_grip_drag(&mut self) {
         if self.interaction.grip_drag.take().is_some()
             && let Some(prev) = self.history.rollback()
@@ -2837,14 +3091,22 @@ impl AppState {
         }
     }
 
+    /// Whether a grip drag is currently in progress.
     pub fn grip_editing(&self) -> bool {
         self.interaction.grip_drag.is_some()
     }
 
+    /// The role of the grip currently being dragged (endpoint, radius,
+    /// etc.), if a drag is active.
     pub fn grip_role(&self) -> Option<oxidraft_cad::GripRole> {
         self.interaction.grip_drag.as_ref().map(|d| d.grip.role)
     }
 
+    /// Applies the active grip drag with an exact numeric `value` instead of
+    /// a cursor position — used when the user types a value into a grip's
+    /// inline edit box rather than dragging it — and ends the drag. Reverts
+    /// the entity and constraints if the result isn't solvable. No-op if no
+    /// grip drag is active.
     pub fn commit_grip_value(&mut self, value: f64) {
         let Some(drag) = self.interaction.grip_drag.as_ref() else {
             return;
@@ -2869,6 +3131,9 @@ impl AppState {
         self.interaction.grip_drag = None;
     }
 
+    /// Every draggable grip on the current selection, for rendering — empty
+    /// unless the Select tool is active and no corner action is in progress
+    /// (grips and corner-rounding handles don't coexist).
     pub fn selection_grips(&self) -> Vec<(EntityId, Grip)> {
         if !matches!(self.tool, Tool::Select) || self.interaction.corner_action.is_some() {
             return Vec::new();
