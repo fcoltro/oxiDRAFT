@@ -1,3 +1,8 @@
+//! Canvas overlays drawn on top of the rendered drawing: constraint/dimension
+//! badges and their hit-testing, snap and inference indicators, the dynamic
+//! input HUD (length/angle/radius fields for the active tool), grip handles,
+//! and other interactive on-canvas widgets.
+
 use super::UiState;
 use super::render::corner_glass_frame;
 use crate::state::AppState;

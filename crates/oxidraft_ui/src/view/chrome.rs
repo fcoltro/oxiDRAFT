@@ -1,3 +1,9 @@
+//! The app's window chrome: menu bar, toolbars, status bar, keyboard
+//! shortcuts, the inspector/properties panel, and modal dialogs (settings,
+//! line properties, plot, about, file open/save). The other canvas-adjacent
+//! UI (the drawing surface itself and its overlays) lives in the sibling
+//! `render`/`overlays` modules.
+
 use super::UiState;
 use crate::command::Command;
 use crate::state::AppState;
@@ -282,6 +288,8 @@ fn export_menu(ctx: &Context, app: &mut AppState) {
     }
 }
 
+/// egui id of the Plot dialog's window, so other code (the Window-mode pick
+/// tool) can tell whether it's currently open.
 pub(crate) const PLOT_WINDOW_ID: &str = "plot_dialog_window";
 
 const PLOT_PRESET_ID: &str = "plot_paper_preset";
