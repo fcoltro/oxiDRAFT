@@ -33,12 +33,10 @@ pub struct AppState {
     pub tool: Tool,
     pub selection: Vec<EntityId>,
     pub snap: SnapSettings,
-    pub snap_on: bool,
-    pub grid_on: bool,
-    pub grid_snap_on: bool,
-    pub polar_on: bool,
-    pub track_on: bool,
-    pub dyn_on: bool,
+    /// All persisted user preferences (snap/grid toggles, colors, scales) as
+    /// one embedded value, so adding a preference is a single edit and
+    /// persistence can't silently drop a field. See [`UiPrefs`].
+    pub prefs: UiPrefs,
     pub last_command: Option<String>,
     pub history: History,
     pub command_log: Vec<String>,
@@ -48,31 +46,13 @@ pub struct AppState {
     pub origin_id: EntityId,
     pub interaction: InteractionState,
     pub current_file_path: Option<std::path::PathBuf>,
-    pub text_font: Option<String>,
     pub hatch_pattern: oxidraft_document::HatchPattern,
     pub saved_revision: u64,
     pub zoom_target: Option<(f64, f64, f64)>,
     pub default_line_type: LineTypeRef,
     pub default_line_weight: LineWeight,
-    pub comb_on: bool,
-    pub comb_scale: f64,
-    pub snap_px: f64,
-    pub polar_step: f64,
-    pub zoom_speed: f64,
-    pub zoom_to_cursor: bool,
-    pub invert_zoom: bool,
-    pub crosshair: bool,
-    pub pick_box: f64,
-    pub show_lineweights: bool,
-    pub lineweight_scale: f64,
-    pub grid_dots: bool,
-    pub grid_major_every: u32,
-    pub grid_minor_rgb: (u8, u8, u8),
-    pub grid_major_rgb: (u8, u8, u8),
     pub clipboard: Vec<Entity>,
     pub hint_tool: Option<Tool>,
-    pub infer_constraints: bool,
-    pub show_constraints: bool,
     pub pending_dim_edit: Option<SketchConstraint>,
     pub plot_window: Option<(f64, f64, f64, f64)>,
     pub plot_dialog_open: bool,
@@ -274,60 +254,12 @@ impl UiPrefs {
 impl AppState {
     /// Snapshots the current settings into a [`UiPrefs`] for persisting.
     pub fn ui_prefs(&self) -> UiPrefs {
-        UiPrefs {
-            snap_on: self.snap_on,
-            grid_on: self.grid_on,
-            grid_snap_on: self.grid_snap_on,
-            polar_on: self.polar_on,
-            track_on: self.track_on,
-            dyn_on: self.dyn_on,
-            comb_on: self.comb_on,
-            comb_scale: self.comb_scale,
-            snap_px: self.snap_px,
-            polar_step: self.polar_step,
-            zoom_speed: self.zoom_speed,
-            zoom_to_cursor: self.zoom_to_cursor,
-            invert_zoom: self.invert_zoom,
-            crosshair: self.crosshair,
-            pick_box: self.pick_box,
-            show_lineweights: self.show_lineweights,
-            lineweight_scale: self.lineweight_scale,
-            grid_dots: self.grid_dots,
-            grid_major_every: self.grid_major_every,
-            grid_minor_rgb: self.grid_minor_rgb,
-            grid_major_rgb: self.grid_major_rgb,
-            text_font: self.text_font.clone(),
-            infer_constraints: self.infer_constraints,
-            show_constraints: self.show_constraints,
-        }
+        self.prefs.clone()
     }
 
     /// Loads a saved [`UiPrefs`] back into this state, e.g. on startup.
     pub fn apply_prefs(&mut self, p: &UiPrefs) {
-        self.snap_on = p.snap_on;
-        self.grid_on = p.grid_on;
-        self.grid_snap_on = p.grid_snap_on;
-        self.polar_on = p.polar_on;
-        self.track_on = p.track_on;
-        self.dyn_on = p.dyn_on;
-        self.comb_on = p.comb_on;
-        self.comb_scale = p.comb_scale;
-        self.snap_px = p.snap_px;
-        self.polar_step = p.polar_step;
-        self.zoom_speed = p.zoom_speed;
-        self.zoom_to_cursor = p.zoom_to_cursor;
-        self.invert_zoom = p.invert_zoom;
-        self.crosshair = p.crosshair;
-        self.pick_box = p.pick_box;
-        self.show_lineweights = p.show_lineweights;
-        self.lineweight_scale = p.lineweight_scale;
-        self.grid_dots = p.grid_dots;
-        self.grid_major_every = p.grid_major_every;
-        self.grid_minor_rgb = p.grid_minor_rgb;
-        self.grid_major_rgb = p.grid_major_rgb;
-        self.text_font = p.text_font.clone();
-        self.infer_constraints = p.infer_constraints;
-        self.show_constraints = p.show_constraints;
+        self.prefs = p.clone();
     }
 }
 
@@ -486,12 +418,7 @@ impl AppState {
             tool: Tool::Select,
             selection: Vec::new(),
             snap: SnapSettings::default(),
-            snap_on: true,
-            grid_on: true,
-            grid_snap_on: false,
-            polar_on: true,
-            track_on: true,
-            dyn_on: true,
+            prefs: UiPrefs::default(),
             last_command: None,
             history: History::new(),
             command_log: Vec::new(),
@@ -501,31 +428,13 @@ impl AppState {
             origin_id,
             interaction: InteractionState::default(),
             current_file_path: None,
-            text_font: None,
             hatch_pattern: oxidraft_document::HatchPattern::Solid,
             saved_revision: 0,
             zoom_target: None,
             default_line_type: LineTypeRef::ByLayer,
             default_line_weight: LineWeight::ByLayer,
-            comb_on: false,
-            comb_scale: 5.0,
-            snap_px: 12.0,
-            polar_step: 45.0,
-            zoom_speed: 1.0,
-            zoom_to_cursor: true,
-            invert_zoom: false,
-            crosshair: true,
-            pick_box: 11.0,
-            show_lineweights: true,
-            lineweight_scale: 5.0,
-            grid_dots: false,
-            grid_major_every: 5,
-            grid_minor_rgb: (24, 28, 36),
-            grid_major_rgb: (33, 39, 49),
             clipboard: Vec::new(),
             hint_tool: None,
-            infer_constraints: true,
-            show_constraints: true,
             pending_dim_edit: None,
             plot_window: None,
             plot_dialog_open: false,
@@ -635,9 +544,9 @@ impl AppState {
         let (wx, wy) = self.view.screen_to_world(sx, sy);
         let dragged_entity = self.interaction.grip_drag.as_ref().map(|d| d.entity_id);
         let allow_snap = self.tool.wants_point_snap() || dragged_entity.is_some();
-        self.active_snap = if self.snap_on && allow_snap {
+        self.active_snap = if self.prefs.snap_on && allow_snap {
             let mut s = self.snap.clone();
-            s.tolerance = self.view.pixel_world_size() * self.snap_px;
+            s.tolerance = self.view.pixel_world_size() * self.prefs.snap_px;
             let ref_pt = self.tool.reference_point().map(|p| p.to_f64());
             let doc_snap = match dragged_entity {
                 Some(ex) => find_snaps_excluding(&self.document, (wx, wy), &s, ref_pt, Some(ex))
@@ -661,7 +570,7 @@ impl AppState {
         self.interaction.active_guides.clear();
         if let Some(ref sp) = self.active_snap {
             self.cursor_world = sp.pos;
-        } else if self.grid_snap_on && allow_snap {
+        } else if self.prefs.grid_snap_on && allow_snap {
             self.cursor_world = self.view.snap_to_grid(wx, wy);
         } else {
             if let Some(ref_pt) = self.tool.reference_point() {
@@ -669,11 +578,11 @@ impl AppState {
                 let dx = wx - rx;
                 let dy = wy - ry;
                 let dist = (dx * dx + dy * dy).sqrt();
-                if self.polar_on && dist > 1e-4 {
+                if self.prefs.polar_on && dist > 1e-4 {
                     const POLAR_CAPTURE_DEG: f64 = 1.5;
                     let angle_rad = dy.atan2(dx);
                     let angle_deg_wrapped = oxidraft_geometry::wrap_deg360(angle_rad.to_degrees());
-                    let step = self.polar_step.max(1.0);
+                    let step = self.prefs.polar_step.max(1.0);
                     let nearest = (angle_deg_wrapped / step).round() * step;
                     let diff = (angle_deg_wrapped - nearest).abs();
                     let diff = diff.min(360.0 - diff);
@@ -692,7 +601,7 @@ impl AppState {
                 self.cursor_world = (wx, wy);
             }
         }
-        if self.track_on
+        if self.prefs.track_on
             && self.active_snap.is_none()
             && let Some(drag) = self.interaction.grip_drag.as_ref()
             && let Some((a, b)) = line_endpoints(&drag.start_kind)
@@ -862,7 +771,7 @@ impl AppState {
     }
 
     fn weld_chain_segments(&mut self, prev: EntityId, new_id: EntityId) {
-        if !self.infer_constraints {
+        if !self.prefs.infer_constraints {
             return;
         }
         let (Some(lp), Some(ln)) = (
@@ -886,7 +795,7 @@ impl AppState {
     }
 
     fn weld_chain_closure(&mut self, new_id: EntityId) -> bool {
-        if !self.infer_constraints {
+        if !self.prefs.infer_constraints {
             return false;
         }
         let Some(first) = self.interaction.line_chain_first else {
@@ -923,7 +832,7 @@ impl AppState {
 
     fn weld_created_loop(&mut self, ids: &[EntityId]) {
         self.weld_adjacent_segments(ids);
-        if !self.infer_constraints {
+        if !self.prefs.infer_constraints {
             return;
         }
         match self.tool {
@@ -966,7 +875,7 @@ impl AppState {
         new_id: EntityId,
         tangent: bool,
     ) {
-        if !self.infer_constraints {
+        if !self.prefs.infer_constraints {
             return;
         }
         let Some(new_ends) = self
@@ -1020,7 +929,7 @@ impl AppState {
         start_pinned: bool,
         end_pinned: bool,
     ) -> bool {
-        if !self.infer_constraints {
+        if !self.prefs.infer_constraints {
             return false;
         }
         let mut recorded = false;
@@ -1133,7 +1042,7 @@ impl AppState {
     }
 
     fn infer_arc_onset_tangency(&mut self, arc_id: EntityId) {
-        if !self.infer_constraints {
+        if !self.prefs.infer_constraints {
             return;
         }
         let Some(EntityKind::Curve(Curve::Arc(arc))) = self.document.get(arc_id).map(|e| &e.kind)
@@ -1203,7 +1112,7 @@ impl AppState {
     }
 
     fn infer_axis_alignment(&mut self, new_id: EntityId, end_pinned: bool) {
-        if !self.infer_constraints {
+        if !self.prefs.infer_constraints {
             return;
         }
         let Some((p0, p1)) = self
@@ -1256,7 +1165,7 @@ impl AppState {
         p0_snap: Option<&SnapPoint>,
         p1_snap: Option<&SnapPoint>,
     ) {
-        if !self.infer_constraints {
+        if !self.prefs.infer_constraints {
             return;
         }
         let mut inferred = 0;
@@ -1330,7 +1239,8 @@ impl AppState {
     fn try_close_on_start(&mut self, p: Point2d) -> bool {
         let close = match &self.tool {
             Tool::Polyline { pts } | Tool::Spline { pts } => {
-                pts.len() >= 3 && pts[0].dist_f64(&p) <= self.view.pixel_world_size() * self.snap_px
+                pts.len() >= 3
+                    && pts[0].dist_f64(&p) <= self.view.pixel_world_size() * self.prefs.snap_px
             }
             _ => false,
         };
@@ -1463,7 +1373,7 @@ impl AppState {
                     content: trimmed.replace("\\n", "\n"),
                     height,
                     rotation: 0.0,
-                    font: self.text_font.clone(),
+                    font: self.prefs.text_font.clone(),
                 });
             }
             self.tool = Tool::Select;
@@ -1734,7 +1644,7 @@ impl AppState {
         let mut new_ids = Vec::new();
         for &id in &ids {
             let group = edit::explode(&mut self.document, &[id]);
-            if self.infer_constraints && group.len() >= 2 {
+            if self.prefs.infer_constraints && group.len() >= 2 {
                 self.weld_adjacent_segments(&group);
             }
             new_ids.extend(group);
@@ -1922,7 +1832,7 @@ impl AppState {
     /// inferred. Pure and O(1): it reads only the tool's last point, the
     /// live cursor, and the active snap, all already computed each frame.
     pub fn inference_preview(&self) -> Option<ConstraintKind> {
-        if !self.infer_constraints {
+        if !self.prefs.infer_constraints {
             return None;
         }
         // Only the Line and Polyline tools infer as they go, and only once
@@ -2033,7 +1943,7 @@ impl AppState {
             _ => return,
         };
         if self.commit_constraint(doc, res) {
-            self.show_constraints = true;
+            self.prefs.show_constraints = true;
         }
     }
 
@@ -2149,7 +2059,7 @@ impl AppState {
             c.place = place;
         }
         if self.commit_constraint(doc, res) {
-            self.show_constraints = true;
+            self.prefs.show_constraints = true;
             self.pending_dim_edit = self
                 .document
                 .constraints
@@ -2432,7 +2342,7 @@ impl AppState {
             *f = font.clone();
             *h = size;
         }
-        self.text_font = font;
+        self.prefs.text_font = font;
     }
 
     /// Converts each selected text entity into curve outlines on the same
@@ -3178,7 +3088,7 @@ mod tests {
     #[test]
     fn rectangle_creates_welded_lines_with_axis_constraints() {
         let mut a = app();
-        a.infer_constraints = true;
+        a.prefs.infer_constraints = true;
         a.tool = Tool::Rectangle { first: None };
         a.place_tool_point(pt(0, 0));
         a.place_tool_point(pt(8, 5));
@@ -3207,7 +3117,7 @@ mod tests {
     #[test]
     fn rectangle_welds_corners_even_without_auto_constrain() {
         let mut a = app();
-        a.infer_constraints = false;
+        a.prefs.infer_constraints = false;
         a.tool = Tool::Rectangle { first: None };
         a.place_tool_point(pt(0, 0));
         a.place_tool_point(pt(8, 5));
@@ -3234,8 +3144,8 @@ mod tests {
     #[test]
     fn hexagon_side_dimension_drives_all_sides() {
         let mut a = app();
-        a.infer_constraints = true;
-        a.snap_on = false;
+        a.prefs.infer_constraints = true;
+        a.prefs.snap_on = false;
         a.tool = Tool::Polygon {
             center: None,
             radius_point: None,
@@ -3289,7 +3199,7 @@ mod tests {
     #[test]
     fn exploding_a_polycurve_welds_segments_when_auto_constrain_is_on() {
         let mut a = app();
-        a.infer_constraints = true;
+        a.prefs.infer_constraints = true;
         let tri = oxidraft_geometry::PolyCurve::new(vec![
             Curve::Line(LineSeg::from_endpoints(pt(0, 0), pt(4, 0))),
             Curve::Line(LineSeg::from_endpoints(pt(4, 0), pt(4, 3))),
@@ -3317,7 +3227,7 @@ mod tests {
     #[test]
     fn exploding_stays_loose_with_auto_constrain_off() {
         let mut a = app();
-        a.infer_constraints = false;
+        a.prefs.infer_constraints = false;
         let chain = oxidraft_geometry::PolyCurve::new(vec![
             Curve::Line(LineSeg::from_endpoints(pt(0, 0), pt(4, 0))),
             Curve::Line(LineSeg::from_endpoints(pt(4, 0), pt(4, 3))),
@@ -3354,7 +3264,7 @@ mod tests {
     fn tangent_markers_and_removal() {
         use oxidraft_geometry::CircularArc;
         let mut a = app();
-        a.snap_on = false;
+        a.prefs.snap_on = false;
         let l1 = a.document.add(line(0, 0, 10, 0));
         let l2 = a.document.add(line(0, 0, 0, 10));
         let cid = a
@@ -3483,7 +3393,7 @@ mod tests {
     #[test]
     fn weld_tool_welds_origin_to_a_line_midpoint() {
         let mut a = app();
-        a.snap_on = false;
+        a.prefs.snap_on = false;
         let l = a
             .document
             .add(EntityKind::Curve(Curve::Line(LineSeg::from_endpoints(
@@ -3530,7 +3440,7 @@ mod tests {
     #[test]
     fn radial_dimension_tool_dimensions_a_circle() {
         let mut a = app();
-        a.snap_on = false;
+        a.prefs.snap_on = false;
         let circle = a.document.add(EntityKind::Curve(Curve::Arc(
             oxidraft_geometry::CircularArc::new(
                 Point2d::from_f64(0.0, 0.0),
@@ -3566,7 +3476,7 @@ mod tests {
     #[test]
     fn angular_from_two_lines_creates_dim_at_intersection() {
         let mut a = app();
-        a.snap_on = false;
+        a.prefs.snap_on = false;
         a.document
             .add(EntityKind::Curve(Curve::Line(LineSeg::from_endpoints(
                 Point2d::from_f64(0.0, 0.0),
@@ -3660,7 +3570,7 @@ mod tests {
         assert_eq!(a.tool.name(), "LINE");
         let (s1x, s1y) = a.view.world_to_screen(0.0, 0.0);
         let (s2x, s2y) = a.view.world_to_screen(5.0, 0.0);
-        a.snap_on = false;
+        a.prefs.snap_on = false;
         a.canvas_click(s1x, s1y);
         assert_eq!(a.document.len(), 1);
         a.canvas_click(s2x, s2y);
@@ -3728,7 +3638,7 @@ mod tests {
         ))));
         a.selection = vec![id];
         a.run_command("MOVE");
-        a.snap_on = false;
+        a.prefs.snap_on = false;
         let (b1x, b1y) = a.view.world_to_screen(0.0, 0.0);
         let (b2x, b2y) = a.view.world_to_screen(10.0, 5.0);
         a.canvas_click(b1x, b1y);
@@ -3775,7 +3685,7 @@ mod tests {
             pt(10, 0),
         ))));
         a.snap.enabled = vec![oxidraft_cad::SnapKind::Perpendicular];
-        a.snap_on = true;
+        a.prefs.snap_on = true;
         a.run_command("LINE");
         let (s1x, s1y) = a.view.world_to_screen(3.0, 5.0);
         a.canvas_click(s1x, s1y);
@@ -3791,8 +3701,8 @@ mod tests {
     #[test]
     fn grid_snap_locks_cursor_to_grid_intersection() {
         let mut a = app();
-        a.snap_on = false;
-        a.grid_snap_on = true;
+        a.prefs.snap_on = false;
+        a.prefs.grid_snap_on = true;
         a.run_command("LINE");
         let g = a.view.grid_spacing();
         let (sx, sy) = a.view.world_to_screen(2.0 * g + g * 0.2, -g - g * 0.1);
@@ -3812,7 +3722,7 @@ mod tests {
     #[test]
     fn grip_drag_snaps_to_other_entity() {
         let mut a = app();
-        a.snap_on = true;
+        a.prefs.snap_on = true;
         let l1 = a.add_entity(EntityKind::Curve(Curve::Line(LineSeg::from_endpoints(
             pt(0, 0),
             pt(10, 0),
@@ -3867,7 +3777,7 @@ mod tests {
     #[test]
     fn grip_drag_maintains_perpendicular_constraint() {
         let mut a = app();
-        a.snap_on = false;
+        a.prefs.snap_on = false;
         let (l1, l2) = perpendicular_pair(&mut a);
         let grip = oxidraft_cad::grips_for(&a.document.get(l1).unwrap().kind)[1];
         a.begin_grip_drag(l1, grip);
@@ -3887,7 +3797,7 @@ mod tests {
     #[test]
     fn cancel_grip_drag_restores_constrained_partners() {
         let mut a = app();
-        a.snap_on = false;
+        a.prefs.snap_on = false;
         let (l1, l2) = perpendicular_pair(&mut a);
         let before_a = line_of(&a, l1);
         let before_b = line_of(&a, l2);
@@ -3919,7 +3829,7 @@ mod tests {
     #[test]
     fn infeasible_grip_drag_holds_the_last_solvable_state() {
         let mut a = app();
-        a.snap_on = false;
+        a.prefs.snap_on = false;
         let id = a.add_entity(EntityKind::Curve(Curve::Line(LineSeg::from_endpoints(
             pt(0, 0),
             pt(5, 0),
@@ -3950,7 +3860,7 @@ mod tests {
     #[test]
     fn dragging_an_endpoint_retargets_a_driven_length() {
         let mut a = app();
-        a.snap_on = false;
+        a.prefs.snap_on = false;
         let id = a.add_entity(EntityKind::Curve(Curve::Line(LineSeg::from_endpoints(
             pt(0, 0),
             pt(4, 0),
@@ -3979,7 +3889,7 @@ mod tests {
     fn dragging_the_radius_grip_retargets_a_driven_radius() {
         use oxidraft_geometry::CircularArc;
         let mut a = app();
-        a.snap_on = false;
+        a.prefs.snap_on = false;
         let circle = a.add_entity(EntityKind::Curve(Curve::Arc(CircularArc::new(
             Point2d::from_f64(0.0, 0.0),
             2.0,
@@ -4012,8 +3922,8 @@ mod tests {
     #[test]
     fn chained_line_segments_weld_and_stay_attached() {
         let mut a = app();
-        a.snap_on = false;
-        a.infer_constraints = true;
+        a.prefs.snap_on = false;
+        a.prefs.infer_constraints = true;
         a.run_command("LINE");
         for (x, y) in [(0.0, 0.0), (8.0, 0.0), (8.0, 6.0)] {
             let (sx, sy) = a.view.world_to_screen(x, y);
@@ -4045,8 +3955,8 @@ mod tests {
     #[test]
     fn closing_a_line_chain_welds_the_loop_corner() {
         let mut a = app();
-        a.snap_on = false;
-        a.infer_constraints = true;
+        a.prefs.snap_on = false;
+        a.prefs.infer_constraints = true;
         a.run_command("LINE");
         for (x, y) in [(0.0, 0.0), (8.0, 0.0), (8.0, 6.0), (0.0, 0.0)] {
             a.place_tool_point(Point2d::from_f64(x, y));
@@ -4075,10 +3985,10 @@ mod tests {
     #[test]
     fn near_axis_drawn_line_is_leveled_and_constrained_horizontal() {
         let mut a = app();
-        a.snap_on = false;
-        a.infer_constraints = true;
-        a.polar_on = false;
-        a.track_on = false;
+        a.prefs.snap_on = false;
+        a.prefs.infer_constraints = true;
+        a.prefs.polar_on = false;
+        a.prefs.track_on = false;
         a.run_command("LINE");
         let (s1x, s1y) = a.view.world_to_screen(0.0, 0.0);
         a.canvas_click(s1x, s1y);
@@ -4105,10 +4015,10 @@ mod tests {
     #[test]
     fn near_axis_drawn_line_is_leveled_and_constrained_vertical() {
         let mut a = app();
-        a.snap_on = false;
-        a.infer_constraints = true;
-        a.polar_on = false;
-        a.track_on = false;
+        a.prefs.snap_on = false;
+        a.prefs.infer_constraints = true;
+        a.prefs.polar_on = false;
+        a.prefs.track_on = false;
         a.run_command("LINE");
         let (s1x, s1y) = a.view.world_to_screen(2.0, 1.0);
         a.canvas_click(s1x, s1y);
@@ -4129,7 +4039,7 @@ mod tests {
     #[test]
     fn typed_near_axis_end_is_not_leveled() {
         let mut a = app();
-        a.snap_on = false;
+        a.prefs.snap_on = false;
         a.run_command("LINE");
         a.place_tool_point(Point2d::from_f64(0.0, 0.0));
         a.place_tool_point(Point2d::from_f64(8.0, 0.04));
@@ -4145,8 +4055,8 @@ mod tests {
     #[test]
     fn exact_axis_lines_record_constraints_without_moving() {
         let mut a = app();
-        a.snap_on = false;
-        a.infer_constraints = true;
+        a.prefs.snap_on = false;
+        a.prefs.infer_constraints = true;
         a.run_command("LINE");
         for (x, y) in [(0.0, 0.0), (10.0, 0.0), (10.0, 4.0)] {
             a.place_tool_point(Point2d::from_f64(x, y));
@@ -4174,8 +4084,8 @@ mod tests {
     #[test]
     fn endpoint_snap_infers_coincident_on_drawn_line() {
         let mut a = app();
-        a.snap_on = true;
-        a.infer_constraints = true;
+        a.prefs.snap_on = true;
+        a.prefs.infer_constraints = true;
         let base = a.add_entity(EntityKind::Curve(Curve::Line(LineSeg::from_endpoints(
             pt(0, 0),
             pt(10, 0),
@@ -4203,10 +4113,10 @@ mod tests {
     #[test]
     fn line_drawn_off_an_arc_endpoint_snaps_tangent_and_records() {
         let mut a = app();
-        a.snap_on = true;
-        a.infer_constraints = true;
-        a.polar_on = false;
-        a.track_on = false;
+        a.prefs.snap_on = true;
+        a.prefs.infer_constraints = true;
+        a.prefs.polar_on = false;
+        a.prefs.track_on = false;
         let (arc_id, att, t) = quarter_arc(&mut a);
         a.run_command("LINE");
         let (sx, sy) = a.view.world_to_screen(att.0, att.1);
@@ -4252,10 +4162,10 @@ mod tests {
     #[test]
     fn inferred_tangency_survives_a_grip_drag() {
         let mut a = app();
-        a.snap_on = true;
-        a.infer_constraints = true;
-        a.polar_on = false;
-        a.track_on = false;
+        a.prefs.snap_on = true;
+        a.prefs.infer_constraints = true;
+        a.prefs.polar_on = false;
+        a.prefs.track_on = false;
         let (_, att, t) = quarter_arc(&mut a);
         a.run_command("LINE");
         let (sx, sy) = a.view.world_to_screen(att.0, att.1);
@@ -4297,9 +4207,9 @@ mod tests {
     #[test]
     fn typed_near_tangent_end_is_not_rotated() {
         let mut a = app();
-        a.snap_on = true;
-        a.polar_on = false;
-        a.track_on = false;
+        a.prefs.snap_on = true;
+        a.prefs.polar_on = false;
+        a.prefs.track_on = false;
         let (_, att, t) = quarter_arc(&mut a);
         a.run_command("LINE");
         let (sx, sy) = a.view.world_to_screen(att.0, att.1);
@@ -4327,10 +4237,10 @@ mod tests {
     #[test]
     fn typed_exact_tangent_records_without_moving() {
         let mut a = app();
-        a.snap_on = true;
-        a.infer_constraints = true;
-        a.polar_on = false;
-        a.track_on = false;
+        a.prefs.snap_on = true;
+        a.prefs.infer_constraints = true;
+        a.prefs.polar_on = false;
+        a.prefs.track_on = false;
         let (arc_id, att, t) = quarter_arc(&mut a);
         a.run_command("LINE");
         let (sx, sy) = a.view.world_to_screen(att.0, att.1);
@@ -4355,10 +4265,10 @@ mod tests {
     #[test]
     fn line_drawn_into_an_arc_endpoint_rotates_its_free_start() {
         let mut a = app();
-        a.snap_on = true;
-        a.infer_constraints = true;
-        a.polar_on = false;
-        a.track_on = false;
+        a.prefs.snap_on = true;
+        a.prefs.infer_constraints = true;
+        a.prefs.polar_on = false;
+        a.prefs.track_on = false;
         let (arc_id, att, t) = quarter_arc(&mut a);
         a.run_command("LINE");
         let start = (
@@ -4392,8 +4302,8 @@ mod tests {
     #[test]
     fn arc_drawn_off_a_line_endpoint_pulls_tangent_and_welds() {
         let mut a = app();
-        a.snap_on = false;
-        a.infer_constraints = true;
+        a.prefs.snap_on = false;
+        a.prefs.infer_constraints = true;
         let line_id = a.add_entity(line(0, 0, -5, 0));
         let (cx, cy) = (0.04_f64, 5.0_f64);
         let r = (cx * cx + cy * cy).sqrt();
@@ -4439,8 +4349,8 @@ mod tests {
     #[test]
     fn arc_tool_off_a_line_endpoint_infers_tangency() {
         let mut a = app();
-        a.snap_on = false;
-        a.infer_constraints = true;
+        a.prefs.snap_on = false;
+        a.prefs.infer_constraints = true;
         a.run_command("LINE");
         a.place_tool_point(pt(-5, 0));
         a.place_tool_point(pt(0, 0));
@@ -4469,8 +4379,8 @@ mod tests {
     #[test]
     fn arc_onset_tangency_respects_the_infer_toggle() {
         let mut a = app();
-        a.snap_on = false;
-        a.infer_constraints = false;
+        a.prefs.snap_on = false;
+        a.prefs.infer_constraints = false;
         let _line_id = a.add_entity(line(0, 0, -5, 0));
         let arc = oxidraft_geometry::CircularArc::new(
             Point2d::from_f64(0.0, 5.0),
@@ -4489,7 +4399,7 @@ mod tests {
     #[test]
     fn radcon_command_drives_the_selected_circle() {
         let mut a = app();
-        a.snap_on = false;
+        a.prefs.snap_on = false;
         let c = a.add_entity(EntityKind::Curve(Curve::Arc(
             oxidraft_geometry::CircularArc::new(pt(0, 0), 2.0, 0.0, std::f64::consts::TAU),
         )));
@@ -4511,8 +4421,8 @@ mod tests {
     #[test]
     fn inference_respects_the_toggle() {
         let mut a = app();
-        a.snap_on = false;
-        a.infer_constraints = false;
+        a.prefs.snap_on = false;
+        a.prefs.infer_constraints = false;
         a.run_command("LINE");
         for (x, y) in [(0.0, 0.0), (8.0, 0.0), (8.0, 6.0)] {
             let (sx, sy) = a.view.world_to_screen(x, y);
@@ -4524,8 +4434,8 @@ mod tests {
     #[test]
     fn moving_a_welded_line_drags_its_neighbour() {
         let mut a = app();
-        a.snap_on = false;
-        a.infer_constraints = true;
+        a.prefs.snap_on = false;
+        a.prefs.infer_constraints = true;
         a.run_command("LINE");
         for (x, y) in [(0.0, 0.0), (8.0, 0.0), (8.0, 6.0)] {
             let (sx, sy) = a.view.world_to_screen(x, y);
@@ -4802,8 +4712,8 @@ mod tests {
     #[test]
     fn plot_window_pick_stores_the_rect_and_reopens_the_dialog() {
         let mut a = AppState::new(800.0, 600.0);
-        a.snap_on = false;
-        a.grid_snap_on = false;
+        a.prefs.snap_on = false;
+        a.prefs.grid_snap_on = false;
         a.tool = Tool::PlotWindow { first: None };
         a.canvas_click(300.0, 350.0);
         a.canvas_click(500.0, 250.0);
@@ -4837,7 +4747,7 @@ mod tests {
             pt(10, 0),
         ))));
         a.snap.enabled = vec![oxidraft_cad::SnapKind::Perpendicular];
-        a.snap_on = true;
+        a.prefs.snap_on = true;
         a.run_command("LINE");
         let (s1x, s1y) = a.view.world_to_screen(5.0, 5.0);
         a.canvas_click(s1x, s1y);
@@ -4853,7 +4763,7 @@ mod tests {
     #[test]
     fn direct_distance_entry_projects_along_cursor() {
         let mut a = app();
-        a.snap_on = false;
+        a.prefs.snap_on = false;
         a.run_command("LINE");
         let (s1x, s1y) = a.view.world_to_screen(0.0, 0.0);
         a.canvas_click(s1x, s1y);
@@ -4875,7 +4785,7 @@ mod tests {
     #[test]
     fn typed_coordinates_build_a_line() {
         let mut a = app();
-        a.snap_on = false;
+        a.prefs.snap_on = false;
         a.run_command("LINE");
         a.run_command("0,0");
         a.run_command("@10,0");
@@ -4892,7 +4802,7 @@ mod tests {
     #[test]
     fn relative_polar_coordinate_places_point() {
         let mut a = app();
-        a.snap_on = false;
+        a.prefs.snap_on = false;
         a.run_command("LINE");
         a.run_command("0,0");
         a.run_command("@5<90");

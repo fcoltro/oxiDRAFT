@@ -318,15 +318,15 @@ pub(super) fn draw_grid(
     }
     let (x0, y0, x1, y1) = app.view.visible_bounds();
     let rgb = |c: (u8, u8, u8)| Color32::from_rgb(c.0, c.1, c.2);
-    let minor = Stroke::new(1.0, rgb(app.grid_minor_rgb));
-    let major_line = Stroke::new(1.0, rgb(app.grid_major_rgb));
+    let minor = Stroke::new(1.0, rgb(app.prefs.grid_minor_rgb));
+    let major_line = Stroke::new(1.0, rgb(app.prefs.grid_major_rgb));
     let axis = Stroke::new(1.0, Color32::from_rgb(58, 66, 80));
-    let every = app.grid_major_every.max(1) as i64;
+    let every = app.prefs.grid_major_every.max(1) as i64;
 
     let ix0 = (x0 / major).floor() as i64;
     let iy0 = (y0 / major).floor() as i64;
 
-    if app.grid_dots {
+    if app.prefs.grid_dots {
         let mut i = ix0;
         let mut gx = ix0 as f64 * major;
         while gx <= x1 {
@@ -643,7 +643,7 @@ pub(super) fn resolve_color(app: &AppState, e: &oxidraft_document::Entity) -> (u
 }
 
 pub(super) fn resolve_line_weight_px(app: &AppState, e: &oxidraft_document::Entity) -> f32 {
-    if !app.show_lineweights {
+    if !app.prefs.show_lineweights {
         return HAIRLINE_PX;
     }
     let layer_mm = app
@@ -653,7 +653,7 @@ pub(super) fn resolve_line_weight_px(app: &AppState, e: &oxidraft_document::Enti
         .map(|l| l.line_weight_mm)
         .unwrap_or(0.0);
     let mm = e.line_weight.to_mm(layer_mm) as f32;
-    (mm * app.lineweight_scale as f32).max(HAIRLINE_PX)
+    (mm * app.prefs.lineweight_scale as f32).max(HAIRLINE_PX)
 }
 
 pub(super) fn resolve_line_pattern(app: &AppState, e: &oxidraft_document::Entity) -> Vec<f32> {

@@ -181,7 +181,7 @@ pub fn draw_ui(ui: &mut egui::Ui, app: &mut AppState, ui_state: &mut UiState) {
                 fams.insert(f.clone());
             }
         }
-        if let Some(f) = &app.text_font {
+        if let Some(f) = &app.prefs.text_font {
             fams.insert(f.clone());
         }
         crate::fonts::ensure_fonts(&ctx, &fams);
@@ -263,7 +263,7 @@ fn canvas(root_ui: &mut egui::Ui, app: &mut AppState, ui_state: &mut UiState, pa
                 &app.document,
                 wx,
                 wy,
-                app.view.pixel_world_size() * app.pick_box * 0.5,
+                app.view.pixel_world_size() * app.prefs.pick_box * 0.5,
             ) && let Some(EntityKind::Text {
                 content,
                 font,
@@ -688,7 +688,7 @@ fn canvas(root_ui: &mut egui::Ui, app: &mut AppState, ui_state: &mut UiState, pa
                         &app.document,
                         wx,
                         wy,
-                        app.view.pixel_world_size() * app.pick_box * 0.5,
+                        app.view.pixel_world_size() * app.prefs.pick_box * 0.5,
                     )
                 })
                 .filter(|&id| id != app.origin_id)
@@ -863,30 +863,30 @@ fn canvas(root_ui: &mut egui::Ui, app: &mut AppState, ui_state: &mut UiState, pa
                     ui.close();
                 }
                 ui.separator();
-                ui.checkbox(&mut app.grid_on, "Grid");
-                ui.checkbox(&mut app.snap_on, "Object Snap");
+                ui.checkbox(&mut app.prefs.grid_on, "Grid");
+                ui.checkbox(&mut app.prefs.snap_on, "Object Snap");
             });
         } else if response.secondary_clicked() {
             app.run_command("");
         }
         let focused_id = ctx.memory(|mem| mem.focused());
         if ui.input(|i| i.key_pressed(egui::Key::F7)) {
-            app.snap_on = !app.snap_on;
+            app.prefs.snap_on = !app.prefs.snap_on;
         }
         if ui.input(|i| i.key_pressed(egui::Key::F8)) {
-            app.grid_on = !app.grid_on;
+            app.prefs.grid_on = !app.prefs.grid_on;
         }
         if ui.input(|i| i.key_pressed(egui::Key::F9)) {
-            app.grid_snap_on = !app.grid_snap_on;
+            app.prefs.grid_snap_on = !app.prefs.grid_snap_on;
         }
         if ui.input(|i| i.key_pressed(egui::Key::F10)) {
-            app.polar_on = !app.polar_on;
+            app.prefs.polar_on = !app.prefs.polar_on;
         }
         if ui.input(|i| i.key_pressed(egui::Key::F11)) {
-            app.track_on = !app.track_on;
+            app.prefs.track_on = !app.prefs.track_on;
         }
         if ui.input(|i| i.key_pressed(egui::Key::F12)) {
-            app.dyn_on = !app.dyn_on;
+            app.prefs.dyn_on = !app.prefs.dyn_on;
         }
         if focused_id.is_none() && !palette_open && ui_state.editing_text.is_none() {
             let mods = ui.input(|i| i.modifiers);
@@ -949,9 +949,13 @@ fn canvas(root_ui: &mut egui::Ui, app: &mut AppState, ui_state: &mut UiState, pa
         if response.hovered() {
             let scroll = ui.input(|i| i.smooth_scroll_delta.y);
             if scroll.abs() > 0.0 {
-                let signed = if app.invert_zoom { -scroll } else { scroll };
-                let factor = (signed as f64 / 200.0 * app.zoom_speed).exp();
-                let (wx, wy) = if app.zoom_to_cursor {
+                let signed = if app.prefs.invert_zoom {
+                    -scroll
+                } else {
+                    scroll
+                };
+                let factor = (signed as f64 / 200.0 * app.prefs.zoom_speed).exp();
+                let (wx, wy) = if app.prefs.zoom_to_cursor {
                     app.cursor_world
                 } else {
                     app.view.center
@@ -994,7 +998,7 @@ fn canvas(root_ui: &mut egui::Ui, app: &mut AppState, ui_state: &mut UiState, pa
         }
         let to_screen = |wx: f64, wy: f64| render::world_to_screen_pos(app, origin, wx, wy);
         painter.rect_filled(rect, 0.0, crate::theme::CANVAS_BG);
-        if app.grid_on {
+        if app.prefs.grid_on {
             draw_grid(&painter, app, rect, &to_screen);
         }
         refresh_hatch_cache(app, &mut ui_state.hatch_cache);
@@ -1106,13 +1110,13 @@ fn canvas(root_ui: &mut egui::Ui, app: &mut AppState, ui_state: &mut UiState, pa
                 curve_pts,
             );
         }
-        if app.comb_on {
+        if app.prefs.comb_on {
             for &id in &app.selection {
                 if let Some(c) = app.document.get(id).and_then(|e| e.as_curve()) {
                     if c.as_line().is_some() {
                         continue;
                     }
-                    overlays::curvature_comb(&painter, app, c, origin, app.comb_scale, 48);
+                    overlays::curvature_comb(&painter, app, c, origin, app.prefs.comb_scale, 48);
                 }
             }
         }
@@ -1637,11 +1641,14 @@ fn canvas(root_ui: &mut egui::Ui, app: &mut AppState, ui_state: &mut UiState, pa
         } else if over_canvas {
             ui.ctx().set_cursor_icon(egui::CursorIcon::None);
             let cross = Stroke::new(1.0, Color32::from_rgb(140, 150, 170));
-            if app.crosshair {
+            if app.prefs.crosshair {
                 painter.line_segment([pos2(rect.left(), cc.y), pos2(rect.right(), cc.y)], cross);
                 painter.line_segment([pos2(cc.x, rect.top()), pos2(cc.x, rect.bottom())], cross);
             } else {
-                let (gap, arm) = (app.pick_box as f32 * 0.6, app.pick_box as f32 * 1.6);
+                let (gap, arm) = (
+                    app.prefs.pick_box as f32 * 0.6,
+                    app.prefs.pick_box as f32 * 1.6,
+                );
                 painter.line_segment([cc - vec2(arm, 0.0), cc - vec2(gap, 0.0)], cross);
                 painter.line_segment([cc + vec2(gap, 0.0), cc + vec2(arm, 0.0)], cross);
                 painter.line_segment([cc - vec2(0.0, arm), cc - vec2(0.0, gap)], cross);
@@ -1668,7 +1675,7 @@ fn canvas(root_ui: &mut egui::Ui, app: &mut AppState, ui_state: &mut UiState, pa
                 painter.rect_stroke(
                     egui::Rect::from_center_size(
                         cc,
-                        vec2(app.pick_box as f32, app.pick_box as f32),
+                        vec2(app.prefs.pick_box as f32, app.prefs.pick_box as f32),
                     ),
                     0.0,
                     box_stroke,
@@ -1787,7 +1794,7 @@ fn canvas(root_ui: &mut egui::Ui, app: &mut AppState, ui_state: &mut UiState, pa
         let has_dims = app.tool.has_pending_input();
         let is_drawing = !matches!(app.tool, Tool::Select);
         let has_input = is_drawing || !ui_state.command_input.is_empty() || has_dims;
-        if app.dyn_on && (has_dims || has_input) {
+        if app.prefs.dyn_on && (has_dims || has_input) {
             let font_id = egui::FontId::monospace(11.0);
             let text_color = Color32::from_rgb(230, 240, 255);
             let bg_color = Color32::from_rgba_unmultiplied(20, 26, 36, 225);
@@ -1796,7 +1803,7 @@ fn canvas(root_ui: &mut egui::Ui, app: &mut AppState, ui_state: &mut UiState, pa
             let dims_text = if has_dims {
                 let cursor = Point2d::from_f64(app.cursor_world.0, app.cursor_world.1);
                 match &app.tool {
-                    Tool::Line { last: Some(p0) } if !app.dyn_on => {
+                    Tool::Line { last: Some(p0) } if !app.prefs.dyn_on => {
                         let d = p0.dist_f64(&cursor);
                         let (x0, y0) = p0.to_f64();
                         let (x1, y1) = cursor.to_f64();

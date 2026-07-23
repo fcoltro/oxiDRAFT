@@ -18,7 +18,7 @@ fn app_with_line() -> AppState {
 #[test]
 fn line_tool_snaps_to_existing_endpoint() {
     let mut a = app_with_line();
-    a.snap_on = true;
+    a.prefs.snap_on = true;
     a.run_command("LINE");
 
     let (s1x, s1y) = a.view.world_to_screen(0.05, 0.05);
@@ -52,7 +52,7 @@ fn line_tool_snaps_to_existing_endpoint() {
 #[test]
 fn click_select_then_erase() {
     let mut a = app_with_line();
-    a.snap_on = false;
+    a.prefs.snap_on = false;
     let (sx, sy) = a.view.world_to_screen(5.0, 0.0);
     a.canvas_click(sx, sy);
     assert_eq!(
@@ -67,7 +67,7 @@ fn click_select_then_erase() {
 #[test]
 fn draw_undo_redo_cycle() {
     let mut a = AppState::new(800.0, 600.0);
-    a.snap_on = false;
+    a.prefs.snap_on = false;
     a.run_command("LINE");
     let (a1x, a1y) = a.view.world_to_screen(0.0, 0.0);
     let (a2x, a2y) = a.view.world_to_screen(4.0, 3.0);
@@ -90,7 +90,7 @@ fn draw_undo_redo_cycle() {
 #[test]
 fn copy_command_full_flow() {
     let mut a = app_with_line();
-    a.snap_on = false;
+    a.prefs.snap_on = false;
     let id = a.document.iter().find(|e| e.id != a.origin_id).unwrap().id;
     a.selection = vec![id];
     a.run_command("COPY");

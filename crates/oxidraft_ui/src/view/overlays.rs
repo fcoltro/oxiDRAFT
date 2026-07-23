@@ -716,7 +716,7 @@ fn chip_centers(app: &AppState, id: EntityId, count: usize) -> Option<Vec<egui::
 /// given canvas-local position, if any. Mirrors the `constraint_badges`
 /// layout so what you click is what you see.
 pub(crate) fn badge_hit(app: &AppState, sx: f64, sy: f64) -> Option<Vec<SketchConstraint>> {
-    if !app.show_constraints || app.document.constraints.is_empty() {
+    if !app.prefs.show_constraints || app.document.constraints.is_empty() {
         return None;
     }
     let p = pos2(sx as f32, sy as f32);
@@ -764,7 +764,7 @@ pub(crate) fn badge_hit(app: &AppState, sx: f64, sy: f64) -> Option<Vec<SketchCo
 /// the value, kept separate from [`badge_hit`] (whose hits are deletions):
 /// clicking a dimension opens its editor instead of removing it.
 pub(crate) fn dim_badge_hit(app: &AppState, sx: f64, sy: f64) -> Option<SketchConstraint> {
-    if !app.show_constraints || app.document.constraints.is_empty() {
+    if !app.prefs.show_constraints || app.document.constraints.is_empty() {
         return None;
     }
     let p = pos2(sx as f32, sy as f32);
@@ -798,7 +798,7 @@ pub(super) fn constraint_badges(
     origin: egui::Pos2,
     hover: Option<egui::Pos2>,
 ) {
-    if !app.show_constraints || app.document.constraints.is_empty() {
+    if !app.prefs.show_constraints || app.document.constraints.is_empty() {
         return;
     }
     let model = badge_model(&app.document);
@@ -995,7 +995,7 @@ pub(super) fn paint_badge_glyph(painter: &egui::Painter, c: egui::Pos2, g: Badge
 }
 
 pub(super) fn cursor_readout(ctx: &egui::Context, app: &AppState, origin: egui::Pos2) {
-    if app.dyn_on {
+    if app.prefs.dyn_on {
         return;
     }
     let (cx, cy) = app.cursor_world;
@@ -1167,7 +1167,7 @@ pub(super) fn dyn_transform_hud(
         } => Some((Kind::Scale, b.to_f64(), Some(*reference))),
         _ => None,
     };
-    let (Some((kind, (bx, by), scale_ref)), true) = (info, app.dyn_on) else {
+    let (Some((kind, (bx, by), scale_ref)), true) = (info, app.prefs.dyn_on) else {
         ui_state.dyn_tf_active = false;
         return;
     };
@@ -1306,7 +1306,7 @@ pub(super) fn dyn_line_hud(
     } else {
         None
     };
-    if let (true, Some((rx, ry))) = (app.dyn_on, line_ref) {
+    if let (true, Some((rx, ry))) = (app.prefs.dyn_on, line_ref) {
         let (cx, cy) = app.cursor_world;
         let live_len = ((cx - rx).powi(2) + (cy - ry).powi(2)).sqrt();
         let live_ang = oxidraft_geometry::wrap_deg360((cy - ry).atan2(cx - rx).to_degrees());
@@ -1367,7 +1367,7 @@ pub(super) fn dyn_circle_hud(
     } else {
         None
     };
-    if let (true, Some((cx, cy))) = (app.dyn_on, circle_center) {
+    if let (true, Some((cx, cy))) = (app.prefs.dyn_on, circle_center) {
         let rad_id = egui::Id::new("dyn_radius");
         let first_show = !ui_state.dyn_circle_active;
         if first_show {
@@ -1410,7 +1410,7 @@ pub(super) fn dyn_circle_hud(
 /// following the cursor once `radius_point` is set), and this popup is the
 /// only thing left to decide before Apply/Enter commits it or Cancel drops
 /// it. Quick-pick buttons cover the common cases; the field next to them
-/// takes any custom count. Not gated by `app.dyn_on` — like
+/// takes any custom count. Not gated by `app.prefs.dyn_on` — like
 /// `blend_confirm_hud`, choosing this option is the point of the tool, not a
 /// typing shortcut layered on top of it.
 pub(super) fn polygon_sides_hud(
@@ -1542,7 +1542,7 @@ pub(super) fn dyn_rect_hud(
     } else {
         None
     };
-    if let (true, Some((fx, fy))) = (app.dyn_on, rect_first) {
+    if let (true, Some((fx, fy))) = (app.prefs.dyn_on, rect_first) {
         let (crx, cry) = app.cursor_world;
 
         let field_id = egui::Id::new("dyn_rect_field");
@@ -1614,7 +1614,7 @@ pub(super) fn dyn_ellipse_hud(
         } => Some((c.to_f64(), Some(a.to_f64()))),
         _ => None,
     };
-    if let (true, Some((center, axis_end))) = (app.dyn_on, stage) {
+    if let (true, Some((center, axis_end))) = (app.prefs.dyn_on, stage) {
         let (crx, cry) = app.cursor_world;
         let first_show = !ui_state.dyn_ell_active;
         if first_show {
@@ -1709,7 +1709,7 @@ pub(super) fn dyn_offset_hud(
     } else {
         None
     };
-    if let (true, Some(dist)) = (app.dyn_on, dist) {
+    if let (true, Some(dist)) = (app.prefs.dyn_on, dist) {
         let first_show = !ui_state.dyn_offset_active;
         if first_show {
             ui_state.dyn_offset_dist = super::render::trim_decimals(dist, 4);
@@ -1760,7 +1760,7 @@ pub(super) fn dyn_corner_hud(
         Tool::CircleTtr { radius, .. } => Some(("Radius", *radius)),
         _ => None,
     };
-    let (Some((label, value)), true) = (info, app.dyn_on) else {
+    let (Some((label, value)), true) = (info, app.prefs.dyn_on) else {
         ui_state.dyn_corner_active = false;
         return;
     };
@@ -1826,7 +1826,7 @@ pub(super) fn dyn_corner_hud(
 /// Always-visible popup shown once both blend entities are picked: lets the
 /// user tune G0–G3 continuity and tension and see the result (drawn separately
 /// as a ghost preview by `render::draw_blend_preview`) before committing.
-/// Unlike the dyn-input-gated HUDs, this one isn't tied to `app.dyn_on` —
+/// Unlike the dyn-input-gated HUDs, this one isn't tied to `app.prefs.dyn_on` —
 /// confirming/cancelling a blend pick is a one-off decision, not a typing
 /// shortcut, so it should always be available.
 pub(super) fn blend_confirm_hud(
@@ -1999,7 +1999,7 @@ pub(super) fn dyn_text_hud(
                                 .hint_text("type text, Enter to place"),
                         );
                         ui.add_space(4.0);
-                        super::chrome::font_combo(ui, "dyn_text_font", &mut app.text_font);
+                        super::chrome::font_combo(ui, "dyn_text_font", &mut app.prefs.text_font);
                         height_glyph(ui);
                         let mut size = if let Tool::Text { height, .. } = &app.tool {
                             *height
@@ -2142,7 +2142,7 @@ mod badge_tests {
     #[test]
     fn clicking_a_badge_chip_removes_the_constraint_undoably() {
         let mut app = AppState::new(800.0, 600.0);
-        app.snap_on = false;
+        app.prefs.snap_on = false;
         let a = app.add_entity(EntityKind::Curve(Curve::Line(LineSeg::from_endpoints(
             Point2d::from_f64(0.0, 0.0),
             Point2d::from_f64(4.0, 0.0),
@@ -2166,7 +2166,7 @@ mod badge_tests {
     #[test]
     fn clicking_a_weld_dot_removes_the_weld() {
         let mut app = AppState::new(800.0, 600.0);
-        app.snap_on = false;
+        app.prefs.snap_on = false;
         let a = app.add_entity(EntityKind::Curve(Curve::Line(LineSeg::from_endpoints(
             Point2d::from_f64(0.0, 0.0),
             Point2d::from_f64(4.0, 0.0),
@@ -2192,7 +2192,7 @@ mod badge_tests {
     #[test]
     fn badge_clicks_are_ignored_while_drawing_or_hidden() {
         let mut app = AppState::new(800.0, 600.0);
-        app.snap_on = false;
+        app.prefs.snap_on = false;
         let a = app.add_entity(EntityKind::Curve(Curve::Line(LineSeg::from_endpoints(
             Point2d::from_f64(0.0, 0.0),
             Point2d::from_f64(4.0, 0.0),
@@ -2208,7 +2208,7 @@ mod badge_tests {
             "drawing tools keep their clicks"
         );
         app.tool = Tool::Select;
-        app.show_constraints = false;
+        app.prefs.show_constraints = false;
         app.canvas_click(chip.x as f64, chip.y as f64);
         assert_eq!(
             user_constraints(&app).len(),
@@ -2235,7 +2235,7 @@ mod badge_tests {
     #[test]
     fn angle_becomes_an_angular_dimension_badge() {
         let mut app = AppState::new(800.0, 600.0);
-        app.snap_on = false;
+        app.prefs.snap_on = false;
         let a = app.add_entity(EntityKind::Curve(Curve::Line(LineSeg::from_endpoints(
             Point2d::from_f64(0.0, 0.0),
             Point2d::from_f64(6.0, 0.0),
@@ -2273,7 +2273,7 @@ mod badge_tests {
     #[test]
     fn near_parallel_angle_badge_still_renders_and_deletes() {
         let mut app = AppState::new(800.0, 600.0);
-        app.snap_on = false;
+        app.prefs.snap_on = false;
         let a = app.add_entity(EntityKind::Curve(Curve::Line(LineSeg::from_endpoints(
             Point2d::from_f64(0.0, 0.0),
             Point2d::from_f64(6.0, 0.0),
@@ -2301,7 +2301,7 @@ mod badge_tests {
     #[test]
     fn dimension_badge_shows_its_value_and_edits_rather_than_deletes() {
         let mut app = AppState::new(800.0, 600.0);
-        app.snap_on = false;
+        app.prefs.snap_on = false;
         let a = app.add_entity(EntityKind::Curve(Curve::Line(LineSeg::from_endpoints(
             Point2d::from_f64(0.0, 0.0),
             Point2d::from_f64(4.0, 0.0),
@@ -2393,8 +2393,8 @@ mod badge_tests {
     #[test]
     fn smart_dimension_infers_length_radius_and_angle() {
         let mut app = AppState::new(800.0, 600.0);
-        app.snap_on = false;
-        app.show_constraints = false;
+        app.prefs.snap_on = false;
+        app.prefs.show_constraints = false;
 
         // One line → a driving length, with its editor queued and badges shown.
         let l = app.add_entity(EntityKind::Curve(Curve::Line(LineSeg::from_endpoints(
@@ -2409,7 +2409,10 @@ mod badge_tests {
                 .any(|c| c.kind == ConstraintKind::Distance && c.a == l && c.val.is_some()),
             "a line gets a driving length"
         );
-        assert!(app.show_constraints, "a new dimension reveals the badges");
+        assert!(
+            app.prefs.show_constraints,
+            "a new dimension reveals the badges"
+        );
         assert!(
             app.pending_dim_edit.is_some(),
             "the new dimension is queued for inline editing"
@@ -2455,7 +2458,7 @@ mod badge_tests {
     #[test]
     fn smart_dimension_on_parallel_lines_is_a_width_not_an_angle() {
         let mut app = AppState::new(800.0, 600.0);
-        app.snap_on = false;
+        app.prefs.snap_on = false;
         let a = app.add_entity(EntityKind::Curve(Curve::Line(LineSeg::from_endpoints(
             Point2d::from_f64(0.0, 0.0),
             Point2d::from_f64(6.0, 0.0),
@@ -2512,7 +2515,7 @@ mod badge_tests {
     #[test]
     fn smart_dimension_placement_click_pins_the_annotation() {
         let mut app = AppState::new(800.0, 600.0);
-        app.snap_on = false;
+        app.prefs.snap_on = false;
         let a = app.add_entity(EntityKind::Curve(Curve::Line(LineSeg::from_endpoints(
             Point2d::from_f64(0.0, 0.0),
             Point2d::from_f64(4.0, 0.0),
@@ -2572,7 +2575,7 @@ mod badge_tests {
     #[test]
     fn smart_dimension_circle_pick_goes_straight_to_placement() {
         let mut app = AppState::new(800.0, 600.0);
-        app.snap_on = false;
+        app.prefs.snap_on = false;
         let c_ent = app.add_entity(EntityKind::Curve(Curve::Arc(
             oxidraft_geometry::CircularArc::new(
                 Point2d::from_f64(20.0, 0.0),
@@ -2609,7 +2612,7 @@ mod badge_tests {
     #[test]
     fn placed_distance_annotation_takes_the_placement_side_and_offset() {
         let mut app = AppState::new(800.0, 600.0);
-        app.snap_on = false;
+        app.prefs.snap_on = false;
         let a = app.add_entity(EntityKind::Curve(Curve::Line(LineSeg::from_endpoints(
             Point2d::from_f64(0.0, 0.0),
             Point2d::from_f64(4.0, 0.0),
@@ -2641,7 +2644,7 @@ mod badge_tests {
     #[test]
     fn smart_dim_ghost_mirrors_the_would_be_constraint() {
         let mut app = AppState::new(800.0, 600.0);
-        app.snap_on = false;
+        app.prefs.snap_on = false;
         app.cursor_world = (2.0, 3.0);
         let l = app.add_entity(EntityKind::Curve(Curve::Line(LineSeg::from_endpoints(
             Point2d::from_f64(0.0, 0.0),
@@ -2785,7 +2788,7 @@ mod polygon_hud_tests {
     fn custom_field_parses_into_sides_with_dyn_on_off() {
         let ctx = egui::Context::default();
         let mut app = AppState::new(800.0, 600.0);
-        app.dyn_on = false; // the popup must work regardless of Dynamic Input
+        app.prefs.dyn_on = false; // the popup must work regardless of Dynamic Input
         app.tool = Tool::Polygon {
             center: Some(Point2d::from_f64(0.0, 0.0)),
             radius_point: Some(Point2d::from_f64(10.0, 0.0)),

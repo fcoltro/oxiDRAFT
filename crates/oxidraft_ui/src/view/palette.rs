@@ -346,12 +346,12 @@ fn score(entry: &Entry, q: &str) -> Option<u8> {
 fn run_entry(app: &mut AppState, e: &Entry) {
     match e.action {
         Action::Cmd(c) => app.run_command(c),
-        Action::ToggleGrid => app.grid_on = !app.grid_on,
-        Action::ToggleSnap => app.snap_on = !app.snap_on,
-        Action::ToggleGridSnap => app.grid_snap_on = !app.grid_snap_on,
-        Action::TogglePolar => app.polar_on = !app.polar_on,
-        Action::ToggleTrack => app.track_on = !app.track_on,
-        Action::ToggleDyn => app.dyn_on = !app.dyn_on,
+        Action::ToggleGrid => app.prefs.grid_on = !app.prefs.grid_on,
+        Action::ToggleSnap => app.prefs.snap_on = !app.prefs.snap_on,
+        Action::ToggleGridSnap => app.prefs.grid_snap_on = !app.prefs.grid_snap_on,
+        Action::TogglePolar => app.prefs.polar_on = !app.prefs.polar_on,
+        Action::ToggleTrack => app.prefs.track_on = !app.prefs.track_on,
+        Action::ToggleDyn => app.prefs.dyn_on = !app.prefs.dyn_on,
     }
 }
 

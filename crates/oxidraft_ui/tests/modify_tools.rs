@@ -16,7 +16,7 @@ fn click(a: &mut AppState, wx: f64, wy: f64) {
 
 fn app() -> AppState {
     let mut a = AppState::new(1200.0, 800.0);
-    a.snap_on = false;
+    a.prefs.snap_on = false;
     a
 }
 
@@ -39,7 +39,7 @@ fn trim_tool_cuts_picked_span() {
 #[test]
 fn trim_ignores_object_snap_when_picking() {
     let mut a = AppState::new(1200.0, 800.0);
-    a.snap_on = true;
+    a.prefs.snap_on = true;
     a.add_entity(line(0, 0, 10, 0));
     a.add_entity(line(3, -1, 3, 1));
     a.add_entity(line(7, -1, 7, 1));
@@ -102,7 +102,7 @@ fn fillet_tool_adds_arc() {
 fn fillet_records_constraints_and_survives_a_leg_drag() {
     use oxidraft_document::ConstraintKind;
     let mut a = app();
-    a.infer_constraints = true;
+    a.prefs.infer_constraints = true;
     let l1 = a.add_entity(line(10, 0, 0, 0));
     let _l2 = a.add_entity(line(0, 0, 0, 10));
     a.run_command("FILLET");
@@ -173,7 +173,7 @@ fn filleting_a_chain_drawn_corner_stays_consistent_and_draggable() {
     // Draw the corner with the Line tool so inference records the direct
     // chain weld plus H/V — the exact combination that used to wedge the
     // solver after a fillet.
-    a.infer_constraints = true;
+    a.prefs.infer_constraints = true;
     a.run_command("LINE");
     for (x, y) in [(10.0, 0.0), (0.0, 0.0), (0.0, 10.0)] {
         click(&mut a, x, y);
@@ -455,7 +455,7 @@ fn fillet_triangle_arcs_connect_to_trimmed_lines() {
 #[test]
 fn grip_drag_tracks_the_lines_original_axis() {
     let mut a = app();
-    a.track_on = true;
+    a.prefs.track_on = true;
     let l1 = a.add_entity(line(0, 0, 10, 0));
     a.add_entity(line(3, 5, 3, 12));
 
@@ -611,7 +611,7 @@ fn con_pick_symmetric_needs_three_picks() {
 #[test]
 fn dof_status_reports_fully_constrained_and_flashes_conflicts() {
     let mut a = app();
-    a.infer_constraints = false;
+    a.prefs.infer_constraints = false;
     let l = a.add_entity(line(0, 0, 4, 1));
     // A free line is 4 DOF; report it via a Horizontal constraint on it.
     a.selection = vec![l];
@@ -634,7 +634,7 @@ fn dof_status_reports_fully_constrained_and_flashes_conflicts() {
 #[test]
 fn dof_status_does_not_claim_fully_constrained_with_free_entities() {
     let mut a = app();
-    a.infer_constraints = false;
+    a.prefs.infer_constraints = false;
     // Fully pin one line...
     let l = a.add_entity(line(0, 0, 4, 0));
     a.selection = vec![l];
@@ -654,7 +654,7 @@ fn dof_status_does_not_claim_fully_constrained_with_free_entities() {
 fn inference_preview_predicts_the_horizontal_capture() {
     use oxidraft_document::ConstraintKind;
     let mut a = app();
-    a.infer_constraints = true;
+    a.prefs.infer_constraints = true;
     a.run_command("LINE");
     // Place the first point, then hover a nearly-horizontal cursor far
     // enough to trip the axis threshold.

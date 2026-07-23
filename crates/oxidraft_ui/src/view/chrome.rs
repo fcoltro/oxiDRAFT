@@ -607,14 +607,14 @@ fn menu_items(ui: &mut egui::Ui, app: &mut AppState) {
             app.zoom_extents();
         }
         ui.separator();
-        ui.checkbox(&mut app.snap_on, "Object Snap  (F7)");
-        ui.checkbox(&mut app.grid_on, "Grid  (F8)");
-        ui.checkbox(&mut app.grid_snap_on, "Snap to Grid  (F9)");
-        ui.checkbox(&mut app.polar_on, "Guides — Polar Tracking  (F10)");
-        ui.checkbox(&mut app.track_on, "Track — Extension Tracking  (F11)");
-        ui.checkbox(&mut app.dyn_on, "Dynamic Input  (F12)");
+        ui.checkbox(&mut app.prefs.snap_on, "Object Snap  (F7)");
+        ui.checkbox(&mut app.prefs.grid_on, "Grid  (F8)");
+        ui.checkbox(&mut app.prefs.grid_snap_on, "Snap to Grid  (F9)");
+        ui.checkbox(&mut app.prefs.polar_on, "Guides — Polar Tracking  (F10)");
+        ui.checkbox(&mut app.prefs.track_on, "Track — Extension Tracking  (F11)");
+        ui.checkbox(&mut app.prefs.dyn_on, "Dynamic Input  (F12)");
         ui.separator();
-        ui.checkbox(&mut app.comb_on, "Curvature Comb");
+        ui.checkbox(&mut app.prefs.comb_on, "Curvature Comb");
         ui.separator();
         if ui.button("Reset Tool Options").clicked() {
             app.apply_prefs(&crate::state::UiPrefs::default());
@@ -1200,21 +1200,21 @@ pub(super) fn settings_dialog(ctx: &Context, app: &mut AppState, ui_state: &mut 
                                     ui.columns(
                                         2,
                                         |c| {
-                                            c[0].checkbox(&mut app.snap_on, "Object snap");
-                                            c[0].checkbox(&mut app.grid_on, "Grid");
-                                            c[0].checkbox(&mut app.grid_snap_on, "Snap to grid");
-                                            c[0].checkbox(&mut app.track_on, "Extension tracking");
-                                            c[1].checkbox(&mut app.polar_on, "Polar tracking");
-                                            c[1].checkbox(&mut app.dyn_on, "Dynamic input");
+                                            c[0].checkbox(&mut app.prefs.snap_on, "Object snap");
+                                            c[0].checkbox(&mut app.prefs.grid_on, "Grid");
+                                            c[0].checkbox(&mut app.prefs.grid_snap_on, "Snap to grid");
+                                            c[0].checkbox(&mut app.prefs.track_on, "Extension tracking");
+                                            c[1].checkbox(&mut app.prefs.polar_on, "Polar tracking");
+                                            c[1].checkbox(&mut app.prefs.dyn_on, "Dynamic input");
                                             c[1]
-                                                .checkbox(&mut app.infer_constraints, "Infer constraints")
+                                                .checkbox(&mut app.prefs.infer_constraints, "Infer constraints")
                                                 .on_hover_text(
                                                     "Record coincident constraints when line endpoints \
                                      are drawn with endpoint snaps or chained, and \
                                      horizontal/vertical on near-axis lines",
                                                 );
                                             c[1]
-                                                .checkbox(&mut app.show_constraints, "Constraint badges")
+                                                .checkbox(&mut app.prefs.show_constraints, "Constraint badges")
                                                 .on_hover_text(
                                                     "Show glyphs on the canvas next to constrained \
                                      lines and welded corners",
@@ -1232,7 +1232,7 @@ pub(super) fn settings_dialog(ctx: &Context, app: &mut AppState, ui_state: &mut 
                                         "Snap sensitivity",
                                         |ui| {
                                             ui.add(
-                                                    egui::Slider::new(&mut app.snap_px, 4.0..=24.0)
+                                                    egui::Slider::new(&mut app.prefs.snap_px, 4.0..=24.0)
                                                         .suffix(" px")
                                                         .fixed_decimals(0),
                                                 )
@@ -1246,7 +1246,7 @@ pub(super) fn settings_dialog(ctx: &Context, app: &mut AppState, ui_state: &mut 
                                         "Polar angle step",
                                         |ui| {
                                             egui::ComboBox::from_id_salt("settings_polar_step")
-                                                .selected_text(format!("{}°", app.polar_step as i32))
+                                                .selected_text(format!("{}°", app.prefs.polar_step as i32))
                                                 .width(120.0)
                                                 .show_ui(
                                                     ui,
@@ -1254,12 +1254,12 @@ pub(super) fn settings_dialog(ctx: &Context, app: &mut AppState, ui_state: &mut 
                                                         for step in [5.0, 10.0, 15.0, 22.5, 30.0, 45.0, 90.0] {
                                                             if ui
                                                                 .selectable_label(
-                                                                    (app.polar_step - step).abs() < 1e-6,
+                                                                    (app.prefs.polar_step - step).abs() < 1e-6,
                                                                     format!("{step}°"),
                                                                 )
                                                                 .clicked()
                                                             {
-                                                                app.polar_step = step;
+                                                                app.prefs.polar_step = step;
                                                             }
                                                         }
                                                     },
@@ -1267,7 +1267,7 @@ pub(super) fn settings_dialog(ctx: &Context, app: &mut AppState, ui_state: &mut 
                                         },
                                     );
                                     ui.checkbox(
-                                        &mut app.crosshair,
+                                        &mut app.prefs.crosshair,
                                         "Full-screen crosshair cursor",
                                     );
                                     setting_row(
@@ -1275,7 +1275,7 @@ pub(super) fn settings_dialog(ctx: &Context, app: &mut AppState, ui_state: &mut 
                                         "Pick-box size",
                                         |ui| {
                                             ui.add(
-                                                egui::Slider::new(&mut app.pick_box, 6.0..=24.0)
+                                                egui::Slider::new(&mut app.prefs.pick_box, 6.0..=24.0)
                                                     .suffix(" px")
                                                     .fixed_decimals(0),
                                             );
@@ -1292,28 +1292,28 @@ pub(super) fn settings_dialog(ctx: &Context, app: &mut AppState, ui_state: &mut 
                                         "Wheel speed",
                                         |ui| {
                                             ui.add(
-                                                egui::Slider::new(&mut app.zoom_speed, 0.25..=3.0)
+                                                egui::Slider::new(&mut app.prefs.zoom_speed, 0.25..=3.0)
                                                     .fixed_decimals(2),
                                             );
                                         },
                                     );
-                                    ui.checkbox(&mut app.zoom_to_cursor, "Zoom toward cursor");
-                                    ui.checkbox(&mut app.invert_zoom, "Invert wheel direction");
+                                    ui.checkbox(&mut app.prefs.zoom_to_cursor, "Zoom toward cursor");
+                                    ui.checkbox(&mut app.prefs.invert_zoom, "Invert wheel direction");
                                 },
                             );
                             settings_card(
                                 ui,
                                 "DISPLAY",
                                 |ui| {
-                                    ui.checkbox(&mut app.show_lineweights, "Show line weights");
+                                    ui.checkbox(&mut app.prefs.show_lineweights, "Show line weights");
                                     ui.add_space(2.0);
                                     setting_row(
                                         ui,
                                         "Line weight scale",
                                         |ui| {
                                             ui.add_enabled(
-                                                app.show_lineweights,
-                                                egui::Slider::new(&mut app.lineweight_scale, 1.0..=12.0)
+                                                app.prefs.show_lineweights,
+                                                egui::Slider::new(&mut app.prefs.lineweight_scale, 1.0..=12.0)
                                                     .suffix(" px/mm")
                                                     .fixed_decimals(1),
                                             );
@@ -1325,18 +1325,18 @@ pub(super) fn settings_dialog(ctx: &Context, app: &mut AppState, ui_state: &mut 
                                 ui,
                                 "GRID",
                                 |ui| {
-                                    ui.checkbox(&mut app.grid_dots, "Dotted grid (vs. lines)");
+                                    ui.checkbox(&mut app.prefs.grid_dots, "Dotted grid (vs. lines)");
                                     ui.add_space(2.0);
                                     setting_row(
                                         ui,
                                         "Major line every",
                                         |ui| {
-                                            let mut n = app.grid_major_every;
+                                            let mut n = app.prefs.grid_major_every;
                                             if ui
                                                 .add(egui::DragValue::new(&mut n).speed(0.1).range(2..=20))
                                                 .changed()
                                             {
-                                                app.grid_major_every = n;
+                                                app.prefs.grid_major_every = n;
                                             }
                                             ui.label(
                                                 egui::RichText::new("lines")
@@ -1350,17 +1350,17 @@ pub(super) fn settings_dialog(ctx: &Context, app: &mut AppState, ui_state: &mut 
                                         "Minor colour",
                                         |ui| {
                                             let mut c = [
-                                                app.grid_minor_rgb.0,
-                                                app.grid_minor_rgb.1,
-                                                app.grid_minor_rgb.2,
+                                                app.prefs.grid_minor_rgb.0,
+                                                app.prefs.grid_minor_rgb.1,
+                                                app.prefs.grid_minor_rgb.2,
                                             ];
                                             if ui.color_edit_button_srgb(&mut c).changed() {
-                                                app.grid_minor_rgb = (c[0], c[1], c[2]);
+                                                app.prefs.grid_minor_rgb = (c[0], c[1], c[2]);
                                             }
                                             let mut m = [
-                                                app.grid_major_rgb.0,
-                                                app.grid_major_rgb.1,
-                                                app.grid_major_rgb.2,
+                                                app.prefs.grid_major_rgb.0,
+                                                app.prefs.grid_major_rgb.1,
+                                                app.prefs.grid_major_rgb.2,
                                             ];
                                             ui.label(
                                                 egui::RichText::new("Major")
@@ -1368,7 +1368,7 @@ pub(super) fn settings_dialog(ctx: &Context, app: &mut AppState, ui_state: &mut 
                                                     .color(crate::theme::TEXT_DIM),
                                             );
                                             if ui.color_edit_button_srgb(&mut m).changed() {
-                                                app.grid_major_rgb = (m[0], m[1], m[2]);
+                                                app.prefs.grid_major_rgb = (m[0], m[1], m[2]);
                                             }
                                         },
                                     );
@@ -1463,7 +1463,7 @@ pub(super) fn settings_dialog(ctx: &Context, app: &mut AppState, ui_state: &mut 
                                         ui,
                                         "Default font",
                                         |ui| {
-                                            font_combo(ui, "settings_font", &mut app.text_font);
+                                            font_combo(ui, "settings_font", &mut app.prefs.text_font);
                                         },
                                     );
                                 },
@@ -1472,11 +1472,11 @@ pub(super) fn settings_dialog(ctx: &Context, app: &mut AppState, ui_state: &mut 
                                 ui,
                                 "CURVATURE COMB",
                                 |ui| {
-                                    ui.checkbox(&mut app.comb_on, "Show on selected curves");
+                                    ui.checkbox(&mut app.prefs.comb_on, "Show on selected curves");
                                     ui.add_space(4.0);
                                     ui.add_enabled(
-                                        app.comb_on,
-                                        egui::Slider::new(&mut app.comb_scale, 1.0..=20.0)
+                                        app.prefs.comb_on,
+                                        egui::Slider::new(&mut app.prefs.comb_scale, 1.0..=20.0)
                                             .text("Tooth scale"),
                                     );
                                 },
@@ -2144,11 +2144,11 @@ pub(super) fn status_pill(ctx: &Context, app: &mut AppState, canvas_rect: egui::
                         pill_sep(ui);
                         snap_master(ui, app);
                         ui.add_space(6.0);
-                        snap_chip(ui, &mut app.grid_on, "Grid");
-                        snap_chip(ui, &mut app.grid_snap_on, "GSnap");
-                        snap_chip(ui, &mut app.polar_on, "Guides");
-                        snap_chip(ui, &mut app.track_on, "Track");
-                        snap_chip(ui, &mut app.dyn_on, "Dyn");
+                        snap_chip(ui, &mut app.prefs.grid_on, "Grid");
+                        snap_chip(ui, &mut app.prefs.grid_snap_on, "GSnap");
+                        snap_chip(ui, &mut app.prefs.polar_on, "Guides");
+                        snap_chip(ui, &mut app.prefs.track_on, "Track");
+                        snap_chip(ui, &mut app.prefs.dyn_on, "Dyn");
                         pill_sep(ui);
                         let (wx, wy) = app
                             .view
@@ -2311,7 +2311,7 @@ fn snap_master(ui: &mut egui::Ui, app: &mut AppState) {
     let (srect, sresp) = ui.allocate_exact_size(egui::vec2(48.0, h), egui::Sense::click());
     let (arect, aresp) = ui.allocate_exact_size(egui::vec2(24.0, h), egui::Sense::click());
     ui.spacing_mut().item_spacing.x = saved_sp;
-    let on = app.snap_on;
+    let on = app.prefs.snap_on;
     let union = srect.union(arect);
     let p = ui.painter();
     p.rect(
@@ -2361,7 +2361,7 @@ fn snap_master(ui: &mut egui::Ui, app: &mut AppState) {
         egui::Stroke::NONE,
     ));
     if sresp.clicked() {
-        app.snap_on = !app.snap_on;
+        app.prefs.snap_on = !app.prefs.snap_on;
     }
     if aresp.clicked() {
         open = !open;
@@ -2721,22 +2721,22 @@ pub(super) fn constraint_bar(ctx: &Context, app: &mut AppState, canvas_rect: egu
                 ui.spacing_mut().item_spacing.y = 4.0;
                 if bar_toggle_onoff(
                     ui,
-                    app.infer_constraints,
+                    app.prefs.infer_constraints,
                     "Auto-constrain — infer coincident, horizontal / vertical \
                      and tangent constraints as you draw",
                     crate::icons::Icon::ConstAuto,
                     crate::icons::Icon::ConstAutoOff,
                 ) {
-                    app.infer_constraints = !app.infer_constraints;
+                    app.prefs.infer_constraints = !app.prefs.infer_constraints;
                 }
                 if bar_toggle_onoff(
                     ui,
-                    app.show_constraints,
+                    app.prefs.show_constraints,
                     "Show / hide constraint badges",
                     crate::icons::Icon::ConstShowHide,
                     crate::icons::Icon::ConstShowHideOff,
                 ) {
-                    app.show_constraints = !app.show_constraints;
+                    app.prefs.show_constraints = !app.prefs.show_constraints;
                 }
             });
         });
@@ -2754,11 +2754,11 @@ pub(super) fn constraint_bar(ctx: &Context, app: &mut AppState, canvas_rect: egu
         .show(ctx, |ui| {
             if bar_toggle(
                 ui,
-                app.comb_on,
+                app.prefs.comb_on,
                 "Curvature Comb — show curvature teeth on selected curves",
                 crate::icons::Icon::CurvComb,
             ) {
-                app.comb_on = !app.comb_on;
+                app.prefs.comb_on = !app.prefs.comb_on;
             }
         });
 }
