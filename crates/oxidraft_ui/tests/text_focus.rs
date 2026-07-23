@@ -20,27 +20,6 @@ fn frame(
     });
 }
 
-fn pointer_move(pos: egui::Pos2) -> Vec<egui::Event> {
-    vec![egui::Event::PointerMoved(pos)]
-}
-
-fn pointer_click(pos: egui::Pos2) -> Vec<egui::Event> {
-    vec![
-        egui::Event::PointerButton {
-            pos,
-            button: egui::PointerButton::Primary,
-            pressed: true,
-            modifiers: egui::Modifiers::NONE,
-        },
-        egui::Event::PointerButton {
-            pos,
-            button: egui::PointerButton::Primary,
-            pressed: false,
-            modifiers: egui::Modifiers::NONE,
-        },
-    ]
-}
-
 #[test]
 fn text_tool_focuses_field_and_enter_creates_entity_through_the_real_pipeline() {
     let ctx = egui::Context::default();
@@ -52,9 +31,13 @@ fn text_tool_focuses_field_and_enter_creates_entity_through_the_real_pipeline() 
         app.tool,
         oxidraft_ui::tools::Tool::Text { anchor: None, .. }
     ));
-    let click_pos = egui::pos2(600.0, 400.0);
-    frame(&ctx, &mut app, &mut ui_state, pointer_move(click_pos));
-    frame(&ctx, &mut app, &mut ui_state, pointer_click(click_pos));
+    // Place the anchor directly: synthetic RawInput clicks don't drive egui's
+    // hit-test-based canvas click handler in a headless run_ui (see harness
+    // note). canvas_click is the same entry point that handler calls; the
+    // behaviour under test — the text field grabbing focus once an anchor
+    // exists — is exercised through the frames below.
+    let (sx, sy) = app.view.world_to_screen(0.0, 0.0);
+    app.canvas_click(sx, sy);
     assert!(
         matches!(
             app.tool,
@@ -126,9 +109,7 @@ fn text_tool_focuses_on_a_second_text_right_after_the_first() {
     for (i, world_pt) in [(-2.0, 1.0), (2.0, -1.0)].into_iter().enumerate() {
         app.run_command("TEXT");
         let (sx, sy) = app.view.world_to_screen(world_pt.0, world_pt.1);
-        let pos = egui::pos2(sx as f32, sy as f32);
-        frame(&ctx, &mut app, &mut ui_state, pointer_move(pos));
-        frame(&ctx, &mut app, &mut ui_state, pointer_click(pos));
+        app.canvas_click(sx, sy);
         assert!(
             matches!(
                 app.tool,
@@ -227,9 +208,8 @@ fn text_tool_focuses_after_leaving_a_blend_popup_field_focused() {
         "sanity check: blend's tension field should have grabbed focus on first show"
     );
     app.run_command("TEXT");
-    let click_pos = egui::pos2(600.0, 400.0);
-    frame(&ctx, &mut app, &mut ui_state, pointer_move(click_pos));
-    frame(&ctx, &mut app, &mut ui_state, pointer_click(click_pos));
+    let (sx, sy) = app.view.world_to_screen(0.0, 0.0);
+    app.canvas_click(sx, sy);
     assert!(
         matches!(
             app.tool,

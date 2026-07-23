@@ -23,23 +23,6 @@ fn pointer_move(pos: egui::Pos2) -> Vec<egui::Event> {
     vec![egui::Event::PointerMoved(pos)]
 }
 
-fn pointer_click(pos: egui::Pos2) -> Vec<egui::Event> {
-    vec![
-        egui::Event::PointerButton {
-            pos,
-            button: egui::PointerButton::Primary,
-            pressed: true,
-            modifiers: egui::Modifiers::NONE,
-        },
-        egui::Event::PointerButton {
-            pos,
-            button: egui::PointerButton::Primary,
-            pressed: false,
-            modifiers: egui::Modifiers::NONE,
-        },
-    ]
-}
-
 fn key(key: egui::Key, pressed: bool) -> Vec<egui::Event> {
     vec![egui::Event::Key {
         key,
@@ -89,12 +72,24 @@ fn escape_closes_radial_menu_without_cancelling_the_active_tool() {
     let mut ui_state = UiState::default();
     frame(&ctx, &mut app, &mut ui_state, vec![]);
     app.run_command("POLYLINE");
-    let p1 = egui::pos2(500.0, 400.0);
-    let p2 = egui::pos2(600.0, 340.0);
-    frame(&ctx, &mut app, &mut ui_state, pointer_move(p1));
-    frame(&ctx, &mut app, &mut ui_state, pointer_click(p1));
-    frame(&ctx, &mut app, &mut ui_state, pointer_move(p2));
-    frame(&ctx, &mut app, &mut ui_state, pointer_click(p2));
+    // Place the two polyline points directly. egui's hit-testing (which the
+    // canvas click handler needs, via response.contains_pointer) does not
+    // register under synthetic RawInput in a headless run_ui, so a real
+    // pointer_click can't drive placement here; canvas_click is the exact entry
+    // point that handler calls. The behaviour under test — Escape closing the
+    // radial without cancelling the in-progress tool — is driven through frames.
+    let (s1x, s1y) = app.view.world_to_screen(-1.0, 0.0);
+    app.canvas_click(s1x, s1y);
+    let (s2x, s2y) = app.view.world_to_screen(1.0, 0.5);
+    app.canvas_click(s2x, s2y);
+    // Put the egui pointer over the canvas so Q (a geometric latest-pos check)
+    // opens the radial.
+    frame(
+        &ctx,
+        &mut app,
+        &mut ui_state,
+        pointer_move(egui::pos2(600.0, 400.0)),
+    );
     assert!(
         matches!(& app.tool, oxidraft_ui::tools::Tool::Polyline { pts } if pts.len() ==
         2),
