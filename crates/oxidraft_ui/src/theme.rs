@@ -143,6 +143,7 @@ pub fn apply(ctx: &Context) {
     v.widgets.open.bg_stroke = Stroke::new(1.0, ACCENT_DIM);
     v.widgets.open.corner_radius = r;
     ctx.set_visuals(v);
+    let heading_font = crate::fonts::strong_font_id(ctx, tok::T_LG);
     ctx.global_style_mut(|s| {
         s.spacing.item_spacing = egui::vec2(tok::SP_2, 5.0);
         s.spacing.button_padding = egui::vec2(7.0, 4.0);
@@ -162,7 +163,7 @@ pub fn apply(ctx: &Context) {
                 TextStyle::Button,
                 FontId::new(tok::T_SM, FontFamily::Proportional),
             ),
-            (TextStyle::Heading, crate::fonts::strong_font_id(tok::T_LG)),
+            (TextStyle::Heading, heading_font),
             (
                 TextStyle::Monospace,
                 FontId::new(tok::T_SM, FontFamily::Monospace),

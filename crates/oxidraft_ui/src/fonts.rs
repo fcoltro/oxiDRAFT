@@ -122,9 +122,19 @@ const NOTO_SANS_SEMIBOLD: &[u8] = include_bytes!("../assets/NotoSans-SemiBold.tt
 pub const STRONG_FAMILY: &str = "Noto Sans SemiBold";
 
 /// A [`FontId`] in the bundled SemiBold family at `size`, for chrome text
-/// that should read as genuinely bolder rather than just differently colored.
-pub fn strong_font_id(size: f32) -> FontId {
-    FontId::new(size, FontFamily::Name(STRONG_FAMILY.into()))
+/// that should read as genuinely bolder rather than just differently
+/// colored. Falls back to the default proportional font, like
+/// [`text_font_id`], for the one pass between [`ensure_fonts`] registering
+/// the family and it actually taking effect (`egui::Context::set_fonts`
+/// only applies starting the *next* pass) — most importantly the very first
+/// pass of a fresh context, before any pass has had a chance to register it.
+pub fn strong_font_id(ctx: &Context, size: f32) -> FontId {
+    let target = FontFamily::Name(STRONG_FAMILY.into());
+    if ctx.fonts(|f| f.families().contains(&target)) {
+        FontId::new(size, target)
+    } else {
+        FontId::proportional(size)
+    }
 }
 
 /// Makes sure every font family in `needed` (plus the bundled default) is

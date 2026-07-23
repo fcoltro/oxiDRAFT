@@ -425,7 +425,10 @@ pub(crate) fn rich_tooltip(ui: &mut Ui, text: &str) {
         ui.spacing_mut().item_spacing.x = 7.0;
         ui.label(
             egui::RichText::new(head)
-                .font(crate::fonts::strong_font_id(crate::theme::tok::T_SM))
+                .font(crate::fonts::strong_font_id(
+                    ui.ctx(),
+                    crate::theme::tok::T_SM,
+                ))
                 .color(crate::theme::TEXT),
         );
         if let Some(k) = keys.filter(|k| !k.is_empty()) {
