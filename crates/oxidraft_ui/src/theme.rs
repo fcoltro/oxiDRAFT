@@ -162,10 +162,7 @@ pub fn apply(ctx: &Context) {
                 TextStyle::Button,
                 FontId::new(tok::T_SM, FontFamily::Proportional),
             ),
-            (
-                TextStyle::Heading,
-                FontId::new(tok::T_LG, FontFamily::Proportional),
-            ),
+            (TextStyle::Heading, crate::fonts::strong_font_id(tok::T_LG)),
             (
                 TextStyle::Monospace,
                 FontId::new(tok::T_SM, FontFamily::Monospace),

@@ -93,6 +93,13 @@ fn run_gui() -> eframe::Result<()> {
         options,
         Box::new(|cc| {
             log("Window created. Using the adaptive-tessellation egui painter.");
+            // Registers the bundled UI fonts before the first frame renders.
+            // `ensure_fonts` is also called every frame from `draw_ui`, but
+            // `Context::set_fonts` doesn't take effect until the *next*
+            // frame's font resolution — without this, the first frame would
+            // try to lay out text in a family that isn't registered yet and
+            // panic.
+            oxidraft_ui::fonts::ensure_fonts(&cc.egui_ctx, &Default::default());
             let mut app = AppState::new(1200.0, 800.0);
             if let Some(s) = cc.storage.and_then(|s| s.get_string(PREFS_KEY)) {
                 app.apply_prefs(&UiPrefs::deserialize(&s));

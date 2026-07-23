@@ -113,6 +113,19 @@ fn initialized_id() -> egui::Id {
 }
 
 const NOTO_SANS: &[u8] = include_bytes!("../assets/NotoSans-Regular.ttf");
+const NOTO_SANS_SEMIBOLD: &[u8] = include_bytes!("../assets/NotoSans-SemiBold.ttf");
+
+/// Name of the bundled heavier-weight family, for chrome text that needs
+/// real emphasis (headings, `.strong()` labels) rather than color alone.
+/// Always registered by [`ensure_fonts`]; use [`strong_font_id`] to build a
+/// [`FontId`] for it.
+pub const STRONG_FAMILY: &str = "Noto Sans SemiBold";
+
+/// A [`FontId`] in the bundled SemiBold family at `size`, for chrome text
+/// that should read as genuinely bolder rather than just differently colored.
+pub fn strong_font_id(size: f32) -> FontId {
+    FontId::new(size, FontFamily::Name(STRONG_FAMILY.into()))
+}
 
 /// Makes sure every font family in `needed` (plus the bundled default) is
 /// loaded into egui's font atlas, re-registering fonts only when the
@@ -134,6 +147,17 @@ pub fn ensure_fonts(ctx: &Context, needed: &BTreeSet<String>) {
     if let Some(prop) = fonts.families.get_mut(&FontFamily::Proportional) {
         prop.insert(0, "Noto Sans".to_owned());
     }
+    fonts.font_data.insert(
+        STRONG_FAMILY.to_owned(),
+        std::sync::Arc::new(egui::FontData::from_static(NOTO_SANS_SEMIBOLD)),
+    );
+    let mut strong_chain = vec![STRONG_FAMILY.to_owned()];
+    if let Some(defaults) = fonts.families.get(&FontFamily::Proportional) {
+        strong_chain.extend(defaults.iter().cloned());
+    }
+    fonts
+        .families
+        .insert(FontFamily::Name(STRONG_FAMILY.into()), strong_chain);
     for family in &want {
         if let Some((bytes, index)) = family_bytes(family) {
             let mut data = egui::FontData::from_owned(bytes);

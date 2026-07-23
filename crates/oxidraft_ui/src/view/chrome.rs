@@ -1024,8 +1024,7 @@ pub(super) fn line_props_dialog(ctx: &Context, app: &mut AppState, ui_state: &mu
             ui.add_space(10.0);
             ui.label(
                 egui::RichText::new("Line Weight & Type")
-                    .size(14.0)
-                    .strong()
+                    .font(crate::fonts::strong_font_id(14.0))
                     .color(crate::theme::TEXT),
             );
             prop_section(ui, "NEW OBJECTS");
@@ -1142,8 +1141,7 @@ pub(super) fn settings_dialog(ctx: &Context, app: &mut AppState, ui_state: &mut 
                 ui.add_space(4.0);
                 ui.label(
                     egui::RichText::new("Settings")
-                        .size(16.0)
-                        .strong()
+                        .font(crate::fonts::strong_font_id(16.0))
                         .color(crate::theme::TEXT),
                 );
                 ui.label(
@@ -1562,8 +1560,7 @@ fn settings_card(ui: &mut egui::Ui, title: &str, body: impl FnOnce(&mut egui::Ui
             ui.set_width(ui.available_width());
             ui.label(
                 egui::RichText::new(title)
-                    .size(11.0)
-                    .strong()
+                    .font(crate::fonts::strong_font_id(11.0))
                     .color(crate::theme::TEXT_DIM),
             );
             ui.add_space(9.0);
@@ -2411,9 +2408,8 @@ fn snap_master(ui: &mut egui::Ui, app: &mut AppState) {
                         ui.set_min_width(168.0);
                         ui.label(
                             egui::RichText::new("OBJECT SNAP")
-                                .size(10.0)
-                                .color(crate::theme::TEXT_DIM)
-                                .strong(),
+                                .font(crate::fonts::strong_font_id(10.0))
+                                .color(crate::theme::TEXT_DIM),
                         );
                         ui.add_space(4.0);
                         for (kind, label) in kinds {
@@ -2893,9 +2889,8 @@ fn inspector_header(ui: &mut egui::Ui, app: &AppState) {
     ui.horizontal(|ui| {
         ui.label(
             egui::RichText::new("PROPERTIES")
-                .size(11.0)
-                .color(crate::theme::TEXT_DIM)
-                .strong(),
+                .font(crate::fonts::strong_font_id(11.0))
+                .color(crate::theme::TEXT_DIM),
         );
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
             let n = app.selection.len();
@@ -2945,9 +2940,8 @@ fn layers_section(ui: &mut egui::Ui, app: &mut AppState) {
     ui.horizontal(|ui| {
         ui.label(
             egui::RichText::new("LAYERS")
-                .size(10.0)
-                .color(crate::theme::TEXT_DIM)
-                .strong(),
+                .font(crate::fonts::strong_font_id(10.0))
+                .color(crate::theme::TEXT_DIM),
         );
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
             if crate::icons::icon_button_sized(
@@ -3489,9 +3483,8 @@ fn prop_section(ui: &mut egui::Ui, title: &str) {
     ui.add_space(15.0);
     ui.add(egui::Label::new(
         egui::RichText::new(title)
-            .size(10.0)
-            .color(crate::theme::TEXT_DIM)
-            .strong(),
+            .font(crate::fonts::strong_font_id(10.0))
+            .color(crate::theme::TEXT_DIM),
     ));
     ui.add_space(7.0);
 }
@@ -3639,8 +3632,7 @@ fn object_header(ui: &mut egui::Ui, name: &str, subtitle: &str, icon: crate::ico
             ui.add_space(2.0);
             ui.label(
                 egui::RichText::new(name)
-                    .size(14.0)
-                    .strong()
+                    .font(crate::fonts::strong_font_id(14.0))
                     .color(crate::theme::TEXT),
             );
             ui.label(
@@ -4011,7 +4003,7 @@ fn selection_properties(ui: &mut egui::Ui, app: &mut AppState) {
     } else {
         ui.add(egui::Label::new(
             egui::RichText::new(format!("{} objects selected", sel.len()))
-                .size(14.0)
+                .font(crate::fonts::strong_font_id(14.0))
                 .strong(),
         ));
     }

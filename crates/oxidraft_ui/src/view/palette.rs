@@ -641,9 +641,8 @@ pub(super) fn command_bar(
                                             ui.add_space(4.0);
                                             ui.label(
                                                 egui::RichText::new(e.group.to_uppercase())
-                                                    .size(10.0)
-                                                    .color(theme::TEXT_DIM)
-                                                    .strong(),
+                                                    .font(crate::fonts::strong_font_id(10.0))
+                                                    .color(theme::TEXT_DIM),
                                             );
                                             ui.add_space(2.0);
                                         }
