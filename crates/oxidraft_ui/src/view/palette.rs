@@ -13,7 +13,6 @@ enum Action {
     ToggleGrid,
     ToggleSnap,
     ToggleGridSnap,
-    ToggleOrtho,
     TogglePolar,
     ToggleTrack,
     ToggleDyn,
@@ -317,14 +316,6 @@ const ENTRIES: &[Entry] = &[
         icon: Icon::Pan,
         action: Action::ToggleDyn,
     },
-    Entry {
-        name: "Toggle Ortho",
-        hint: "",
-        keywords: "horizontal vertical lock",
-        group: "View",
-        icon: Icon::Pan,
-        action: Action::ToggleOrtho,
-    },
 ];
 
 const GROUP_ORDER: [&str; 3] = ["Tools", "Modify", "View"];
@@ -358,18 +349,7 @@ fn run_entry(app: &mut AppState, e: &Entry) {
         Action::ToggleGrid => app.grid_on = !app.grid_on,
         Action::ToggleSnap => app.snap_on = !app.snap_on,
         Action::ToggleGridSnap => app.grid_snap_on = !app.grid_snap_on,
-        Action::ToggleOrtho => {
-            app.ortho_on = !app.ortho_on;
-            if app.ortho_on {
-                app.polar_on = false;
-            }
-        }
-        Action::TogglePolar => {
-            app.polar_on = !app.polar_on;
-            if app.polar_on {
-                app.ortho_on = false;
-            }
-        }
+        Action::TogglePolar => app.polar_on = !app.polar_on,
         Action::ToggleTrack => app.track_on = !app.track_on,
         Action::ToggleDyn => app.dyn_on = !app.dyn_on,
     }

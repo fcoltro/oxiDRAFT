@@ -36,7 +36,6 @@ pub struct AppState {
     pub snap_on: bool,
     pub grid_on: bool,
     pub grid_snap_on: bool,
-    pub ortho_on: bool,
     pub polar_on: bool,
     pub track_on: bool,
     pub dyn_on: bool,
@@ -99,7 +98,6 @@ pub struct UiPrefs {
     pub snap_on: bool,
     pub grid_on: bool,
     pub grid_snap_on: bool,
-    pub ortho_on: bool,
     pub polar_on: bool,
     pub track_on: bool,
     pub dyn_on: bool,
@@ -129,7 +127,6 @@ impl Default for UiPrefs {
             snap_on: true,
             grid_on: true,
             grid_snap_on: false,
-            ortho_on: false,
             polar_on: true,
             track_on: true,
             dyn_on: true,
@@ -168,11 +165,10 @@ impl UiPrefs {
         let rgb = |c: (u8, u8, u8)| format!("{},{},{}", c.0, c.1, c.2);
         let font = self.text_font.as_deref().unwrap_or("");
         format!(
-            "snap={}\ngrid={}\ngsnap={}\northo={}\npolar={}\ntrack={}\ndyn={}\ncomb={}\ncomb_scale={}\nsnap_px={}\npolar_step={}\nzoom_speed={}\nzoom_cursor={}\ninvert_zoom={}\ncrosshair={}\npick_box={}\nlw_show={}\nlw_scale={}\ngrid_dots={}\ngrid_major={}\ngrid_minor={}\ngrid_majorc={}\nfont={}\ninfer_con={}\nshow_con={}\n",
+            "snap={}\ngrid={}\ngsnap={}\npolar={}\ntrack={}\ndyn={}\ncomb={}\ncomb_scale={}\nsnap_px={}\npolar_step={}\nzoom_speed={}\nzoom_cursor={}\ninvert_zoom={}\ncrosshair={}\npick_box={}\nlw_show={}\nlw_scale={}\ngrid_dots={}\ngrid_major={}\ngrid_minor={}\ngrid_majorc={}\nfont={}\ninfer_con={}\nshow_con={}\n",
             b(self.snap_on),
             b(self.grid_on),
             b(self.grid_snap_on),
-            b(self.ortho_on),
             b(self.polar_on),
             b(self.track_on),
             b(self.dyn_on),
@@ -211,7 +207,6 @@ impl UiPrefs {
                 "snap" => p.snap_on = on,
                 "grid" => p.grid_on = on,
                 "gsnap" => p.grid_snap_on = on,
-                "ortho" => p.ortho_on = on,
                 "polar" => p.polar_on = on,
                 "track" => p.track_on = on,
                 "dyn" => p.dyn_on = on,
@@ -283,7 +278,6 @@ impl AppState {
             snap_on: self.snap_on,
             grid_on: self.grid_on,
             grid_snap_on: self.grid_snap_on,
-            ortho_on: self.ortho_on,
             polar_on: self.polar_on,
             track_on: self.track_on,
             dyn_on: self.dyn_on,
@@ -309,12 +303,10 @@ impl AppState {
     }
 
     /// Loads a saved [`UiPrefs`] back into this state, e.g. on startup.
-    /// Normalizes `ortho`/`polar` afterward since they're mutually exclusive.
     pub fn apply_prefs(&mut self, p: &UiPrefs) {
         self.snap_on = p.snap_on;
         self.grid_on = p.grid_on;
         self.grid_snap_on = p.grid_snap_on;
-        self.ortho_on = p.ortho_on;
         self.polar_on = p.polar_on;
         self.track_on = p.track_on;
         self.dyn_on = p.dyn_on;
@@ -336,9 +328,6 @@ impl AppState {
         self.text_font = p.text_font.clone();
         self.infer_constraints = p.infer_constraints;
         self.show_constraints = p.show_constraints;
-        if self.ortho_on {
-            self.polar_on = false;
-        }
     }
 }
 
@@ -500,7 +489,6 @@ impl AppState {
             snap_on: true,
             grid_on: true,
             grid_snap_on: false,
-            ortho_on: false,
             polar_on: true,
             track_on: true,
             dyn_on: true,
@@ -641,8 +629,8 @@ impl AppState {
 
     /// Recomputes `cursor_world`, `active_snap`, and the active alignment
     /// guides from a new screen-space pointer position (`sx`, `sy`). Called
-    /// on every mouse-move; folds in point snapping, grid snapping, ortho,
-    /// polar, and axis tracking in that priority order.
+    /// on every mouse-move; folds in point snapping, grid snapping, polar,
+    /// and axis tracking in that priority order.
     pub fn pointer_moved(&mut self, sx: f64, sy: f64) {
         let (wx, wy) = self.view.screen_to_world(sx, sy);
         let dragged_entity = self.interaction.grip_drag.as_ref().map(|d| d.entity_id);
@@ -675,26 +663,6 @@ impl AppState {
             self.cursor_world = sp.pos;
         } else if self.grid_snap_on && allow_snap {
             self.cursor_world = self.view.snap_to_grid(wx, wy);
-        } else if self.ortho_on {
-            if let Some(ref_pt) = self.tool.reference_point() {
-                let (rx, ry) = ref_pt.to_f64();
-                let dx = wx - rx;
-                let dy = wy - ry;
-                let angle_rad = if dx.abs() >= dy.abs() {
-                    self.cursor_world = (wx, ry);
-                    if wx >= rx { 0.0 } else { std::f64::consts::PI }
-                } else {
-                    self.cursor_world = (rx, wy);
-                    if wy >= ry {
-                        std::f64::consts::FRAC_PI_2
-                    } else {
-                        -std::f64::consts::FRAC_PI_2
-                    }
-                };
-                self.interaction.active_guide = Some(((rx, ry), angle_rad));
-            } else {
-                self.cursor_world = (wx, wy);
-            }
         } else {
             if let Some(ref_pt) = self.tool.reference_point() {
                 let (rx, ry) = ref_pt.to_f64();
@@ -3466,7 +3434,6 @@ mod tests {
             snap_on: false,
             grid_on: true,
             grid_snap_on: true,
-            ortho_on: true,
             polar_on: false,
             track_on: false,
             dyn_on: true,
@@ -3639,18 +3606,6 @@ mod tests {
             dim.dist_f64(&Point2d::from_f64(0.0, 0.0)) < 1e-6,
             "vertex at intersection"
         );
-    }
-
-    #[test]
-    fn apply_prefs_keeps_ortho_polar_exclusive() {
-        let mut a = app();
-        let p = UiPrefs {
-            ortho_on: true,
-            polar_on: true,
-            ..Default::default()
-        };
-        a.apply_prefs(&p);
-        assert!(a.ortho_on && !a.polar_on, "ortho should win over polar");
     }
 
     #[test]
@@ -4872,24 +4827,6 @@ mod tests {
         a.canvas_click(400.0, 300.0);
         assert_eq!(a.plot_window, None, "no area, no window");
         assert!(a.plot_dialog_open && a.plot_window_mode);
-    }
-
-    #[test]
-    fn ortho_mode_constrains_cursor_to_axis() {
-        let mut a = app();
-        a.snap_on = false;
-        a.ortho_on = true;
-        a.run_command("LINE");
-        let (s1x, s1y) = a.view.world_to_screen(0.0, 0.0);
-        a.canvas_click(s1x, s1y);
-        let (s2x, s2y) = a.view.world_to_screen(8.0, 3.0);
-        a.pointer_moved(s2x, s2y);
-        assert!((a.cursor_world.0 - 8.0).abs() < 1e-4);
-        assert!(a.cursor_world.1.abs() < 1e-4);
-        let (s3x, s3y) = a.view.world_to_screen(2.0, 9.0);
-        a.pointer_moved(s3x, s3y);
-        assert!(a.cursor_world.0.abs() < 1e-4);
-        assert!((a.cursor_world.1 - 9.0).abs() < 1e-4);
     }
 
     #[test]

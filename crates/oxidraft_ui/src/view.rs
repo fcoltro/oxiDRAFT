@@ -881,9 +881,6 @@ fn canvas(root_ui: &mut egui::Ui, app: &mut AppState, ui_state: &mut UiState, pa
         }
         if ui.input(|i| i.key_pressed(egui::Key::F10)) {
             app.polar_on = !app.polar_on;
-            if app.polar_on {
-                app.ortho_on = false;
-            }
         }
         if ui.input(|i| i.key_pressed(egui::Key::F11)) {
             app.track_on = !app.track_on;

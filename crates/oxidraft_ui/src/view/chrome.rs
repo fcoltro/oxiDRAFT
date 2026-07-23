@@ -610,16 +610,7 @@ fn menu_items(ui: &mut egui::Ui, app: &mut AppState) {
         ui.checkbox(&mut app.snap_on, "Object Snap  (F7)");
         ui.checkbox(&mut app.grid_on, "Grid  (F8)");
         ui.checkbox(&mut app.grid_snap_on, "Snap to Grid  (F9)");
-        let mut polar = app.polar_on;
-        if ui
-            .checkbox(&mut polar, "Guides — Polar Tracking  (F10)")
-            .changed()
-        {
-            app.polar_on = polar;
-            if polar {
-                app.ortho_on = false;
-            }
-        }
+        ui.checkbox(&mut app.polar_on, "Guides — Polar Tracking  (F10)");
         ui.checkbox(&mut app.track_on, "Track — Extension Tracking  (F11)");
         ui.checkbox(&mut app.dyn_on, "Dynamic Input  (F12)");
         ui.separator();
@@ -1213,20 +1204,7 @@ pub(super) fn settings_dialog(ctx: &Context, app: &mut AppState, ui_state: &mut 
                                             c[0].checkbox(&mut app.grid_on, "Grid");
                                             c[0].checkbox(&mut app.grid_snap_on, "Snap to grid");
                                             c[0].checkbox(&mut app.track_on, "Extension tracking");
-                                            let mut polar = app.polar_on;
-                                            if c[1].checkbox(&mut polar, "Polar tracking").changed() {
-                                                app.polar_on = polar;
-                                                if polar {
-                                                    app.ortho_on = false;
-                                                }
-                                            }
-                                            let mut ortho = app.ortho_on;
-                                            if c[1].checkbox(&mut ortho, "Ortho").changed() {
-                                                app.ortho_on = ortho;
-                                                if ortho {
-                                                    app.polar_on = false;
-                                                }
-                                            }
+                                            c[1].checkbox(&mut app.polar_on, "Polar tracking");
                                             c[1].checkbox(&mut app.dyn_on, "Dynamic input");
                                             c[1]
                                                 .checkbox(&mut app.infer_constraints, "Infer constraints")
@@ -2168,13 +2146,7 @@ pub(super) fn status_pill(ctx: &Context, app: &mut AppState, canvas_rect: egui::
                         ui.add_space(6.0);
                         snap_chip(ui, &mut app.grid_on, "Grid");
                         snap_chip(ui, &mut app.grid_snap_on, "GSnap");
-                        let mut polar = app.polar_on;
-                        if snap_chip(ui, &mut polar, "Guides") {
-                            app.polar_on = polar;
-                            if app.polar_on {
-                                app.ortho_on = false;
-                            }
-                        }
+                        snap_chip(ui, &mut app.polar_on, "Guides");
                         snap_chip(ui, &mut app.track_on, "Track");
                         snap_chip(ui, &mut app.dyn_on, "Dyn");
                         pill_sep(ui);
