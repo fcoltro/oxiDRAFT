@@ -427,7 +427,7 @@ fn command_row(ui: &mut egui::Ui, e: &Entry, selected: bool) -> egui::Response {
         egui::pos2(icon_box.right() + 12.0, rect.center().y),
         egui::Align2::LEFT_CENTER,
         e.name,
-        egui::FontId::proportional(13.5),
+        egui::FontId::proportional(14.0),
         theme::TEXT,
     );
     if !e.hint.is_empty() {
@@ -667,14 +667,14 @@ pub(super) fn command_bar(
                                 keycap(ui, "↑↓");
                                 ui.label(
                                     egui::RichText::new("navigate")
-                                        .size(11.5)
+                                        .size(12.0)
                                         .color(theme::TEXT_DIM),
                                 );
                                 ui.add_space(8.0);
                                 keycap(ui, "↵");
                                 ui.label(
                                     egui::RichText::new("select")
-                                        .size(11.5)
+                                        .size(12.0)
                                         .color(theme::TEXT_DIM),
                                 );
                                 ui.with_layout(

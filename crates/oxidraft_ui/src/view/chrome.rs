@@ -182,7 +182,7 @@ fn search_button() -> impl egui::Widget {
             egui::pos2(rect.left() + 28.0, rect.center().y),
             egui::Align2::LEFT_CENTER,
             "Search or run a command",
-            egui::FontId::proportional(12.5),
+            egui::FontId::proportional(13.0),
             crate::theme::TEXT_DIM,
         );
         let cap = |p: &egui::Painter, right: f32, text: &str| -> f32 {
@@ -234,7 +234,7 @@ fn export_button() -> impl egui::Widget {
             rect.center(),
             egui::Align2::CENTER_CENTER,
             "Export",
-            egui::FontId::proportional(12.5),
+            egui::FontId::proportional(13.0),
             Color32::WHITE,
         );
         resp
@@ -333,7 +333,7 @@ pub(super) fn plot_dialog(ctx: &Context, app: &mut AppState) {
             ui.set_width(260.0);
             ui.label(
                 egui::RichText::new("Renders the drawing onto one PDF page, fit to the paper.")
-                    .size(11.5)
+                    .size(12.0)
                     .color(crate::theme::TEXT_DIM),
             );
             ui.add_space(8.0);
@@ -347,13 +347,13 @@ pub(super) fn plot_dialog(ctx: &Context, app: &mut AppState) {
                         Some((x0, y0, x1, y1)) => {
                             ui.label(
                                 egui::RichText::new(format!("{:.1} × {:.1}", x1 - x0, y1 - y0))
-                                    .size(11.5),
+                                    .size(12.0),
                             );
                         }
                         None => {
                             ui.label(
                                 egui::RichText::new("not set")
-                                    .size(11.5)
+                                    .size(12.0)
                                     .color(crate::theme::TEXT_DIM),
                             );
                         }
@@ -1150,7 +1150,7 @@ pub(super) fn settings_dialog(ctx: &Context, app: &mut AppState, ui_state: &mut 
                     egui::RichText::new(
                             "Preferences, drawing aids & document defaults — drag the bottom edge to resize",
                         )
-                        .size(11.5)
+                        .size(12.0)
                         .color(crate::theme::TEXT_DIM),
                 );
                 ui.add_space(8.0);
@@ -1562,7 +1562,7 @@ fn settings_card(ui: &mut egui::Ui, title: &str, body: impl FnOnce(&mut egui::Ui
             ui.set_width(ui.available_width());
             ui.label(
                 egui::RichText::new(title)
-                    .size(10.5)
+                    .size(11.0)
                     .strong()
                     .color(crate::theme::TEXT_DIM),
             );
@@ -1578,7 +1578,7 @@ fn setting_row(ui: &mut egui::Ui, label: &str, add: impl FnOnce(&mut egui::Ui)) 
             egui::pos2(rect.left(), rect.center().y),
             egui::Align2::LEFT_CENTER,
             label,
-            egui::FontId::proportional(12.5),
+            egui::FontId::proportional(13.0),
             crate::theme::TEXT,
         );
         add(ui);
@@ -2140,7 +2140,7 @@ pub(super) fn status_pill(ctx: &Context, app: &mut AppState, canvas_rect: egui::
                                     egui::pos2(rect.left(), rect.center().y),
                                     egui::Align2::LEFT_CENTER,
                                     text,
-                                    egui::FontId::monospace(12.5),
+                                    egui::FontId::monospace(13.0),
                                     crate::theme::ACCENT_BRIGHT,
                                 );
                             };
@@ -2211,7 +2211,7 @@ pub(super) fn status_pill(ctx: &Context, app: &mut AppState, canvas_rect: egui::
                         unit_dropdown(ui, app);
                         if let Some((text, color)) = &dof_chip {
                             pill_sep(ui);
-                            ui.label(egui::RichText::new(text).size(11.5).color(*color))
+                            ui.label(egui::RichText::new(text).size(12.0).color(*color))
                                 .on_hover_text(
                                     "Degrees of freedom left in the selected \
                                      constraint group (or the whole sketch when \
@@ -2451,7 +2451,7 @@ fn pill_sep(ui: &mut egui::Ui) {
 fn snap_chip(ui: &mut egui::Ui, on: &mut bool, label: &str) -> bool {
     let galley = ui.painter().layout_no_wrap(
         label.to_string(),
-        egui::FontId::proportional(11.5),
+        egui::FontId::proportional(12.0),
         crate::theme::TEXT,
     );
     let w = galley.size().x + 18.0;
@@ -2481,7 +2481,7 @@ fn snap_chip(ui: &mut egui::Ui, on: &mut bool, label: &str) -> bool {
         rect.center(),
         egui::Align2::CENTER_CENTER,
         label,
-        egui::FontId::proportional(11.5),
+        egui::FontId::proportional(12.0),
         fg,
     );
     if resp.clicked() {
@@ -3174,9 +3174,9 @@ pub(super) fn tool_hint_panel(ctx: &Context, app: &AppState, canvas_rect: egui::
     let title_col = crate::theme::ACCENT_BRIGHT.gamma_multiply(0.5);
     let key_col = crate::theme::TEXT.gamma_multiply(0.5);
     let desc_col = crate::theme::TEXT_DIM.gamma_multiply(0.5);
-    let title_font = egui::FontId::proportional(11.5);
+    let title_font = egui::FontId::proportional(12.0);
     let key_font = egui::FontId::monospace(11.0);
-    let desc_font = egui::FontId::proportional(11.5);
+    let desc_font = egui::FontId::proportional(12.0);
     let row_gap = 6.0;
     let line_gap = 5.0;
     let cell_min = 46.0;
@@ -3645,7 +3645,7 @@ fn object_header(ui: &mut egui::Ui, name: &str, subtitle: &str, icon: crate::ico
             );
             ui.label(
                 egui::RichText::new(subtitle)
-                    .size(11.5)
+                    .size(12.0)
                     .monospace()
                     .color(crate::theme::TEXT_DIM),
             );
@@ -3786,7 +3786,7 @@ fn appearance_row(
                 ui.set_height(22.0);
                 ui.label(
                     egui::RichText::new(label)
-                        .size(12.5)
+                        .size(13.0)
                         .color(crate::theme::TEXT_DIM),
                 );
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
@@ -3805,7 +3805,7 @@ fn appearance_row(
                     ui.add_space(2.0);
                     ui.label(
                         egui::RichText::new(value)
-                            .size(12.5)
+                            .size(13.0)
                             .color(crate::theme::TEXT),
                     );
                     if let Some(c) = swatch {

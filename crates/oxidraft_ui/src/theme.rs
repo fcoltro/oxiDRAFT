@@ -12,7 +12,11 @@ pub mod tok {
     pub const R_MD: u8 = 11;
     pub const R_LG: u8 = 16;
     pub const T_XS: f32 = 11.0;
-    pub const T_SM: f32 = 12.5;
+    // Whole pixel values only: egui/ab_glyph rasterizes each font size into
+    // its own texture-atlas entry, and a fractional size (e.g. the old 12.5)
+    // forces every glyph edge through extra sub-pixel antialiasing at 100%
+    // display scaling — the single biggest source of "slightly blurry" text.
+    pub const T_SM: f32 = 13.0;
     pub const T_LG: f32 = 15.0;
 }
 /// The canvas's background color, behind all drawn geometry.

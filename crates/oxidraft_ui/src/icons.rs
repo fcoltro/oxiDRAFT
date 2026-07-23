@@ -447,7 +447,7 @@ pub(crate) fn rich_tooltip(ui: &mut Ui, text: &str) {
     if !desc.is_empty() {
         ui.label(
             egui::RichText::new(desc)
-                .size(11.5)
+                .size(12.0)
                 .color(crate::theme::TEXT_DIM),
         );
     }
