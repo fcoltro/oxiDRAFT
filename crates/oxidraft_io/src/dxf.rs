@@ -465,6 +465,11 @@ fn parse_spline(rec: &[Pair]) -> Vec<EntityKind> {
             _ => {}
         }
     }
+    // Bound an absurdly dense control/fit set (crafted-file DoS) so a
+    // pathological curve can't be built — see [`crate::MAX_CURVE_CONTROL_POINTS`].
+    control.truncate(crate::MAX_CURVE_CONTROL_POINTS);
+    weights.truncate(crate::MAX_CURVE_CONTROL_POINTS);
+    fit.truncate(crate::MAX_CURVE_CONTROL_POINTS);
     if control.len() >= 2 {
         let weights = if weights.len() == control.len() && weights.iter().all(|&w| w > 0.0) {
             weights

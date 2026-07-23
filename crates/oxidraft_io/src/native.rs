@@ -833,7 +833,12 @@ fn parse_control_data<'a, I: Iterator<Item = &'a str>>(
     let n: usize = tok.next().and_then(|v| v.parse().ok())?;
     let mut points = Vec::with_capacity(n.min(1024));
     let mut weights = Vec::with_capacity(n.min(1024));
-    for _ in 0..n {
+    // Bound the *actual* points read, not the declared count: a huge declared
+    // count with few real tokens still loads (the loop breaks on token
+    // exhaustion), but a crafted line that really carries a pathological
+    // number of points is truncated so a high-degree rational curve can't
+    // freeze rendering. See [`crate::MAX_CURVE_CONTROL_POINTS`].
+    for _ in 0..n.min(crate::MAX_CURVE_CONTROL_POINTS) {
         let Some(p) = tok.next() else { break };
         points.push(parse_pt(Some(p)));
         weights.push(parse_num(tok.next().unwrap_or("1")));
@@ -1837,6 +1842,32 @@ mod tests {
         } else {
             panic!("expected a Rational curve after round-trip");
         }
+    }
+
+    #[test]
+    fn control_point_count_is_capped() {
+        let cap = crate::MAX_CURVE_CONTROL_POINTS;
+
+        // A crafted line that really carries far more points than the cap is
+        // truncated, so a pathological high-degree rational curve can't be
+        // built and freeze rendering.
+        let mut toks: Vec<String> = vec![(cap + 500).to_string()];
+        for _ in 0..(cap + 500) {
+            toks.push("1;1".into());
+            toks.push("1".into());
+        }
+        let refs: Vec<&str> = toks.iter().map(String::as_str).collect();
+        let (points, _) = parse_control_data(&mut refs.into_iter()).expect("still loads, bounded");
+        assert!(
+            points.len() <= cap,
+            "control points must be capped: {}",
+            points.len()
+        );
+
+        // A normal control set (count, then point/weight pairs) still parses.
+        let tokens = ["4", "0;0", "1", "2;4", "1", "6;4", "1", "8;0", "1"];
+        let mut ok = tokens.into_iter();
+        assert!(parse_control_data(&mut ok).is_some());
     }
 
     #[test]
