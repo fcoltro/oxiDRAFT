@@ -210,24 +210,52 @@ impl RationalBezier {
         } else {
             floor
         };
-        let mut out = vec![self.evaluate(0.0)];
-        self.flatten_into(0.0, 1.0, tol, 0, &mut out);
+        let a = self.evaluate(0.0);
+        let b = self.evaluate(1.0);
+        let mut out = vec![a];
+        self.flatten_into(0.0, a, 1.0, b, tol * tol, 0, &mut out);
         out
     }
 
-    fn flatten_into(&self, t0: f64, t1: f64, tol: f64, depth: u32, out: &mut Vec<Point2d>) {
-        let a = self.evaluate(t0);
-        let b = self.evaluate(t1);
+    /// Adaptive flattening of `[t0, t1]`, whose endpoints `a`/`b` the caller
+    /// has already evaluated.
+    ///
+    /// Deviation is measured at three interior parameters against the *chord*,
+    /// not just at the midpoint against the chord's midpoint. A midpoint-only
+    /// test is exactly zero for any span antisymmetric about its middle — an
+    /// S-shape returns to the chord centre — so such a curve was declared flat
+    /// and tessellated to a bare straight line at every tolerance. (Both other
+    /// flatteners in the tree already defend against this by seeding several
+    /// initial spans; sampling inside the test fixes every recursion level, not
+    /// just the first.) Passing the endpoints in rather than re-evaluating them
+    /// each level pays for the extra samples.
+    #[allow(clippy::too_many_arguments)]
+    fn flatten_into(
+        &self,
+        t0: f64,
+        a: Point2d,
+        t1: f64,
+        b: Point2d,
+        tol_sq: f64,
+        depth: u32,
+        out: &mut Vec<Point2d>,
+    ) {
         let tm = 0.5 * (t0 + t1);
         let m = self.evaluate(tm);
-        let cmx = 0.5 * (a.x + b.x);
-        let cmy = 0.5 * (a.y + b.y);
-        let dev = ((m.x - cmx).powi(2) + (m.y - cmy).powi(2)).sqrt();
-        if dev <= tol || depth >= 24 {
+        let mut worst = crate::util::point_segment_dist_sq((m.x, m.y), (a.x, a.y), (b.x, b.y));
+        for f in [0.25, 0.75] {
+            let p = self.evaluate(t0 + (t1 - t0) * f);
+            worst = worst.max(crate::util::point_segment_dist_sq(
+                (p.x, p.y),
+                (a.x, a.y),
+                (b.x, b.y),
+            ));
+        }
+        if worst <= tol_sq || depth >= 24 {
             out.push(b);
         } else {
-            self.flatten_into(t0, tm, tol, depth + 1, out);
-            self.flatten_into(tm, t1, tol, depth + 1, out);
+            self.flatten_into(t0, a, tm, m, tol_sq, depth + 1, out);
+            self.flatten_into(tm, m, t1, b, tol_sq, depth + 1, out);
         }
     }
 }
@@ -735,6 +763,37 @@ mod tests {
     use super::*;
     use crate::curve::CurveSegment;
     use crate::primitives::{CircularArc, CubicBezier, EllipticalArc, LineSeg};
+
+    /// Regression: a midpoint-only flatness test is exactly zero for a span
+    /// that is antisymmetric about its middle, so an S-curve was declared flat
+    /// and tessellated to a bare straight line at *every* tolerance. This is
+    /// the main render/export path, so the S simply disappeared.
+    #[test]
+    fn s_curve_is_not_flattened_to_a_straight_line() {
+        // De Casteljau at t=1/2 over these dyadic control points lands exactly
+        // on the chord midpoint (0.5, 0), so the old test measured dev = 0.
+        let s = Curve::Bezier(CubicBezier::new(
+            pt(0.0, 0.0),
+            pt(0.0, 1.0),
+            pt(1.0, -1.0),
+            pt(1.0, 0.0),
+        ));
+        for tol in [1e-2, 1e-4, 1e-6] {
+            let pts = crate::tessellate_curve(&s, tol);
+            assert!(
+                pts.len() > 2,
+                "S-curve flattened to {} vertices at tol {tol:e}",
+                pts.len()
+            );
+            // Every sample must actually track the curve: the true curve
+            // reaches |y| ~ 0.29, which a straight chord would miss entirely.
+            let peak = pts.iter().fold(0.0f64, |acc, p| acc.max(p.y.abs()));
+            assert!(
+                peak > 0.2,
+                "tessellation stayed within {peak} of the chord at tol {tol:e}"
+            );
+        }
+    }
 
     /// Regression (found by the SVG loader fuzz test): an arc/ellipse whose two
     /// angles are finite but astronomically far apart used to subtract to an
