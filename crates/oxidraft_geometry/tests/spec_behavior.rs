@@ -75,14 +75,35 @@ fn offset_circle_is_concentric_and_correct_radius() {
         0.0,
         2.0 * std::f64::consts::PI,
     ));
-    let outer = offset_curve(&circle, 3.0);
-    if let Curve::Arc(a) = outer {
+    // The offset side is "left of the direction of travel" — the only notion
+    // that generalises to every curve kind (there is no "outward" for a line or
+    // an open spline). This circle is CCW, and left of travel on a CCW circle
+    // points at the centre, so a positive dist shrinks it and a negative one
+    // grows it. Both directions are checked here so the sign convention can't
+    // silently flip again.
+    let inner = offset_curve(&circle, 3.0);
+    if let Curve::Arc(a) = inner {
         let (cx, cy) = a.center.to_f64();
         assert!(
             (cx - 10.0).abs() < 1e-6 && (cy - 20.0).abs() < 1e-6,
             "center moved"
         );
-        assert!((a.radius - 10.0).abs() < 1e-6, "radius should be 7+3=10");
+        assert!(
+            (a.radius - 4.0).abs() < 1e-6,
+            "left of travel is inward on a CCW circle: 7-3=4, got {}",
+            a.radius
+        );
+    } else {
+        panic!("offset of arc should be an arc");
+    }
+
+    let outer = offset_curve(&circle, -3.0);
+    if let Curve::Arc(a) = outer {
+        assert!(
+            (a.radius - 10.0).abs() < 1e-6,
+            "right of travel is outward on a CCW circle: 7+3=10, got {}",
+            a.radius
+        );
     } else {
         panic!("offset of arc should be an arc");
     }

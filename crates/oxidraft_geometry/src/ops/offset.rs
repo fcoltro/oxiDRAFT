@@ -14,11 +14,21 @@ pub fn offset_curve(curve: &Curve, dist: f64) -> Curve {
     match curve {
         Curve::Line(l) => Curve::Line(l.offset_exact(dist)),
         Curve::Arc(a) => {
+            // "Left of travel" on a CCW arc points *inward*: the unit tangent is
+            // (-sin θ, cos θ), so the left normal (-Tᵧ, Tₓ) is (-cos θ, -sin θ),
+            // i.e. toward the centre. A positive dist therefore shrinks a CCW
+            // arc's radius. A reversed (CW) arc travels the other way, so its
+            // left normal points outward and the sign flips. Without this the
+            // arc offset ran opposite to every other branch (line, bezier,
+            // nurbs, sampling), and offsetting a mixed line/arc polycurve moved
+            // the straight sides one way and the round ends the other.
+            let outward = a.end_angle < a.start_angle;
+            let signed = if outward { dist } else { -dist };
             // An inward offset past the center is degenerate: the true offset
             // collapses through the center. Clamp to a point-like arc instead
             // of reflecting the radius, which silently produced an arc on the
             // wrong side of the center.
-            let r = (a.radius + dist).max(1e-12);
+            let r = (a.radius + signed).max(1e-12);
             Curve::Arc(CircularArc::new(a.center, r, a.start_angle, a.end_angle))
         }
         Curve::Bezier(bz) => offset_bezier(bz, dist),
@@ -547,7 +557,7 @@ fn offset_by_sampling(curve: &Curve, dist: f64) -> Curve {
 mod tests {
     use super::*;
     use crate::point::Point2d;
-    use crate::primitives::LineSeg;
+    use crate::primitives::{LineSeg, PolyCurve};
 
     fn pt(x: i64, y: i64) -> Point2d {
         Point2d::from_i64(x, y)
@@ -568,7 +578,9 @@ mod tests {
     }
 
     #[test]
-    fn offset_circle_increases_radius() {
+    fn offset_ccw_circle_shrinks_because_left_of_travel_is_inward() {
+        // A CCW circle's left normal points at the centre, so a *positive*
+        // dist (left of travel, per this module's contract) shrinks it.
         let arc = Curve::Arc(CircularArc::new(
             pt(0, 0),
             3.0,
@@ -577,10 +589,100 @@ mod tests {
         ));
         let off = offset_curve(&arc, 2.0);
         if let Curve::Arc(a) = off {
-            assert!((a.radius - 5.0).abs() < 1e-9);
+            assert!((a.radius - 1.0).abs() < 1e-9, "radius {}", a.radius);
         } else {
             panic!("Expected Arc");
         }
+    }
+
+    #[test]
+    fn offset_cw_circle_grows_because_reversed_travel_flips_the_normal() {
+        // The same circle traversed CW (end < start) travels the other way, so
+        // its left normal points outward and the same positive dist grows it.
+        let arc = Curve::Arc(CircularArc::new(
+            pt(0, 0),
+            3.0,
+            2.0 * std::f64::consts::PI,
+            0.0,
+        ));
+        let off = offset_curve(&arc, 2.0);
+        if let Curve::Arc(a) = off {
+            assert!((a.radius - 5.0).abs() < 1e-9, "radius {}", a.radius);
+        } else {
+            panic!("Expected Arc");
+        }
+    }
+
+    /// Regression: every curve kind must offset to the *same* side of its own
+    /// direction of travel. The arc branch used to offset to the opposite side
+    /// from the line/bezier/nurbs/sampling branches, which silently wrecked any
+    /// offset of a mixed line+arc chain (see `offset_stadium_moves_coherently`).
+    #[test]
+    fn all_curve_kinds_offset_to_the_same_side_of_travel() {
+        // Signed area of (travel direction × offset vector): >0 means left of
+        // travel. Note `tangent_f64` is the *parameter-increasing* derivative,
+        // which for a reversed arc (domain t0 > t1) points against the actual
+        // direction of travel — hence the sign(t1 - t0) correction.
+        fn side(c: &Curve, d: f64) -> f64 {
+            let (t0, t1) = c.domain();
+            let off = offset_curve(c, d);
+            let (ox, oy) = off.evaluate_f64(off.domain().0);
+            let (x, y) = c.evaluate_f64(t0);
+            let (tx, ty) = c.tangent_f64(t0);
+            let dir = (t1 - t0).signum();
+            (tx * dir) * (oy - y) - (ty * dir) * (ox - x)
+        }
+        let line = Curve::Line(LineSeg::from_endpoints(pt(0, 0), pt(4, 0)));
+        let ccw = Curve::Arc(CircularArc::new(
+            pt(0, 0),
+            2.0,
+            0.0,
+            std::f64::consts::FRAC_PI_2,
+        ));
+        let cw = Curve::Arc(CircularArc::new(
+            pt(0, 0),
+            2.0,
+            std::f64::consts::FRAC_PI_2,
+            0.0,
+        ));
+        let reference = side(&line, 1.0);
+        assert!(reference > 0.0, "line must offset left of travel");
+        for (name, c) in [("ccw arc", &ccw), ("cw arc", &cw)] {
+            let s = side(c, 1.0);
+            assert!(
+                s.signum() == reference.signum(),
+                "{name} offset to side {s:+.4}, but a line offsets to {reference:+.4}"
+            );
+        }
+    }
+
+    /// The user-visible consequence of the sign bug: offsetting a closed
+    /// stadium (two straight sides + two round caps) moved the straight sides
+    /// inward while the caps went outward, producing a self-crossing mess.
+    #[test]
+    fn offset_stadium_moves_coherently() {
+        let half_pi = std::f64::consts::FRAC_PI_2;
+        let stadium = Curve::Poly(Box::new(PolyCurve::new(vec![
+            Curve::Line(LineSeg::from_endpoints(pt(-2, -1), pt(2, -1))),
+            Curve::Arc(CircularArc::new(pt(2, 0), 1.0, -half_pi, half_pi)),
+            Curve::Line(LineSeg::from_endpoints(pt(2, 1), pt(-2, 1))),
+            Curve::Arc(CircularArc::new(pt(-2, 0), 1.0, half_pi, 3.0 * half_pi)),
+        ])));
+        let Curve::Poly(pc) = offset_curve(&stadium, 0.5) else {
+            panic!("expected a Poly");
+        };
+        let sides_out = pc.segments.iter().any(|s| match s {
+            Curve::Line(l) if (l.p0.y - l.p1.y).abs() < 1e-9 => l.p0.y.abs() > 1.0,
+            _ => false,
+        });
+        let caps_out = pc
+            .segments
+            .iter()
+            .any(|s| matches!(s, Curve::Arc(a) if a.radius > 1.0));
+        assert_eq!(
+            sides_out, caps_out,
+            "straight sides and round caps must move the same way, not opposite"
+        );
     }
 
     #[test]
@@ -655,7 +757,8 @@ mod tests {
             0.0,
             2.0 * std::f64::consts::PI,
         ));
-        let off = offset_curve(&arc, -8.0);
+        // Positive dist shrinks a CCW arc, so +8 on r=5 overshoots the centre.
+        let off = offset_curve(&arc, 8.0);
         if let Curve::Arc(a) = off {
             assert!(
                 a.radius <= 1e-9,
@@ -764,16 +867,17 @@ mod tests {
     }
 
     #[test]
-    fn offset_circle_decreases_radius() {
+    fn offset_ccw_circle_grows_on_negative_dist() {
         let arc = Curve::Arc(CircularArc::new(
             pt(0, 0),
             5.0,
             0.0,
             2.0 * std::f64::consts::PI,
         ));
+        // Negative dist is right of travel = outward for a CCW circle.
         let off = offset_curve(&arc, -2.0);
         if let Curve::Arc(a) = off {
-            assert!((a.radius - 3.0).abs() < 1e-9);
+            assert!((a.radius - 7.0).abs() < 1e-9, "radius {}", a.radius);
         } else {
             panic!("Expected Arc");
         }

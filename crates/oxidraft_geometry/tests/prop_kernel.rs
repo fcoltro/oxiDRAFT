@@ -42,8 +42,11 @@ proptest! {
         start in -3.0..3.0f64,
         sweep in 0.2..std::f64::consts::TAU,
     ) {
-        // Keep the offset outside the degenerate collapse regime.
-        prop_assume!(r + d > 0.05);
+        // Keep the offset outside the degenerate collapse regime. `sweep > 0`
+        // so these arcs are always CCW, and left-of-travel on a CCW arc points
+        // inward — a positive `d` shrinks the radius to `r - d`, which is the
+        // side that can collapse through the centre.
+        prop_assume!(r - d > 0.05);
         let base = Curve::Arc(CircularArc::new(
             Point2d::from_f64(1.0, -2.0),
             r,

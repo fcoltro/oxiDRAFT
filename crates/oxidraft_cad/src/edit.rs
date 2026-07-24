@@ -2773,7 +2773,7 @@ mod tests {
     }
 
     #[test]
-    fn offset_circle_grows() {
+    fn offset_circle_changes_radius_by_the_signed_distance() {
         let mut doc = Document::new();
         let id = doc.add(EntityKind::Curve(Curve::Arc(CircularArc::new(
             pt(0, 0),
@@ -2781,9 +2781,19 @@ mod tests {
             0.0,
             2.0 * std::f64::consts::PI,
         ))));
-        let new = offset(&mut doc, &[id], 2.0);
-        if let Curve::Arc(a) = doc.get(new[0]).unwrap().as_curve().unwrap() {
-            assert!((a.radius - 7.0).abs() < 1e-6);
+        // Offset distance is signed "left of travel"; this circle is CCW, so
+        // left points inward and a negative distance is the outward one. (The
+        // OFFSET tool picks the sign from which side the user clicks, so both
+        // directions stay reachable interactively.)
+        let grown = offset(&mut doc, &[id], -2.0);
+        if let Curve::Arc(a) = doc.get(grown[0]).unwrap().as_curve().unwrap() {
+            assert!((a.radius - 7.0).abs() < 1e-6, "radius {}", a.radius);
+        } else {
+            panic!()
+        }
+        let shrunk = offset(&mut doc, &[id], 2.0);
+        if let Curve::Arc(a) = doc.get(shrunk[0]).unwrap().as_curve().unwrap() {
+            assert!((a.radius - 3.0).abs() < 1e-6, "radius {}", a.radius);
         } else {
             panic!()
         }
