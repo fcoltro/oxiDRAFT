@@ -389,7 +389,22 @@ fn flatten_arc_optimal(a: &crate::primitives::CircularArc, tol: f64) -> Vec<Poin
 
 fn unit_arc_segments(a0: f64, a1: f64) -> Vec<([[f64; 2]; 3], f64)> {
     let sweep = a1 - a0;
-    let n = ((sweep.abs() / std::f64::consts::FRAC_PI_2).ceil() as usize).max(1);
+    // Two individually finite angles can be far enough apart that their
+    // difference overflows to ±inf, and a merely enormous finite sweep
+    // saturates the quarter-turn count when cast to usize. Both are reachable
+    // from a crafted file (an SVG carrying `1e999`, say), and both are worse
+    // than they look: `inf as usize` is usize::MAX, so `collect()` below tries
+    // to allocate that many segments, while `0 * inf` poisons every control
+    // point and weight with NaN — which then trips the positive-weight
+    // assertion in `RationalBezier::new`. No real arc spans a thousand turns,
+    // so anything past the cap is unrepresentable: drop it, as the rest of the
+    // kernel drops degenerate geometry rather than panicking on it.
+    const MAX_SEGMENTS: usize = 4096;
+    let quarters = sweep.abs() / std::f64::consts::FRAC_PI_2;
+    if !quarters.is_finite() || quarters > MAX_SEGMENTS as f64 {
+        return Vec::new();
+    }
+    let n = (quarters.ceil() as usize).max(1);
     let step = sweep / n as f64;
     (0..n)
         .map(|i| {
@@ -720,6 +735,53 @@ mod tests {
     use super::*;
     use crate::curve::CurveSegment;
     use crate::primitives::{CircularArc, CubicBezier, EllipticalArc, LineSeg};
+
+    /// Regression (found by the SVG loader fuzz test): an arc/ellipse whose two
+    /// angles are finite but astronomically far apart used to subtract to an
+    /// infinite sweep, saturate the segment count to usize::MAX, and then build
+    /// NaN weights — panicking in `RationalBezier::new` after attempting a
+    /// vast allocation. Such a span is not representable; it must be dropped.
+    #[test]
+    fn absurd_arc_spans_are_dropped_not_panicked_or_allocated() {
+        for (a0, a1) in [
+            (-1e308, 1e308), // difference overflows to +inf
+            (1e308, -1e308), // ... and to -inf
+            (0.0, 1e300),    // finite but saturates the quarter-turn count
+            (0.0, f64::MAX),
+        ] {
+            assert!(
+                unit_arc_segments(a0, a1).is_empty(),
+                "span {a0}..{a1} should be dropped"
+            );
+            // The whole-curve path must stay quiet too.
+            let arc = CircularArc::new(pt(0.0, 0.0), 2.0, a0, a1);
+            assert!(lower(&Curve::Arc(arc)).is_empty());
+        }
+    }
+
+    /// The cap must not disturb ordinary arcs, including legitimately
+    /// multi-turn ones.
+    #[test]
+    fn normal_and_multi_turn_spans_still_lower() {
+        let tau = std::f64::consts::TAU;
+        for (a0, a1, least) in [
+            (0.0, std::f64::consts::FRAC_PI_2, 1), // quarter turn
+            (0.0, tau, 4),                         // full circle
+            (0.0, 4.0 * tau, 16),                  // four turns
+            (1.0, -2.0, 2),                        // reversed
+        ] {
+            let segs = unit_arc_segments(a0, a1);
+            assert!(
+                segs.len() >= least,
+                "span {a0}..{a1} produced {} segments",
+                segs.len()
+            );
+            assert!(
+                segs.iter().all(|(_, w)| w.is_finite() && *w > 0.0),
+                "span {a0}..{a1} produced a non-positive weight"
+            );
+        }
+    }
 
     fn pt(x: f64, y: f64) -> Point2d {
         Point2d::from_f64(x, y)
