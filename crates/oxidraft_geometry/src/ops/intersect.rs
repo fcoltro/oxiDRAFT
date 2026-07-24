@@ -99,13 +99,14 @@ fn angle_in_arc(angle: f64, start: f64, end: f64) -> bool {
     } else {
         (end, start)
     };
-    let pi2 = 2.0 * std::f64::consts::PI;
     let a = crate::util::wrap_tau(angle - lo);
-    let mut span = hi - lo;
-    if span <= 0.0 {
-        span += pi2;
-    }
-    a <= span + 1e-9
+    // `hi >= lo` after ordering, so the span is already non-negative. It is
+    // zero only for a degenerate arc (`start == end`), which the rest of the
+    // kernel agrees covers nothing — `included_angle` and `arc_length` are 0
+    // and `contains_angle` is false. Promoting that to a full turn (as this
+    // used to) reported intersections at angles the arc never visits; full
+    // circles are encoded as (0, τ), which needs no special case.
+    a <= (hi - lo) + 1e-9
 }
 
 /// Maps a hit angle into the arc's own domain interval; the returned value is
@@ -116,13 +117,11 @@ fn angle_on_domain(angle: f64, start: f64, end: f64) -> f64 {
     } else {
         (end, start)
     };
-    let pi2 = 2.0 * std::f64::consts::PI;
     let a = crate::util::wrap_tau(angle - lo);
-    let mut span = hi - lo;
-    if span <= 0.0 {
-        span += pi2;
-    }
-    lo + a.min(span)
+    // Same reasoning as `angle_in_arc`: clamping to the real span keeps the
+    // result inside the arc's own domain. The old full-turn fallback returned
+    // a parameter outside `[lo, hi]` for a degenerate arc.
+    lo + a.min(hi - lo)
 }
 
 /// Intersections of two arcs (0, 1, or 2), restricted to the spans both arcs
@@ -725,5 +724,47 @@ mod tests {
             assert!((y.abs() - expect).abs() < 1e-6, "y={}", y);
             assert!((0.0..=tau).contains(&h.t1) && (0.0..=tau).contains(&h.t2));
         }
+    }
+
+    /// Regression: a degenerate arc (`start == end`) sweeps nothing, and the
+    /// rest of the kernel agrees — `included_angle`, `arc_length` are 0 and
+    /// `contains_angle` is false. Intersection used to promote it to a full
+    /// turn and report hits at angles the arc never visits.
+    #[test]
+    fn zero_sweep_arc_intersects_nothing() {
+        use crate::primitives::CircularArc;
+        let arc = CircularArc::new(Point2d::from_f64(0.0, 0.0), 5.0, 1.0, 1.0);
+        assert_eq!(arc.arc_length(), 0.0, "precondition: degenerate arc");
+        assert!(!arc.contains_angle(std::f64::consts::PI));
+
+        let line = Curve::Line(LineSeg::from_endpoints(
+            Point2d::from_f64(-10.0, 0.0),
+            Point2d::from_f64(10.0, 0.0),
+        ));
+        let hits = intersect(&line, &Curve::Arc(arc));
+        assert!(
+            hits.is_empty(),
+            "degenerate arc reported {} intersection(s) at angles it never visits",
+            hits.len()
+        );
+    }
+
+    /// The fix must not disturb a genuine full circle, which is encoded as
+    /// (0, τ) rather than as a zero sweep.
+    #[test]
+    fn full_circle_still_intersects_on_both_sides() {
+        use crate::primitives::CircularArc;
+        let circle = CircularArc::new(
+            Point2d::from_f64(0.0, 0.0),
+            5.0,
+            0.0,
+            2.0 * std::f64::consts::PI,
+        );
+        let line = Curve::Line(LineSeg::from_endpoints(
+            Point2d::from_f64(-10.0, 0.0),
+            Point2d::from_f64(10.0, 0.0),
+        ));
+        let hits = intersect(&line, &Curve::Arc(circle));
+        assert_eq!(hits.len(), 2, "a full circle must still be crossed twice");
     }
 }
