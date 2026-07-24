@@ -289,11 +289,22 @@ impl Transform2d {
         let new_major = e.semi_major * sf;
         let new_minor = e.semi_minor * sf;
         let rot = self.rotation_angle();
-        let new_rotation = e.rotation + rot;
-        let (start, end) = if self.is_reflection() {
-            (-e.end_angle + rot, -e.start_angle + rot)
+        // Unlike a circular arc, an ellipse carries its orientation in its own
+        // `rotation` field, so the map must go there — NOT into the eccentric
+        // angles as well. With P(t) = C + R(ψ)·(a cos t, b sin t):
+        //
+        //   rotation  M = s·R(φ):  M·P(t) = C' + R(φ+ψ)·(sa cos t, sb sin t)
+        //                          ⇒ rotation ψ+φ, angles unchanged.
+        //   reflection M = s·R(φ)·F, using F·R(ψ) = R(−ψ)·F:
+        //                          M·P(t) = C' + s·R(φ−ψ)·(a cos(−t), b sin(−t))
+        //                          ⇒ rotation φ−ψ, angles negated.
+        //
+        // Adding `rot` to the angles too (the circular-arc rule, where there is
+        // no rotation field to absorb it) rotated the ellipse twice.
+        let (new_rotation, start, end) = if self.is_reflection() {
+            (rot - e.rotation, -e.start_angle, -e.end_angle)
         } else {
-            (e.start_angle + rot, e.end_angle + rot)
+            (e.rotation + rot, e.start_angle, e.end_angle)
         };
         // Same degenerate-scale guard as apply_arc: don't hand back an
         // ellipse with collapsed axes that evaluates to NaN downstream.
@@ -465,5 +476,70 @@ mod tests {
             "included angle {}",
             mirrored.included_angle()
         );
+    }
+
+    /// Worst distance from the true image of the source curve to the curve the
+    /// transform produced. Checks the *point set*, which is what the older
+    /// tests missed: they only asserted a field or a single endpoint, so a
+    /// wrong rotation/angle pairing that still produced a plausible ellipse
+    /// went unnoticed.
+    fn worst_image_deviation(xf: &Transform2d, src: &Curve) -> f64 {
+        let (t0, t1) = src.domain();
+        let out = xf.apply_curve(src);
+        let mut worst: f64 = 0.0;
+        for i in 0..=60 {
+            let t = t0 + (t1 - t0) * i as f64 / 60.0;
+            let (x, y) = src.evaluate_f64(t);
+            let truth = xf.apply_point(&Point2d::from_f64(x, y));
+            // True distance to the curve via the kernel's projection — a
+            // nearest-sample scan would floor out at half the sample spacing
+            // and hide (or fake) errors at this magnitude.
+            worst = worst.max(crate::ops::point_to_curve_distance(&out, truth.x, truth.y));
+        }
+        worst
+    }
+
+    /// Regression: an ellipse carries its orientation in its `rotation` field,
+    /// so a rotation must not also shift the eccentric angles. Doing both
+    /// rotated the ellipse twice and moved the curve off its true image by
+    /// several units.
+    #[test]
+    fn rotating_a_partial_ellipse_keeps_its_point_set() {
+        let e = EllipticalArc::new(pt(0, 0), 3.0, 1.0, 0.0, 0.0, std::f64::consts::FRAC_PI_2);
+        let src = Curve::Ellipse(e);
+        for turns in [0.25, 0.5, 1.0, -0.3] {
+            let xf = Transform2d::rotation(turns * std::f64::consts::PI);
+            let dev = worst_image_deviation(&xf, &src);
+            assert!(dev < 1e-6, "rotation by {turns}pi deviated {dev}");
+        }
+    }
+
+    /// Regression: reflecting an ellipse negates its rotation (φ − ψ, not
+    /// φ + ψ) and negates the eccentric angles. Getting either wrong moved the
+    /// produced ellipse clean off the mirrored point set.
+    #[test]
+    fn mirroring_a_rotated_ellipse_keeps_its_point_set() {
+        for psi in [0.0, 0.5, 1.2, -0.8] {
+            let e = EllipticalArc::new(pt(0, 0), 3.0, 1.0, psi, 0.0, std::f64::consts::FRAC_PI_2);
+            let src = Curve::Ellipse(e);
+            let dev = worst_image_deviation(&Transform2d::mirror_x(), &src);
+            assert!(dev < 1e-6, "mirror of rotation={psi} deviated {dev}");
+        }
+    }
+
+    /// A rotated ellipse under a rotation+scale must still land on its image.
+    #[test]
+    fn rotate_and_scale_a_rotated_ellipse() {
+        let e = EllipticalArc::new(pt(1, -2), 4.0, 2.5, 0.7, -0.4, 1.9);
+        let src = Curve::Ellipse(e);
+        // Uniform scale only: a non-uniform one is non-conformal and lowers the
+        // ellipse to rational segments, which is a different code path.
+        let xf = Transform2d::rotation(0.6).compose(&Transform2d::scale_about(
+            &Point2d::from_f64(0.0, 0.0),
+            1.7,
+            1.7,
+        ));
+        let dev = worst_image_deviation(&xf, &src);
+        assert!(dev < 1e-6, "rotate+scale deviated {dev}");
     }
 }
