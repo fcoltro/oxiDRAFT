@@ -322,24 +322,65 @@ fn infinite_line_intersection(
     Some(((b1 * c2 - b2 * c1) / det, (a2 * c1 - a1 * c2) / det))
 }
 
+/// A Bézier span as a plain cubic, when it is one: degree 3 and unweighted.
+fn as_cubic(rb: &crate::nurbs::RationalBezier) -> Option<CubicBezier> {
+    let unweighted = rb.weights.iter().all(|w| (w - 1.0).abs() < 1e-12);
+    if rb.points.len() == 4 && unweighted {
+        Some(CubicBezier::new(
+            rb.points[0],
+            rb.points[1],
+            rb.points[2],
+            rb.points[3],
+        ))
+    } else {
+        None
+    }
+}
+
+/// Offsets a spline by offsetting each of its Bézier spans with the adaptive
+/// machinery that has real error control, then chaining the results.
+///
+/// This used to sample exactly one offset point per control point and
+/// interpolate a spline of the same control count through them, with no
+/// residual check of any kind. That fit is exact at those few nodes and free
+/// to wander arbitrarily far between them: measured on this module's own
+/// `offset_spline_stays_a_spline` curve, the worst true error was 43% of the
+/// offset distance, while the paired-at-the-nodes metric the old test used
+/// read 1.6e-15 — it was measuring a tautology.
+///
+/// Densifying the fit does not rescue it. `interpolate_nurbs` parameterizes
+/// uniformly and `NurbsCurve`'s knot vector is implicitly uniform, so more
+/// samples make the interpolation oscillate rather than converge.
+///
+/// The result is a chain rather than a single spline. Offsetting already
+/// changes curve kind elsewhere here (a bezier that needs subdividing comes
+/// back as a `Poly`), and a correct chain beats a tidily-typed wrong answer.
 fn offset_nurbs(nc: &NurbsCurve, dist: f64) -> Curve {
-    let m = nc.control.len();
-    if m < 2 {
+    if nc.control.len() < 2 {
         return offset_by_sampling(&Curve::Nurbs(nc.clone()), dist);
     }
-    let params: Vec<f64> = (0..m).map(|k| k as f64 / (m - 1) as f64).collect();
-    let data: Vec<Point2d> = params
-        .iter()
-        .map(|&t| {
-            let (px, py) = nc.evaluate_f64(t);
-            let (tx, ty) = nc.tangent_f64(t);
-            let len = (tx * tx + ty * ty).sqrt().max(1e-12);
-            Point2d::from_f64(px + dist * (-ty / len), py + dist * (tx / len))
-        })
-        .collect();
-    match interpolate_nurbs(&data, &nc.weights) {
-        Some(fit) => Curve::Nurbs(fit),
-        None => offset_by_sampling(&Curve::Nurbs(nc.clone()), dist),
+    let spans = nc.segments();
+    if spans.is_empty() {
+        return offset_by_sampling(&Curve::Nurbs(nc.clone()), dist);
+    }
+    let mut pieces: Vec<Curve> = Vec::new();
+    for rb in spans {
+        let piece = match as_cubic(&rb) {
+            Some(bz) => offset_bezier(&bz, dist),
+            // A genuinely rational span (a conic) has no cubic form; sample it.
+            None => offset_by_sampling(&Curve::Rational(rb), dist),
+        };
+        // Keep the chain flat: `offset_bezier` returns a `Poly` when it had to
+        // subdivide, and nesting those would leave a tree of one-segment polys.
+        match piece {
+            Curve::Poly(pc) => pieces.extend(pc.segments.iter().cloned()),
+            other => pieces.push(other),
+        }
+    }
+    match pieces.len() {
+        0 => offset_by_sampling(&Curve::Nurbs(nc.clone()), dist),
+        1 => pieces.pop().expect("len checked"),
+        _ => Curve::Poly(Box::new(crate::primitives::PolyCurve::new(pieces))),
     }
 }
 
@@ -559,6 +600,26 @@ mod tests {
     use crate::point::Point2d;
     use crate::primitives::{LineSeg, PolyCurve};
 
+    /// How far a candidate offset strays from being truly parallel to `base`:
+    /// the worst |distance-to-base − |dist|| over samples *of the candidate*.
+    ///
+    /// This is the honest metric. Comparing `base(t)` with `candidate(t)` at
+    /// the fit nodes instead measures nothing — the old implementation
+    /// interpolated through exactly those points, so it was exact there by
+    /// construction and free to wander anywhere between them.
+    fn offset_residual(candidate: &Curve, base: &Curve, dist: f64) -> f64 {
+        let (t0, t1) = candidate.domain();
+        const SAMPLES: usize = 64;
+        let mut worst = 0.0f64;
+        for k in 0..=SAMPLES {
+            let t = t0 + (t1 - t0) * k as f64 / SAMPLES as f64;
+            let (x, y) = candidate.evaluate_f64(t);
+            let d = crate::ops::point_to_curve_distance(base, x, y);
+            worst = worst.max((d - dist.abs()).abs());
+        }
+        worst
+    }
+
     fn pt(x: i64, y: i64) -> Point2d {
         Point2d::from_i64(x, y)
     }
@@ -685,33 +746,53 @@ mod tests {
         );
     }
 
+    /// A spline offset must actually be parallel to the spline.
+    ///
+    /// This used to compare `base(t)` against `offset(t)` at the six fit nodes
+    /// and require the gap to equal `dist`. That measured nothing: the old
+    /// implementation interpolated through exactly those points, so it was
+    /// exact there by construction and free to wander anywhere between. It
+    /// passed at 1.6e-15 while the true worst error on this very curve was 43%
+    /// of the offset distance. The honest metric is the minimum distance from
+    /// points *on the offset* back to the base curve.
     #[test]
-    fn offset_spline_stays_a_spline() {
+    fn offset_spline_is_truly_parallel() {
         use crate::nurbs::NurbsCurve;
         let cvs = vec![pt(0, 0), pt(2, 4), pt(6, 4), pt(8, 0), pt(10, 4), pt(12, 0)];
-        let spline = Curve::Nurbs(NurbsCurve::uniform(cvs.clone()));
-        let dist = 1.0;
-        let off = offset_curve(&spline, dist);
-
-        let nc = match &off {
-            Curve::Nurbs(nc) => nc,
-            other => panic!("expected a spline offset, got {:?}", other),
-        };
-        assert_eq!(
-            nc.control.len(),
-            cvs.len(),
-            "control-vertex count preserved"
-        );
-
-        let m = cvs.len();
-        for k in 0..m {
-            let t = k as f64 / (m - 1) as f64;
-            let (px, py) = spline.evaluate_f64(t);
-            let (ox, oy) = off.evaluate_f64(t);
-            let d = ((ox - px).powi(2) + (oy - py).powi(2)).sqrt();
+        let spline = Curve::Nurbs(NurbsCurve::uniform(cvs));
+        // This curve's tightest radius of curvature is ~0.68. Offsetting
+        // further than that on the concave side cusps: the true offset folds
+        // through itself and genuinely runs closer to the base than `dist`, so
+        // no implementation can drive this metric to zero there. Stay inside
+        // that radius, where a clean parallel exists and the number means
+        // something. (The old test offset by 1.0 — already past the cusp — but
+        // its metric was a tautology, so it never noticed.)
+        for dist in [0.5, -0.5, 0.25] {
+            let off = offset_curve(&spline, dist);
+            let err = offset_residual(&off, &spline, dist);
             assert!(
-                (d - dist).abs() < 1e-6,
-                "node {k}: offset distance {d}, want {dist}"
+                err <= dist.abs() * 5e-3,
+                "offset by {dist} strays {err} from parallel"
+            );
+        }
+    }
+
+    /// The offset of a spline is a chain of bezier spans, and it must join up.
+    #[test]
+    fn offset_spline_chain_is_connected() {
+        use crate::nurbs::NurbsCurve;
+        let spline = Curve::Nurbs(NurbsCurve::uniform(vec![
+            pt(0, 0),
+            pt(2, 4),
+            pt(6, 4),
+            pt(8, 0),
+            pt(10, 4),
+            pt(12, 0),
+        ]));
+        if let Curve::Poly(pc) = offset_curve(&spline, 1.0) {
+            assert!(
+                pc.check_g0(1e-6),
+                "offset spans must meet end to end, no gaps"
             );
         }
     }
