@@ -22,7 +22,12 @@ fn validate_rational(points: usize, weights: &[f64]) -> Result<(), GeomError> {
             need: 2,
         });
     }
-    if let Some(&w) = weights.iter().find(|&&w| w.is_nan() || w <= 0.0) {
+    // Non-finite as well as non-positive: an infinite weight used to pass here
+    // while `set_weight` rejected it, so the same value was legal through one
+    // door and not the other. It is degenerate anyway — `from_homogeneous`
+    // divides through by the weight, so an infinite one yields 0/NaN control
+    // points. Matches the finite checks in the other `try_new`s.
+    if let Some(&w) = weights.iter().find(|&&w| !w.is_finite() || w <= 0.0) {
         return Err(GeomError::NonPositiveWeight(w));
     }
     Ok(())
@@ -796,6 +801,31 @@ mod tests {
     use super::*;
     use crate::curve::CurveSegment;
     use crate::primitives::{CircularArc, CubicBezier, EllipticalArc, LineSeg};
+
+    /// A weight must be legal through the constructor exactly when it is legal
+    /// through `set_weight` — an infinite weight used to pass `try_new` while
+    /// the setter refused it, so the same value was accepted through one door
+    /// and not the other.
+    #[test]
+    fn constructor_and_setter_agree_on_legal_weights() {
+        let cvs = vec![pt(0.0, 0.0), pt(1.0, 2.0), pt(3.0, 2.0), pt(4.0, 0.0)];
+        for bad in [f64::INFINITY, f64::NEG_INFINITY, f64::NAN, 0.0, -1.0] {
+            let mut w = vec![1.0; 4];
+            w[1] = bad;
+            assert!(
+                NurbsCurve::try_new(cvs.clone(), w).is_err(),
+                "try_new accepted weight {bad}"
+            );
+            let mut nc = NurbsCurve::uniform(cvs.clone());
+            nc.set_weight(1, bad);
+            assert_eq!(nc.weights()[1], 1.0, "set_weight accepted weight {bad}");
+        }
+        // A legal weight still goes through both doors.
+        assert!(NurbsCurve::try_new(cvs.clone(), vec![1.0, 2.5, 1.0, 1.0]).is_ok());
+        let mut nc = NurbsCurve::uniform(cvs);
+        nc.set_weight(1, 2.5);
+        assert_eq!(nc.weights()[1], 2.5);
+    }
 
     /// The Bézier decomposition is cached, so every mutating accessor must
     /// invalidate it. This is the property that lets the cache key be a cheap

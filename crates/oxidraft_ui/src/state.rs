@@ -2428,18 +2428,27 @@ impl AppState {
     /// the edit applied (false for an out-of-range index or non-NURBS
     /// entity, in which case nothing is snapshotted).
     pub fn adjust_nurbs_weight(&mut self, id: EntityId, index: usize, factor: f64) -> bool {
-        let ok = matches!(
-            self.document.get(id).map(| e | & e.kind),
-            Some(EntityKind::Curve(Curve::Nurbs(nc))) if index < nc.weights().len()
-        );
-        if !ok {
+        // Work out the new weight and whether it is acceptable BEFORE taking a
+        // history snapshot. `f64::clamp` propagates NaN, so a NaN factor
+        // produced a NaN weight that `set_weight` then silently refused — and
+        // this returned `true` regardless, claiming an edit that never
+        // happened and leaving a no-op entry on the undo stack.
+        let Some(EntityKind::Curve(Curve::Nurbs(nc))) = self.document.get(id).map(|e| &e.kind)
+        else {
+            return false;
+        };
+        let Some(&current) = nc.weights().get(index) else {
+            return false;
+        };
+        let scaled = (current * factor).clamp(0.05, 20.0);
+        if !scaled.is_finite() || scaled <= 0.0 {
             return false;
         }
+
         self.history.snapshot(&self.document);
         if let Some(EntityKind::Curve(Curve::Nurbs(nc))) =
             self.document.get_mut(id).map(|e| &mut e.kind)
         {
-            let scaled = (nc.weights()[index] * factor).clamp(0.05, 20.0);
             nc.set_weight(index, scaled);
         }
         true
@@ -4982,6 +4991,27 @@ mod tests {
             (weight_at(&a, 2).1 - 5.0).abs() < 1e-9,
             "undo restores the prior weight"
         );
+
+        // A rejected edit must report failure and leave the undo stack alone.
+        // `f64::clamp` propagates NaN, so a NaN factor produced a NaN weight
+        // the setter silently refused while this still returned true — an
+        // undo entry that restores nothing.
+        let before = weight_at(&a, 2).1;
+        let depth = a.history.undo_depth();
+        assert!(
+            !a.adjust_nurbs_weight(id, 2, f64::NAN),
+            "a NaN factor must report failure"
+        );
+        assert!(
+            (weight_at(&a, 2).1 - before).abs() < 1e-12,
+            "weight unchanged"
+        );
+        assert_eq!(a.history.undo_depth(), depth, "no phantom undo entry");
+        assert!(
+            !a.adjust_nurbs_weight(id, 99, 2.0),
+            "out-of-range index must report failure"
+        );
+        assert_eq!(a.history.undo_depth(), depth, "still no phantom undo entry");
     }
 
     #[test]
