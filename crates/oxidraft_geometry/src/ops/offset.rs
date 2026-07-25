@@ -581,7 +581,14 @@ fn offset_by_sampling(curve: &Curve, dist: f64) -> Curve {
         let (px, py) = curve.evaluate_f64(t);
         let (tx, ty) = curve.tangent_f64(t);
         let len = (tx * tx + ty * ty).sqrt().max(1e-20);
-        let (nx, ny) = (-ty / len, tx / len);
+        // `tangent_f64` is the parameter-increasing derivative, but a reversed
+        // span (domain t1 < t0, which the kernel treats as first class — see
+        // `reverse_curve`) travels against it, so its left normal is the other
+        // way. Without this an ellipse offset to the wrong side once reversed,
+        // the same defect the Arc branch above fixes — and mirroring an
+        // ellipse now produces exactly that reversed domain.
+        let dir = (t1 - t0).signum();
+        let (nx, ny) = (-ty / len * dir, tx / len * dir);
         let op = (px + dist * nx, py + dist * ny);
         if let Some(prev) = prev_pt {
             segs.push(Curve::Line(LineSeg::from_endpoints(
@@ -706,9 +713,39 @@ mod tests {
             std::f64::consts::FRAC_PI_2,
             0.0,
         ));
+        // Every kind, forward AND reversed. Covering only the two arcs let a
+        // reversed ellipse (which routes through `offset_by_sampling`) offset
+        // to the opposite side unnoticed — extending this loop is exactly what
+        // surfaced it.
+        let ell = Curve::Ellipse(crate::primitives::EllipticalArc::new(
+            pt(0, 0),
+            3.0,
+            2.0,
+            0.0,
+            0.0,
+            std::f64::consts::FRAC_PI_2,
+        ));
+        let bez = Curve::Bezier(CubicBezier::new(pt(0, 0), pt(1, 2), pt(3, 2), pt(4, 0)));
+        let spline = Curve::Nurbs(crate::nurbs::NurbsCurve::uniform(vec![
+            pt(0, 0),
+            pt(2, 3),
+            pt(5, -1),
+            pt(8, 2),
+        ]));
+        let rev = |c: &Curve| crate::ops::split_reverse::reverse_curve(c);
+
         let reference = side(&line, 1.0);
         assert!(reference > 0.0, "line must offset left of travel");
-        for (name, c) in [("ccw arc", &ccw), ("cw arc", &cw)] {
+        for (name, c) in [
+            ("ccw arc", &ccw),
+            ("cw arc", &cw),
+            ("ellipse", &ell),
+            ("ellipse reversed", &rev(&ell)),
+            ("bezier", &bez),
+            ("bezier reversed", &rev(&bez)),
+            ("nurbs", &spline),
+            ("nurbs reversed", &rev(&spline)),
+        ] {
             let s = side(c, 1.0);
             assert!(
                 s.signum() == reference.signum(),
