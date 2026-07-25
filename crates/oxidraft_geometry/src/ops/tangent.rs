@@ -136,24 +136,76 @@ fn solve_apollonius(objs: &[Object; 3], signs: [f64; 3]) -> Vec<(Point2d, f64)> 
 
     let [a1, b1, g1, d1] = eqs[0];
     let [a2, b2, g2, d2] = eqs[1];
-    let det = a1 * b2 - a2 * b1;
-    if det.abs() < EPS {
-        return Vec::new();
-    }
-    let x0 = (b2 * d1 - b1 * d2) / det;
-    let xr = -(b2 * g1 - b1 * g2) / det;
-    let y0 = (a1 * d2 - a2 * d1) / det;
-    let yr = -(a1 * g2 - a2 * g1) / det;
 
-    let (p0, p1) = (x0 - oax, xr);
-    let (q0, q1) = (y0 - oay, yr);
-    let qa = p1 * p1 + q1 * q1 - 1.0;
-    let qb = 2.0 * (p0 * p1 + q0 * q1) - 2.0 * ra * sa;
-    let qc = p0 * p0 + q0 * q0 - ra * ra;
+    // The two rows are linear in (x, y, r); solve two of the unknowns in terms
+    // of the third, then substitute into the anchor's own conic.
+    //
+    // Which two must not be hard-coded. Eliminating (x, y) — as this used to
+    // always do — needs `a1·b2 − a2·b1` to be non-zero, but for three circles
+    // those columns hold 2(o_a − o_k), so *collinear centres* make them
+    // parallel and that determinant vanishes for every one of the eight sign
+    // combinations. The whole solve then reported "no solution" even where one
+    // plainly exists: circles at (0,0) r=2, (5,0) r=1, (10,0) r=2 admit a
+    // tangent circle of radius 11 centred at (5, 12). Two parallel lines plus a
+    // circle degenerate the same way.
+    //
+    // So try each column pair and keep the best-conditioned one. Each yields
+    // x, y and r as affine functions of one free parameter `u`.
+    let det_ab = a1 * b2 - a2 * b1; // free = r
+    let det_ag = a1 * g2 - a2 * g1; // free = y
+    let det_bg = b1 * g2 - b2 * g1; // free = x
+    // (x0, xu, y0, yu, r0, ru)
+    let coeffs: [f64; 6] = if det_ab.abs() >= det_ag.abs() && det_ab.abs() >= det_bg.abs() {
+        if det_ab.abs() < EPS {
+            return Vec::new();
+        }
+        [
+            (d1 * b2 - b1 * d2) / det_ab,
+            (b1 * g2 - g1 * b2) / det_ab,
+            (a1 * d2 - a2 * d1) / det_ab,
+            (a2 * g1 - a1 * g2) / det_ab,
+            0.0,
+            1.0,
+        ]
+    } else if det_ag.abs() >= det_bg.abs() {
+        if det_ag.abs() < EPS {
+            return Vec::new();
+        }
+        [
+            (d1 * g2 - g1 * d2) / det_ag,
+            (g1 * b2 - b1 * g2) / det_ag,
+            0.0,
+            1.0,
+            (a1 * d2 - a2 * d1) / det_ag,
+            (a2 * b1 - a1 * b2) / det_ag,
+        ]
+    } else {
+        if det_bg.abs() < EPS {
+            return Vec::new();
+        }
+        [
+            0.0,
+            1.0,
+            (d1 * g2 - g1 * d2) / det_bg,
+            (g1 * a2 - a1 * g2) / det_bg,
+            (b1 * d2 - b2 * d1) / det_bg,
+            (b2 * a1 - b1 * a2) / det_bg,
+        ]
+    };
+    let [x0, xu, y0, yu, r0, ru] = coeffs;
+
+    // Substitute into (x − o_ax)² + (y − o_ay)² = (r + s_a·r_a)², which is a
+    // quadratic in `u`.
+    let (p0, p1) = (x0 - oax, xu);
+    let (q0, q1) = (y0 - oay, yu);
+    let (s0, s1) = (r0 + sa * ra, ru);
+    let qa = p1 * p1 + q1 * q1 - s1 * s1;
+    let qb = 2.0 * (p0 * p1 + q0 * q1 - s0 * s1);
+    let qc = p0 * p0 + q0 * q0 - s0 * s0;
 
     solve_quadratic(qa, qb, qc)
         .into_iter()
-        .map(|r| (Point2d::from_f64(x0 + xr * r, y0 + yr * r), r))
+        .map(|u| (Point2d::from_f64(x0 + xu * u, y0 + yu * u), r0 + ru * u))
         .collect()
 }
 
@@ -575,5 +627,47 @@ mod tests {
             )
             .is_none()
         );
+    }
+
+    /// Regression: the Apollonius solve always eliminated (x, y), which for
+    /// three circles needs the 2(o_a − o_k) columns to be independent. With
+    /// *collinear centres* they are parallel, so that determinant vanished for
+    /// all eight sign combinations and the solve reported no solution at all —
+    /// even though one plainly exists.
+    #[test]
+    fn ttt_collinear_centres_still_solve() {
+        let a = circle(0.0, 0.0, 2.0);
+        let b = circle(5.0, 0.0, 1.0);
+        let c = circle(10.0, 0.0, 2.0);
+        // By symmetry the centre is (5, y) with sqrt(25 + y²) = r + 2 and
+        // y = r + 1, giving 25 + (r+1)² = (r+2)² ⇒ r = 11, centre (5, 12).
+        let (ctr, r) = tangent_circle_ttt(&a, &b, &c, Point2d::from_f64(5.0, 12.0))
+            .expect("collinear centres admit a tangent circle");
+        assert!((ctr.x - 5.0).abs() < 1e-6, "centre x {}", ctr.x);
+        assert!((ctr.y - 12.0).abs() < 1e-6, "centre y {}", ctr.y);
+        assert!((r - 11.0).abs() < 1e-6, "radius {r}");
+        for obj in [&a, &b, &c] {
+            assert!(is_tangent(ctr, r, obj), "not tangent to all three");
+        }
+    }
+
+    /// The same degeneracy in its other guise: two parallel lines make the
+    /// eliminated columns parallel too.
+    #[test]
+    fn ttt_two_parallel_lines_and_a_circle_still_solve() {
+        let l0 = line(-20.0, 0.0, 20.0, 0.0);
+        let l1 = line(-20.0, 4.0, 20.0, 4.0);
+        // Anything in the strip has radius 2 and centre y = 2, so the third
+        // circle has to be reachable from there: at (10, 2) with r = 3 the
+        // solution is centre (5, 2), externally tangent at distance 5 = 2 + 3.
+        let c = circle(10.0, 2.0, 3.0);
+        let (ctr, r) = tangent_circle_ttt(&l0, &l1, &c, Point2d::from_f64(5.0, 2.0))
+            .expect("parallel lines admit an inscribed circle");
+        assert!((r - 2.0).abs() < 1e-6, "radius {r}");
+        assert!((ctr.x - 5.0).abs() < 1e-6, "centre x {}", ctr.x);
+        assert!((ctr.y - 2.0).abs() < 1e-6, "centre y {}", ctr.y);
+        for obj in [&l0, &l1, &c] {
+            assert!(is_tangent(ctr, r, obj), "not tangent to all three");
+        }
     }
 }
