@@ -55,6 +55,19 @@ fn polyline_projection(c: &mut Criterion) {
     });
 }
 
+/// Projection onto a free-form curve, which is what snapping does on every
+/// mouse move. The polyline bench above never reaches the golden-section
+/// path — a chain of straight segments projects analytically.
+fn spline_projection(c: &mut Criterion) {
+    let cvs: Vec<Point2d> = (0..40)
+        .map(|i| Point2d::from_f64(i as f64, if i % 2 == 0 { -1.0 } else { 1.0 }))
+        .collect();
+    let spline = Curve::Nurbs(NurbsCurve::uniform(cvs));
+    c.bench_function("project_point_onto_40cv_spline", |b| {
+        b.iter(|| project_point_onto_curve(black_box(&spline), 21.3, 0.4))
+    });
+}
+
 fn spline_line_intersection(c: &mut Criterion) {
     let cvs: Vec<Point2d> = (0..40)
         .map(|i| Point2d::from_f64(i as f64, if i % 2 == 0 { -1.0 } else { 1.0 }))
@@ -74,6 +87,7 @@ criterion_group!(
     arc_tessellation,
     nurbs_evaluation,
     polyline_projection,
+    spline_projection,
     spline_line_intersection
 );
 criterion_main!(benches);
