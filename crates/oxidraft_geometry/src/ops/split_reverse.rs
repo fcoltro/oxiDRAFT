@@ -106,8 +106,8 @@ pub fn reverse_curve(curve: &Curve) -> Curve {
         }
         Curve::Rational(rb) => Curve::Rational(rb.reverse()),
         Curve::Nurbs(nc) => Curve::Nurbs(NurbsCurve::new(
-            nc.control.iter().rev().cloned().collect(),
-            nc.weights.iter().rev().cloned().collect(),
+            nc.control().iter().rev().cloned().collect(),
+            nc.weights().iter().rev().cloned().collect(),
         )),
     }
 }

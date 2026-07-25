@@ -1553,9 +1553,9 @@ mod tests {
         match t.commit() {
             ToolEvent::Create(es) => match &es[0] {
                 EntityKind::Curve(Curve::Nurbs(nc)) => {
-                    assert_eq!(nc.control.len(), cvs.len());
-                    assert_eq!(nc.control[0], cvs[0]);
-                    assert!(nc.weights.iter().all(|&w| w == 1.0));
+                    assert_eq!(nc.control().len(), cvs.len());
+                    assert_eq!(nc.control()[0], cvs[0]);
+                    assert!(nc.weights().iter().all(|&w| w == 1.0));
                 }
                 o => panic!("expected a Nurbs curve, got {:?}", o),
             },

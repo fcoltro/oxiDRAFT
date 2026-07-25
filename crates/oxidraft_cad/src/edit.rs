@@ -1758,7 +1758,7 @@ pub fn stretch(
                     }
                 }
                 EntityKind::Curve(Curve::Nurbs(nc)) => {
-                    for p in &mut nc.control {
+                    for p in nc.control_mut() {
                         *p = nudge(p);
                     }
                 }
@@ -2609,7 +2609,7 @@ mod tests {
         );
         for id in &survivors {
             match doc.get(*id).and_then(|e| e.as_curve()) {
-                Some(Curve::Nurbs(s)) => assert!(s.control.len() >= 2, "keeps control vertices"),
+                Some(Curve::Nurbs(s)) => assert!(s.control().len() >= 2, "keeps control vertices"),
                 other => panic!("survivor must stay a NURBS, got {other:?}"),
             }
         }
@@ -3404,10 +3404,18 @@ mod tests {
         ))));
         stretch(&mut doc, &[id], (4.0, 4.0, 6.0, 6.0), 1.0, 1.0);
         if let Curve::Nurbs(nc) = doc.get(id).unwrap().as_curve().unwrap() {
-            assert!((nc.control[0].x - 0.0).abs() < 1e-6 && (nc.control[0].y - 0.0).abs() < 1e-6);
-            assert!((nc.control[1].x - 6.0).abs() < 1e-6 && (nc.control[1].y - 6.0).abs() < 1e-6);
-            assert!((nc.control[2].x - 10.0).abs() < 1e-6 && (nc.control[2].y - 5.0).abs() < 1e-6);
-            assert!((nc.control[3].x - 15.0).abs() < 1e-6 && (nc.control[3].y - 0.0).abs() < 1e-6);
+            assert!(
+                (nc.control()[0].x - 0.0).abs() < 1e-6 && (nc.control()[0].y - 0.0).abs() < 1e-6
+            );
+            assert!(
+                (nc.control()[1].x - 6.0).abs() < 1e-6 && (nc.control()[1].y - 6.0).abs() < 1e-6
+            );
+            assert!(
+                (nc.control()[2].x - 10.0).abs() < 1e-6 && (nc.control()[2].y - 5.0).abs() < 1e-6
+            );
+            assert!(
+                (nc.control()[3].x - 15.0).abs() < 1e-6 && (nc.control()[3].y - 0.0).abs() < 1e-6
+            );
         } else {
             panic!()
         }

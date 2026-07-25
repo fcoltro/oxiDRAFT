@@ -253,11 +253,11 @@ fn hash_curve(h: &mut u64, c: &Curve) {
         }
         Curve::Nurbs(n) => {
             feed(h, 7);
-            feed(h, n.control.len() as u64);
-            for p in &n.control {
+            feed(h, n.control().len() as u64);
+            for p in n.control() {
                 hash_pt(h, p);
             }
-            for w in &n.weights {
+            for w in n.weights() {
                 feed(h, w.to_bits());
             }
         }

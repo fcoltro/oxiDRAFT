@@ -247,8 +247,8 @@ impl Transform2d {
                 Curve::Rational(RationalBezier::new(points, rb.weights.clone()))
             }
             Curve::Nurbs(nc) => {
-                let control = nc.control.iter().map(|p| self.apply_point(p)).collect();
-                Curve::Nurbs(NurbsCurve::new(control, nc.weights.clone()))
+                let control = nc.control().iter().map(|p| self.apply_point(p)).collect();
+                Curve::Nurbs(NurbsCurve::new(control, nc.weights().to_vec()))
             }
         }
     }

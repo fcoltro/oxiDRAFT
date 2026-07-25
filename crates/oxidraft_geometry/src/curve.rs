@@ -181,7 +181,8 @@ impl Curve {
                 r.points.iter().all(|p| p.is_finite()) && r.weights.iter().all(|w| w.is_finite())
             }
             Curve::Nurbs(n) => {
-                n.control.iter().all(|p| p.is_finite()) && n.weights.iter().all(|w| w.is_finite())
+                n.control().iter().all(|p| p.is_finite())
+                    && n.weights().iter().all(|w| w.is_finite())
             }
         }
     }

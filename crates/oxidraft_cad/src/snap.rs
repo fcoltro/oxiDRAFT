@@ -349,7 +349,7 @@ fn fast_bbox_f64(c: &Curve) -> (f64, f64, f64, f64) {
             ),
             |acc, p| join(acc, (p.x, p.y, p.x, p.y)),
         ),
-        Curve::Nurbs(nc) => nc.control.iter().fold(
+        Curve::Nurbs(nc) => nc.control().iter().fold(
             (
                 f64::INFINITY,
                 f64::INFINITY,

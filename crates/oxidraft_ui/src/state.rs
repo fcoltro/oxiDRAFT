@@ -2253,7 +2253,7 @@ impl AppState {
         }
         let id = self.selection[0];
         if let EntityKind::Curve(Curve::Nurbs(nc)) = &self.document.get(id)?.kind {
-            Some((id, nc.control.clone(), nc.weights.clone()))
+            Some((id, nc.control().to_vec(), nc.weights().to_vec()))
         } else {
             None
         }
@@ -2266,7 +2266,7 @@ impl AppState {
             .iter()
             .filter_map(|&id| match &self.document.get(id)?.kind {
                 EntityKind::Curve(Curve::Nurbs(nc)) => {
-                    Some((id, nc.control.clone(), nc.weights.clone()))
+                    Some((id, nc.control().to_vec(), nc.weights().to_vec()))
                 }
                 _ => None,
             })
@@ -2418,9 +2418,8 @@ impl AppState {
     pub fn set_nurbs_control(&mut self, id: EntityId, index: usize, p: Point2d) {
         if let Some(e) = self.document.get_mut(id)
             && let EntityKind::Curve(Curve::Nurbs(nc)) = &mut e.kind
-            && index < nc.control.len()
         {
-            nc.control[index] = p;
+            nc.set_control_point(index, p);
         }
     }
 
@@ -2431,7 +2430,7 @@ impl AppState {
     pub fn adjust_nurbs_weight(&mut self, id: EntityId, index: usize, factor: f64) -> bool {
         let ok = matches!(
             self.document.get(id).map(| e | & e.kind),
-            Some(EntityKind::Curve(Curve::Nurbs(nc))) if index < nc.weights.len()
+            Some(EntityKind::Curve(Curve::Nurbs(nc))) if index < nc.weights().len()
         );
         if !ok {
             return false;
@@ -2440,7 +2439,8 @@ impl AppState {
         if let Some(EntityKind::Curve(Curve::Nurbs(nc))) =
             self.document.get_mut(id).map(|e| &mut e.kind)
         {
-            nc.weights[index] = (nc.weights[index] * factor).clamp(0.05, 20.0);
+            let scaled = (nc.weights()[index] * factor).clamp(0.05, 20.0);
+            nc.set_weight(index, scaled);
         }
         true
     }
@@ -4942,7 +4942,7 @@ mod tests {
         assert_eq!(a.document.len(), 2);
         let entity = a.document.iter().find(|e| e.id != a.origin_id).unwrap();
         match &entity.kind {
-            EntityKind::Curve(Curve::Nurbs(nc)) => assert_eq!(nc.control.len(), 4),
+            EntityKind::Curve(Curve::Nurbs(nc)) => assert_eq!(nc.control().len(), 4),
             other => panic!("expected a NURBS curve, got {:?}", other),
         }
     }
@@ -4967,7 +4967,7 @@ mod tests {
         a.set_nurbs_control(id, 2, Point2d::from_f64(6.0, 9.0));
         let weight_at = |a: &AppState, i: usize| {
             if let EntityKind::Curve(Curve::Nurbs(nc)) = &a.document.get(id).unwrap().kind {
-                (nc.control[i], nc.weights[i])
+                (nc.control()[i], nc.weights()[i])
             } else {
                 panic!("expected NURBS")
             }

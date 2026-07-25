@@ -356,7 +356,7 @@ fn as_cubic(rb: &crate::nurbs::RationalBezier) -> Option<CubicBezier> {
 /// changes curve kind elsewhere here (a bezier that needs subdividing comes
 /// back as a `Poly`), and a correct chain beats a tidily-typed wrong answer.
 fn offset_nurbs(nc: &NurbsCurve, dist: f64) -> Curve {
-    if nc.control.len() < 2 {
+    if nc.control().len() < 2 {
         return offset_by_sampling(&Curve::Nurbs(nc.clone()), dist);
     }
     let spans = nc.segments();
@@ -423,7 +423,7 @@ pub fn interpolate_nurbs(data: &[Point2d], weights: &[f64]) -> Option<NurbsCurve
 /// Re-expresses the portion of `nc` between parameters `a` and `b` as a fresh
 /// NURBS curve over its own `[0, 1]` domain — used when trimming splines.
 pub fn refit_nurbs_subcurve(nc: &NurbsCurve, a: f64, b: f64) -> NurbsCurve {
-    let m = nc.control.len().max(2);
+    let m = nc.control().len().max(2);
     let data: Vec<Point2d> = (0..m)
         .map(|k| {
             let t = a + (b - a) * (k as f64 / (m - 1) as f64);

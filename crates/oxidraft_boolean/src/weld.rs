@@ -141,10 +141,10 @@ fn snap_endpoints(c: &Curve, s: (f64, f64), e: (f64, f64)) -> Curve {
             }
             pts[0] = Point2d::from_f64(s.0, s.1);
             pts[n - 1] = Point2d::from_f64(e.0, e.1);
-            Curve::Rational(RationalBezier::new(pts, rb.weights.clone()))
+            Curve::Rational(RationalBezier::new(pts, rb.weights.to_vec()))
         }
         Curve::Nurbs(nc) => {
-            let mut cv = nc.control.clone();
+            let mut cv = nc.control().to_vec();
             let n = cv.len();
             let d_start = (s.0 - cv[0].x, s.1 - cv[0].y);
             let d_end = (e.0 - cv[n - 1].x, e.1 - cv[n - 1].y);
@@ -154,7 +154,7 @@ fn snap_endpoints(c: &Curve, s: (f64, f64), e: (f64, f64)) -> Curve {
             }
             cv[0] = Point2d::from_f64(s.0, s.1);
             cv[n - 1] = Point2d::from_f64(e.0, e.1);
-            Curve::Nurbs(NurbsCurve::new(cv, nc.weights.clone()))
+            Curve::Nurbs(NurbsCurve::new(cv, nc.weights().to_vec()))
         }
     }
 }

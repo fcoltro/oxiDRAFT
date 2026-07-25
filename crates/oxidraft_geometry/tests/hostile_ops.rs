@@ -229,7 +229,7 @@ fn nurbs_refit_survives_hostile_ranges() {
         let out = refit_nurbs_subcurve(&nc, a, b);
         if a.is_finite() && b.is_finite() {
             assert!(
-                out.control.iter().all(|q| q.is_finite()),
+                out.control().iter().all(|q| q.is_finite()),
                 "refit ({a},{b}) produced non-finite control points"
             );
         }

@@ -95,7 +95,7 @@ pub fn list_entity(doc: &Document, id: EntityId) -> Option<String> {
             rb.points.len()
         ),
         EntityKind::Curve(Curve::Nurbs(nc)) => {
-            format!("NURBS SPLINE ({} control vertices)", nc.control.len())
+            format!("NURBS SPLINE ({} control vertices)", nc.control().len())
         }
         EntityKind::Curve(Curve::Poly(p)) => format!("POLYLINE  {} segments", p.segments.len()),
         EntityKind::Point(p) => format!("POINT  ({},{})", p.x, p.y),

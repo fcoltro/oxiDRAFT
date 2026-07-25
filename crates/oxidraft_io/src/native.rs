@@ -216,7 +216,7 @@ fn write_entity(s: &mut String, e: &Entity) -> bool {
             let _ = writeln!(
                 s,
                 "E NURBS {layer} {color} {} {extra}",
-                control_fields(&nc.control, &nc.weights)
+                control_fields(nc.control(), nc.weights())
             );
         }
         EntityKind::Curve(Curve::Poly(pc)) => {
@@ -1906,10 +1906,11 @@ mod tests {
         let e = doc2.iter().next().expect("one entity");
         if let EntityKind::Curve(Curve::Nurbs(n2)) = &e.kind {
             assert_eq!(
-                n2.control, nc.control,
+                n2.control(),
+                nc.control(),
                 "control vertices must survive exactly"
             );
-            assert_eq!(n2.weights, nc.weights, "weights must survive exactly");
+            assert_eq!(n2.weights(), nc.weights(), "weights must survive exactly");
         } else {
             panic!("expected a NURBS curve after round-trip");
         }

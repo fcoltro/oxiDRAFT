@@ -107,7 +107,7 @@ pub fn grips_for(kind: &EntityKind) -> Vec<Grip> {
             Grip::new(GripRole::Vertex(3), b.p3),
         ],
         EntityKind::Curve(Curve::Nurbs(nc)) => nc
-            .control
+            .control()
             .iter()
             .enumerate()
             .map(|(i, p)| Grip::new(GripRole::Vertex(i), *p))
@@ -297,10 +297,13 @@ fn apply_grip_inner(start: &EntityKind, grip: &Grip, to: Point2d) -> EntityKind 
             EntityKind::Curve(Curve::Bezier(nb))
         }
         (EntityKind::Curve(Curve::Nurbs(nc)), GripRole::Vertex(k)) => {
-            let mut control = nc.control.clone();
+            let mut control = nc.control().to_vec();
             if k < control.len() {
                 control[k] = to;
-                EntityKind::Curve(Curve::Nurbs(NurbsCurve::new(control, nc.weights.clone())))
+                EntityKind::Curve(Curve::Nurbs(NurbsCurve::new(
+                    control,
+                    nc.weights().to_vec(),
+                )))
             } else {
                 start.clone()
             }
@@ -1034,9 +1037,9 @@ mod tests {
         if let EntityKind::Curve(Curve::Nurbs(n)) =
             apply_grip(&start, &g[1], Point2d::from_f64(1.0, 9.0))
         {
-            assert_eq!(n.control[1], Point2d::from_f64(1.0, 9.0));
-            assert_eq!(n.control[0], Point2d::from_f64(0.0, 0.0));
-            assert_eq!(n.weights, vec![1.0, 1.0, 1.0]);
+            assert_eq!(n.control()[1], Point2d::from_f64(1.0, 9.0));
+            assert_eq!(n.control()[0], Point2d::from_f64(0.0, 0.0));
+            assert_eq!(n.weights(), vec![1.0, 1.0, 1.0]);
         } else {
             panic!("expected a spline");
         }
