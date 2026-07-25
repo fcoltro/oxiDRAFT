@@ -769,18 +769,39 @@ mod tests {
         let Curve::Poly(pc) = offset_curve(&stadium, 0.5) else {
             panic!("expected a Poly");
         };
-        let sides_out = pc.segments.iter().any(|s| match s {
-            Curve::Line(l) if (l.p0.y - l.p1.y).abs() < 1e-9 => l.p0.y.abs() > 1.0,
-            _ => false,
-        });
-        let caps_out = pc
+        // Assert where the pieces actually LANDED, not merely that two
+        // booleans agree. Comparing `sides_out == caps_out` passes when both
+        // are false — which an offset that does nothing at all satisfies, so
+        // it constrained almost nothing. This is the same tautology the
+        // spline-offset test above was rewritten to remove.
+        //
+        // The stadium is CCW, so left-of-travel is inward: a +0.5 offset pulls
+        // the horizontal sides from |y| = 1 to 0.5 and shrinks the caps from
+        // r = 1 to 0.5.
+        let sides: Vec<f64> = pc
             .segments
             .iter()
-            .any(|s| matches!(s, Curve::Arc(a) if a.radius > 1.0));
-        assert_eq!(
-            sides_out, caps_out,
-            "straight sides and round caps must move the same way, not opposite"
-        );
+            .filter_map(|s| match s {
+                Curve::Line(l) if (l.p0.y - l.p1.y).abs() < 1e-9 => Some(l.p0.y.abs()),
+                _ => None,
+            })
+            .collect();
+        let caps: Vec<f64> = pc
+            .segments
+            .iter()
+            .filter_map(|s| match s {
+                Curve::Arc(a) => Some(a.radius),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(sides.len(), 2, "both straight sides survive: {sides:?}");
+        assert_eq!(caps.len(), 2, "both round caps survive: {caps:?}");
+        for y in &sides {
+            assert!((y - 0.5).abs() < 1e-9, "side at |y| = {y}, want 0.5");
+        }
+        for r in &caps {
+            assert!((r - 0.5).abs() < 1e-9, "cap radius {r}, want 0.5");
+        }
     }
 
     /// A spline offset must actually be parallel to the spline.
@@ -826,12 +847,25 @@ mod tests {
             pt(10, 4),
             pt(12, 0),
         ]));
-        if let Curve::Poly(pc) = offset_curve(&spline, 1.0) {
-            assert!(
-                pc.check_g0(1e-6),
-                "offset spans must meet end to end, no gaps"
-            );
-        }
+        // Assert the shape, don't just look for it. With `if let` and no
+        // `else` this test silently passed whenever the offset came back as
+        // anything but a Poly — and a single-span spline does exactly that
+        // (offset_nurbs returns a bare Bezier when there is one piece), so the
+        // body could be skipped entirely. `check_g0` is also vacuously true
+        // for 0 or 1 segments, so the segment count needs pinning too.
+        let off = offset_curve(&spline, 1.0);
+        let Curve::Poly(pc) = &off else {
+            panic!("a multi-span spline must offset to a chain, got {off:?}");
+        };
+        assert!(
+            pc.segments.len() > 1,
+            "chain must have real joints to test, got {} segment(s)",
+            pc.segments.len()
+        );
+        assert!(
+            pc.check_g0(1e-6),
+            "offset spans must meet end to end, no gaps"
+        );
     }
 
     #[test]

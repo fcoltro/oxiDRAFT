@@ -507,6 +507,18 @@ mod tests {
             // and hide (or fake) errors at this magnitude.
             worst = worst.max(crate::ops::point_to_curve_distance(&out, truth.x, truth.y));
         }
+        // The loop above is one-sided: it only checks that the true image lies
+        // ON the produced curve, so a curve spanning MORE than it should — or
+        // running the other way — still passes. Pin the endpoints too. That is
+        // the half of the reflection fix which is pure traversal, invisible to
+        // any point-set metric, and the half `apply_arc` was just aligned to.
+        let (o0, o1) = out.domain();
+        for (t_src, t_out) in [(t0, o0), (t1, o1)] {
+            let (sx, sy) = src.evaluate_f64(t_src);
+            let want = xf.apply_point(&Point2d::from_f64(sx, sy));
+            let (gx, gy) = out.evaluate_f64(t_out);
+            worst = worst.max((gx - want.x).hypot(gy - want.y));
+        }
         worst
     }
 
