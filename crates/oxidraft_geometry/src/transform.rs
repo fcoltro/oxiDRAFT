@@ -263,8 +263,14 @@ impl Transform2d {
         let new_center = self.apply_point(&a.center);
         let new_radius = a.radius * self.scale_factor();
         let rot = self.rotation_angle();
+        // Negate, do NOT swap. Swapping keeps `start < end` but silently
+        // re-orients the mirrored arc, so its domain-start evaluates to the
+        // mirror of the *end* point. Lines and beziers map endpoint-to-
+        // endpoint, and `apply_ellipse` negates without swapping, so an arc
+        // that swaps desynchronises any mixed chain: mirroring a rounded
+        // rectangle or filleted profile broke G0 at every arc.
         let (start, end) = if self.is_reflection() {
-            (-a.end_angle + rot, -a.start_angle + rot)
+            (-a.start_angle + rot, -a.end_angle + rot)
         } else {
             (a.start_angle + rot, a.end_angle + rot)
         };
@@ -458,16 +464,21 @@ mod tests {
             _ => panic!("expected arc"),
         };
 
+        // Endpoint correspondence: the mirrored arc's start must be the mirror
+        // of the ORIGINAL start, not of its end. This used to swap them, which
+        // kept `start < end` but reversed traversal — and since lines and
+        // beziers map endpoint-to-endpoint, mirroring a mixed chain then broke
+        // G0 at every arc (see `mirroring_a_chain_keeps_it_connected`).
         let (sx, sy) = mirrored.evaluate_f64(mirrored.start_angle);
         let (ex, ey) = mirrored.evaluate_f64(mirrored.end_angle);
         assert!(
-            (sx - 0.0).abs() < 1e-6 && (sy + 2.0).abs() < 1e-6,
-            "mirrored start {:?}",
+            (sx - 2.0).abs() < 1e-6 && (sy - 0.0).abs() < 1e-6,
+            "mirrored start {:?}, want the mirror of (2,0)",
             (sx, sy)
         );
         assert!(
-            (ex - 2.0).abs() < 1e-6 && (ey - 0.0).abs() < 1e-6,
-            "mirrored end {:?}",
+            (ex - 0.0).abs() < 1e-6 && (ey + 2.0).abs() < 1e-6,
+            "mirrored end {:?}, want the mirror of (0,2)",
             (ex, ey)
         );
 
@@ -497,6 +508,39 @@ mod tests {
             worst = worst.max(crate::ops::point_to_curve_distance(&out, truth.x, truth.y));
         }
         worst
+    }
+
+    /// Regression: mirroring a mixed line+arc chain must keep it connected.
+    /// Lines and beziers map endpoint-to-endpoint under a reflection, so an
+    /// arc that also swapped its endpoints desynchronised the chain — every
+    /// rounded rectangle, slot or filleted profile came apart at the arcs when
+    /// mirrored.
+    #[test]
+    fn mirroring_a_chain_keeps_it_connected() {
+        let half_pi = std::f64::consts::FRAC_PI_2;
+        for xf in [
+            Transform2d::mirror_x(),
+            Transform2d::mirror_line(&pt(0, 0), &Point2d::from_f64(1.0, 1.0)),
+        ] {
+            let chain = Curve::Poly(Box::new(PolyCurve::new(vec![
+                Curve::Line(LineSeg::from_endpoints(pt(-2, 0), pt(0, 0))),
+                // Arc from (0,0) round to (2,2)-ish, then a line onward.
+                Curve::Arc(CircularArc::new(pt(0, 2), 2.0, -half_pi, 0.0)),
+                Curve::Line(LineSeg::from_endpoints(pt(2, 2), pt(4, 2))),
+            ])));
+            let Curve::Poly(before) = &chain else {
+                panic!("expected a Poly")
+            };
+            assert!(before.check_g0(1e-6), "fixture must start connected");
+
+            let Curve::Poly(after) = xf.apply_curve(&chain) else {
+                panic!("a mirrored Poly must stay a Poly")
+            };
+            assert!(
+                after.check_g0(1e-6),
+                "mirroring broke the chain's continuity"
+            );
+        }
     }
 
     /// Regression: an ellipse carries its orientation in its `rotation` field,

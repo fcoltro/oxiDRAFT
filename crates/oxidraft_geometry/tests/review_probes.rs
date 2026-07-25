@@ -84,21 +84,25 @@ fn mirror_arc_keeps_radius_flips_center() {
         let (me_x, me_y) = a.evaluate_f64(a.domain().1);
         let (os_x, os_y) = arc.evaluate_f64(arc.domain().0);
         let (oe_x, oe_y) = arc.evaluate_f64(arc.domain().1);
+        // Start maps to start, end to end. This used to assert the opposite —
+        // that a mirrored arc's start is the reflection of the original *end* —
+        // which is the traversal-reversing convention that desynchronised
+        // mixed chains, since lines and beziers map endpoint-to-endpoint.
         assert!(
-            (ms_x - oe_x).abs() < 1e-6 && (ms_y + oe_y).abs() < 1e-6,
-            "mirrored start ({},{}) is not the reflection of original end ({},{})",
+            (ms_x - os_x).abs() < 1e-6 && (ms_y + os_y).abs() < 1e-6,
+            "mirrored start ({},{}) is not the reflection of original start ({},{})",
             ms_x,
             ms_y,
-            oe_x,
-            oe_y
-        );
-        assert!(
-            (me_x - os_x).abs() < 1e-6 && (me_y + os_y).abs() < 1e-6,
-            "mirrored end ({},{}) is not the reflection of original start ({},{})",
-            me_x,
-            me_y,
             os_x,
             os_y
+        );
+        assert!(
+            (me_x - oe_x).abs() < 1e-6 && (me_y + oe_y).abs() < 1e-6,
+            "mirrored end ({},{}) is not the reflection of original end ({},{})",
+            me_x,
+            me_y,
+            oe_x,
+            oe_y
         );
     } else {
         panic!("expected arc");
