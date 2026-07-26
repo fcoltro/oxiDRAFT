@@ -1545,7 +1545,50 @@ fn pin_shape(s: &mut Sketch, sv: &ShapeVars) {
 /// never has this escape from. Not used for EqualLength, whose whole point
 /// is to change a length.
 fn anchor_line_lengths(s: &mut Sketch, doc: &Document, vars: &HashMap<EntityId, ShapeVars>) {
+    // Every line, unconditionally — this is the validation sketch, where the
+    // point is to detect a solve that "succeeded" only by degenerating some
+    // line. Distinct from `anchor_line_lengths_except`, which is selective
+    // because it runs on sketches that then WRITE geometry back.
     for (&id, sv) in vars {
+        if let (Some((a, b)), Some(l)) = (sv.line(), line_of(doc, id)) {
+            s.constrain(Constraint::Distance(a, b, len(&l)));
+        }
+    }
+}
+
+/// [`anchor_line_lengths`], skipping the entities the user is directly
+/// editing. Their length is legitimately free — dragging one endpoint of a
+/// line is meant to change its length — so anchoring them would fight the
+/// edit. Only the *followers*, which should rotate to satisfy an angular
+/// relation rather than shorten, get pinned lengths.
+fn anchor_line_lengths_except(
+    s: &mut Sketch,
+    doc: &Document,
+    vars: &HashMap<EntityId, ShapeVars>,
+    edited: &[EntityId],
+) {
+    for (&id, sv) in vars {
+        if edited.contains(&id) {
+            continue;
+        }
+        // Only lines held by a purely ANGULAR relation get their length
+        // pinned. Those are the ones whose residual is minimised by
+        // projection, so they shorten instead of rotating. A line positioned
+        // by Coincident/Midpoint/PointOnLine has no such failure mode, and its
+        // length must stay free — it is welded to geometry that is moving, and
+        // stretching to follow is the correct behaviour.
+        let angular = doc.constraints_on(id).any(|c| {
+            matches!(
+                c.kind,
+                ConstraintKind::Parallel
+                    | ConstraintKind::Perpendicular
+                    | ConstraintKind::Collinear
+                    | ConstraintKind::Angle
+            )
+        });
+        if !angular {
+            continue;
+        }
         if let (Some((a, b)), Some(l)) = (sv.line(), line_of(doc, id)) {
             s.constrain(Constraint::Distance(a, b, len(&l)));
         }
@@ -2160,6 +2203,15 @@ pub fn resolve_after_edit(
         }
         _ => pin_shape(&mut s, sv),
     }
+    // Without this the purely angular relations (Parallel, Perpendicular,
+    // Collinear, Angle) are least-squares-minimised by the ORTHOGONAL
+    // PROJECTION of the follower onto the target direction, not by rotating
+    // it — so every re-solve shortened it by |v|·(1−cos θ) and a 90° edit
+    // collapsed it to a zero-length segment at its own midpoint, while this
+    // returned `true` and wrote it to the document. Record time already pairs
+    // each angular row with a Distance row for exactly this reason; the
+    // re-solve path lowered the angular row alone.
+    anchor_line_lengths_except(&mut s, doc, &vars, &[moved]);
     if !s.solve_robust().converged {
         return false;
     }
@@ -2194,6 +2246,13 @@ pub fn resolve_after_transform(doc: &mut Document, moved: &[EntityId]) -> bool {
     // this routinely). Plain solve() then reports failure and the recorded
     // constraint is silently left violated with no user signal. Every
     // record-time sibling already retries from a perturbed start.
+    //
+    // Anchor lengths for the same reason as `resolve_after_edit`: an angular
+    // residual alone is minimised by projecting the follower onto the target
+    // direction, which shortens it every solve and annihilates it outright at
+    // 90°. Pinned entities are already fully constrained, so anchoring their
+    // length is redundant rather than conflicting.
+    anchor_line_lengths_except(&mut s, doc, &vars, moved);
     if !s.solve_robust().converged {
         return false;
     }
@@ -3275,6 +3334,54 @@ mod tests {
             report.free_entities, 1,
             "the untouched line must be reported, or 'fully constrained' lies"
         );
+    }
+
+    #[test]
+    fn angular_constraints_rotate_the_follower_instead_of_shrinking_it() {
+        // A purely angular residual is least-squares-minimised by projecting
+        // the follower onto the target direction, which costs it
+        // |v|·(1−cos θ) on EVERY re-solve. Dragging the reference round to
+        // 90° collapsed the follower to a zero-length segment at its own
+        // midpoint — and `resolve_after_transform` returned true and wrote
+        // that to the document.
+        for kind in [
+            ConstraintKind::Parallel,
+            ConstraintKind::Perpendicular,
+            ConstraintKind::Collinear,
+        ] {
+            let mut doc = Document::new();
+            let a = doc.add(EntityKind::Curve(Curve::Line(LineSeg::from_endpoints(
+                Point2d::from_f64(0.0, 0.0),
+                Point2d::from_f64(6.0, 0.0),
+            ))));
+            let b = doc.add(EntityKind::Curve(Curve::Line(LineSeg::from_endpoints(
+                Point2d::from_f64(0.0, 3.0),
+                Point2d::from_f64(6.0, 3.0),
+            ))));
+            constrain_lines(&mut doc, &[a, b], kind)
+                .unwrap_or_else(|e| panic!("{kind:?} should record cleanly: {e:?}"));
+            let length_of = |d: &Document, id| match d.get(id).unwrap().as_curve().unwrap() {
+                Curve::Line(l) => l.p0.dist_f64(&l.p1),
+                _ => panic!("expected a line"),
+            };
+            let before = length_of(&doc, b);
+
+            // Rotate the reference to vertical — the worst case, where the
+            // projection of the follower onto it is a single point.
+            let xf = oxidraft_geometry::Transform2d::rotation_about(
+                &Point2d::from_f64(0.0, 0.0),
+                std::f64::consts::FRAC_PI_2,
+            );
+            if let Some(e) = doc.get_mut(a) {
+                e.transform(&xf);
+            }
+            resolve_after_transform(&mut doc, &[a]);
+            let after = length_of(&doc, b);
+            assert!(
+                (after - before).abs() < 1e-6,
+                "{kind:?}: follower must rotate, not shrink: {before} -> {after}"
+            );
+        }
     }
 
     #[test]
