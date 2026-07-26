@@ -732,13 +732,11 @@ fn shape_curves(name: &str, attrs: &[(String, String)]) -> Vec<Curve> {
             let r = attrf(attrs, "r");
             (r > 1e-9)
                 .then(|| {
-                    Curve::Arc(CircularArc::new(
-                        p(attrf(attrs, "cx"), attrf(attrs, "cy")),
-                        r,
-                        0.0,
-                        TAU,
-                    ))
+                    CircularArc::try_new(p(attrf(attrs, "cx"), attrf(attrs, "cy")), r, 0.0, TAU)
+                        .ok()
+                        .map(Curve::Arc)
                 })
+                .flatten()
                 .into_iter()
                 .collect()
         }
@@ -1053,22 +1051,17 @@ fn svg_arc_to_curve(
         dtheta += TAU;
     }
     let (start, end) = (theta1, theta1 + dtheta);
+    // Fallible: every value here is derived from the `d` attribute, and the
+    // arc constructors reject spans they cannot represent. `new` would panic
+    // on a crafted path — the importer must drop the segment instead.
     if (rx - ry).abs() < 1e-9 && phi.abs() < 1e-12 {
-        Some(Curve::Arc(CircularArc::new(
-            Point2d::from_f64(cx, cy),
-            rx,
-            start,
-            end,
-        )))
+        CircularArc::try_new(Point2d::from_f64(cx, cy), rx, start, end)
+            .ok()
+            .map(Curve::Arc)
     } else {
-        Some(Curve::Ellipse(EllipticalArc::new(
-            Point2d::from_f64(cx, cy),
-            rx,
-            ry,
-            phi,
-            start,
-            end,
-        )))
+        EllipticalArc::try_new(Point2d::from_f64(cx, cy), rx, ry, phi, start, end)
+            .ok()
+            .map(Curve::Ellipse)
     }
 }
 

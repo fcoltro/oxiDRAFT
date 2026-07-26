@@ -2003,6 +2003,34 @@ mod tests {
     }
 
     #[test]
+    fn crafted_arc_spans_are_dropped_on_import() {
+        // Both angles are individually finite, so no per-field check catches
+        // these. The first describes an infinite sweep; the second a finite
+        // but unrepresentable one, which used to saturate the flattening
+        // vertex cap at every tolerance — a 300 KB file of these expanded to
+        // ~10 GB of cached geometry on open, and tessellated to 65k NaN
+        // vertices that the SVG exporter wrote out verbatim.
+        for rec in [
+            "E ARC 0 bylayer 0;0 2 -1e308 1e308",
+            "E ARC 0 bylayer 0;0 2 1e308 -1e308",
+            "E ARC 0 bylayer 0;0 2 0 1e300",
+        ] {
+            let doc = from_string(&format!("{MAGIC} {VERSION}\n{rec}\n"))
+                .expect("a bad arc must not fail the whole load");
+            assert_eq!(doc.len(), 0, "{rec} must be dropped");
+        }
+        // Ordinary arcs, full circles and multi-turn spans still load.
+        for rec in [
+            "E ARC 0 bylayer 0;0 2 0 1.5708",
+            "E ARC 0 bylayer 0;0 2 0 6.28318530717958",
+            "E ARC 0 bylayer 0;0 2 0 25.1327412287183",
+        ] {
+            let doc = from_string(&format!("{MAGIC} {VERSION}\n{rec}\n")).unwrap();
+            assert_eq!(doc.len(), 1, "{rec} must still load");
+        }
+    }
+
+    #[test]
     fn crafted_weights_are_rejected_not_panicked() {
         // `w > 0.0` admits +inf, and the geometry constructors reject
         // non-finite weights — so an infinite weight in a one-line crafted

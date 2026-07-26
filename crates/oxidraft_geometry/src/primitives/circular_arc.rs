@@ -39,6 +39,21 @@ impl CircularArc {
         if radius.is_nan() || radius <= 0.0 {
             return Err(GeomError::NonPositiveRadius(radius));
         }
+        // Reject spans the kernel cannot represent. Two individually *finite*
+        // angles can describe an infinite sweep (-1e308 .. 1e308), and even a
+        // finite 1e300 sweep saturates the flattening vertex cap at every
+        // tolerance — so a 300 KB crafted file expands into gigabytes of
+        // cached geometry on open, and the same arc tessellates to 65k NaN
+        // vertices that the SVG exporter writes out verbatim. The bound
+        // matches the quarter-turn cap in `nurbs::unit_arc_segments`; no real
+        // arc spans a thousand turns. Deliberately no centre check: `new` has
+        // 130+ trusted call sites and tightening it there would turn computed
+        // non-finite centres into panics far from any import path.
+        const MAX_QUARTER_TURNS: f64 = 4096.0;
+        let quarters = (end_angle - start_angle).abs() / std::f64::consts::FRAC_PI_2;
+        if !quarters.is_finite() || quarters > MAX_QUARTER_TURNS {
+            return Err(GeomError::NonFiniteValue);
+        }
         Ok(CircularArc {
             center,
             radius,

@@ -921,9 +921,15 @@ mod tests {
                 unit_arc_segments(a0, a1).is_empty(),
                 "span {a0}..{a1} should be dropped"
             );
-            // The whole-curve path must stay quiet too.
-            let arc = CircularArc::new(pt(0.0, 0.0), 2.0, a0, a1);
-            assert!(lower(&Curve::Arc(arc)).is_empty());
+            // Stronger than dropping it downstream: such an arc is now refused
+            // at construction, so it never reaches the lowering OR the
+            // flattening path. That matters because the two used to disagree —
+            // `lower` returned nothing while `flatten_arc_optimal` emitted
+            // 65k NaN vertices for the very same object.
+            assert!(
+                CircularArc::try_new(pt(0.0, 0.0), 2.0, a0, a1).is_err(),
+                "span {a0}..{a1} should be rejected by the constructor"
+            );
         }
     }
 

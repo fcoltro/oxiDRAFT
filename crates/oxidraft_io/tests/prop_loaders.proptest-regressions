@@ -5,3 +5,4 @@
 # It is recommended to check this file in to source control so that
 # everyone who runs the test benefits from these saved cases.
 cc 9ecd963b927346dacc18bf170701a2dd63c474c99efa2a54b1c75c7ab3baf852 # shrinks to mode = 1, i = Index(5825287602224068932), j = Index(9223372036854775808), junk = "1e999"
+cc a426cbb8b86357694abbe68fabd8b6e79268e4f73b6955b018552fa25780eebf # shrinks to mode = 1, i = Index(5825287602224068932), j = Index(6456360425798343066), junk = "1e999"

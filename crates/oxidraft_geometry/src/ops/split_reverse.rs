@@ -16,9 +16,17 @@ pub fn split_curve(curve: &Curve, t: f64) -> (Curve, Curve) {
         }
         Curve::Arc(a) => {
             let mid_angle = a.start_angle + t * (a.end_angle - a.start_angle);
-            let left = CircularArc::new(a.center, a.radius, a.start_angle, mid_angle);
-            let right = CircularArc::new(a.center, a.radius, mid_angle, a.end_angle);
-            (Curve::Arc(left), Curve::Arc(right))
+            // A non-finite split parameter drives `mid_angle` to NaN/inf, which
+            // the constructor now refuses. There are no valid halves in that
+            // case, so hand the original back on both sides rather than
+            // panicking in the trusted constructor.
+            match (
+                CircularArc::try_new(a.center, a.radius, a.start_angle, mid_angle),
+                CircularArc::try_new(a.center, a.radius, mid_angle, a.end_angle),
+            ) {
+                (Ok(left), Ok(right)) => (Curve::Arc(left), Curve::Arc(right)),
+                _ => (curve.clone(), curve.clone()),
+            }
         }
         Curve::Ellipse(e) => {
             let mid_angle = e.start_angle + t * (e.end_angle - e.start_angle);
