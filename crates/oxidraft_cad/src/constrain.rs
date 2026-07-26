@@ -1878,9 +1878,13 @@ fn component_sketch(doc: &Document, seeds: &[EntityId]) -> CompSketch {
                 else {
                     continue;
                 };
-                // Coincident emits two rows.
+                // One entry per `constrain` call, NOT per residual row.
+                // Coincident does emit two rows, but `analyze().redundant` and
+                // `diagnose_conflict().culprits` index by constraint, so an
+                // extra entry here shifted every later constraint's mapping —
+                // the properties panel then put the "redundant" badge on the
+                // wrong row and conflicts named the wrong kind.
                 s.constrain(Constraint::Coincident(ca, cb));
-                constraint_doc_idx.push(doc_idx);
                 constraint_doc_idx.push(doc_idx);
             }
             ConstraintKind::Collinear => {
@@ -1913,8 +1917,7 @@ fn component_sketch(doc: &Document, seeds: &[EntityId]) -> CompSketch {
                     AnchorVars::At(pa) => Constraint::MidpointsCoincident(pa, pa, b0, b1),
                     AnchorVars::Mid(a0, a1) => Constraint::MidpointsCoincident(a0, a1, b0, b1),
                 });
-                // MidpointsCoincident emits two rows.
-                constraint_doc_idx.push(doc_idx);
+                // One entry per `constrain` call — see the Coincident arm.
                 constraint_doc_idx.push(doc_idx);
             }
             ConstraintKind::PointOnLine => {
@@ -2069,7 +2072,9 @@ fn anchor_point_var(
             let (x1, y1) = s.point(a1);
             let aux = s.add_point((x0 + x1) * 0.5, (y0 + y1) * 0.5);
             s.constrain(Constraint::MidpointsCoincident(aux, aux, a0, a1));
-            constraint_doc_idx.push(doc_idx);
+            // One entry per `constrain` call — see the Coincident arm. This
+            // auxiliary is why a midpoint-anchored constraint (a PointOnLine
+            // onto a line's midpoint, say) shifted every later diagnostic.
             constraint_doc_idx.push(doc_idx);
             Some(aux)
         }
