@@ -764,7 +764,8 @@ impl Sketch {
         if res.converged {
             return res;
         }
-        self.vars = perturb(&initial);
+        let scale = self.feature_scale();
+        self.vars = perturb(&initial, scale);
         self.solve()
     }
 
@@ -805,10 +806,23 @@ impl Sketch {
 /// (e.g. a line sitting exactly on a 90° saddle) without moving far from
 /// `vars`, scaled to each variable's own magnitude so it's meaningful
 /// across unit scales.
-fn perturb(vars: &[f64]) -> Vec<f64> {
+fn perturb(vars: &[f64], scale: f64) -> Vec<f64> {
+    // Scaled by the sketch's own extent, NOT by each coordinate's magnitude.
+    // The old `v.abs().max(1.0)` made the nudge proportional to distance from
+    // the origin — exactly what `feature_scale` was written to avoid — so a
+    // 4-unit part drawn at (1e6, 1e6) got a ~1000-unit shove, 250x its own
+    // size. That destroys the "stay near the initial guess" property the user
+    // relies on to pick which branch they drew: the identical sketch solved to
+    // the mirrored answer purely because of where it sat in world space.
+    let amp = 1e-3
+        * if scale.is_finite() && scale > 0.0 {
+            scale
+        } else {
+            1.0
+        };
     vars.iter()
         .enumerate()
-        .map(|(k, v)| v + 1e-3 * (k as f64 * 0.7 + 1.0).sin() * v.abs().max(1.0))
+        .map(|(k, v)| v + amp * (k as f64 * 0.7 + 1.0).sin())
         .collect()
 }
 
@@ -1409,6 +1423,39 @@ mod tests {
         // Same relative accuracy the unit-scale rectangle test demands.
         assert!(dist(s.point(b), (4.0 * S, 0.0)) < 1e-6 * S);
         assert!(dist(s.point(c), (4.0 * S, 3.0 * S)) < 1e-6 * S);
+    }
+
+    #[test]
+    fn the_retry_nudge_does_not_depend_on_world_position() {
+        // `solve_robust`'s retry exists to escape the exact saddle a
+        // pure-angle residual has 90° from its target. The nudge used to be
+        // scaled by each coordinate's magnitude, so a 4-unit part at
+        // (1e6, 1e6) got a ~1000-unit shove — 250× its own size — and LM no
+        // longer stayed near the initial guess. The user's drawn branch was
+        // then decided by where the part sat in world space: identical
+        // sketches solved to mirrored answers.
+        let solve_at = |off: f64| {
+            let mut s = Sketch::new();
+            let a = s.add_point(off, off);
+            // b starts exactly on the saddle.
+            let b = s.add_point(off, off + 4.0);
+            s.constrain(Constraint::Fixed(a, off, off));
+            s.constrain(Constraint::Horizontal(a, b));
+            s.constrain(Constraint::Distance(a, b, 4.0));
+            assert!(s.solve_robust().converged, "off {off:e} must converge");
+            let (ax, _) = s.point(a);
+            let (bx, _) = s.point(b);
+            (bx - ax).signum()
+        };
+        let reference = solve_at(0.0);
+        for off in [1e3, 1e5, 1e6, 1e7] {
+            assert_eq!(
+                solve_at(off),
+                reference,
+                "off {off:e} solved to the mirrored branch; world position must \
+                 not decide which solution the user gets"
+            );
+        }
     }
 
     #[test]
