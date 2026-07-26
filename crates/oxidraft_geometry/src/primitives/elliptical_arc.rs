@@ -89,6 +89,18 @@ impl EllipticalArc {
         {
             return Err(GeomError::NonFiniteValue);
         }
+        // Two individually finite angles can still describe a sweep that is
+        // not: -1e308 .. 1e308 passes every check above while spanning
+        // infinity. `bounding_box` then samples the whole plane and every
+        // sample is NaN, which f64 min/max silently drop — so the box comes
+        // back (-inf, -inf)..(inf, inf), document extents go infinite, and an
+        // SVG or PDF export of an OTHERWISE VALID drawing comes out blank.
+        // Same bound and reasoning as `CircularArc::try_new`.
+        const MAX_QUARTER_TURNS: f64 = 4096.0;
+        let quarters = (end_angle - start_angle).abs() / std::f64::consts::FRAC_PI_2;
+        if !quarters.is_finite() || quarters > MAX_QUARTER_TURNS {
+            return Err(GeomError::NonFiniteValue);
+        }
         Ok(EllipticalArc {
             center,
             semi_major,
@@ -163,6 +175,16 @@ impl CurveSegment for EllipticalArc {
             xmax = xmax.max(x);
             ymin = ymin.min(y);
             ymax = ymax.max(y);
+        }
+        // Defence in depth behind `try_new`'s sweep check: if every sample
+        // came back NaN the sentinels above survive untouched (f64 min/max
+        // return the non-NaN operand), and `from_corners` would swap
+        // ±INFINITY into a whole-plane box that poisons document extents and
+        // blanks exports. A box that never got a real sample describes no
+        // geometry, so degenerate to the centre instead.
+        if !(xmin <= xmax && ymin <= ymax) {
+            let (cx, cy) = self.center.to_f64();
+            return BoundingBox::from_corners(cx, cy, cx, cy);
         }
         BoundingBox::from_corners(xmin, ymin, xmax, ymax)
     }

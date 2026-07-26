@@ -2016,6 +2016,33 @@ mod tests {
     }
 
     #[test]
+    fn a_poisoned_ellipse_cannot_blank_the_whole_export() {
+        // The ellipse's angles are individually finite but span infinity, so
+        // no per-field check caught it. Its bounding box then came back as the
+        // whole plane, document extents went infinite, and the SVG/PDF export
+        // of the *valid* line alongside it came out blank — export_pdf even
+        // returned Ok, so nothing warned the user.
+        let doc = from_string(&format!(
+            "{MAGIC} {VERSION}\n\
+             E LINE 0 bylayer 0;0 10;10 ByLayer bylayer\n\
+             E ELLIPSE 0 bylayer 0;0 2 1 0 -1e308 1e308\n"
+        ))
+        .expect("the good entity must still load");
+        assert_eq!(doc.len(), 1, "the poisoned ellipse must be dropped");
+
+        let bb = doc.extents().expect("the line gives real extents");
+        assert!(
+            bb.min.x.is_finite() && bb.max.x.is_finite(),
+            "extents must stay finite: {bb:?}"
+        );
+        let svg = crate::export_svg(&doc);
+        assert!(
+            !svg.contains("inf") && !svg.contains("NaN"),
+            "export must not carry inf/NaN"
+        );
+    }
+
+    #[test]
     fn crafted_arc_spans_are_dropped_on_import() {
         // Both angles are individually finite, so no per-field check catches
         // these. The first describes an infinite sweep; the second a finite
