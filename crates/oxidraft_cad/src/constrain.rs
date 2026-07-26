@@ -3342,6 +3342,60 @@ mod tests {
     }
 
     #[test]
+    fn redundancy_is_blamed_on_the_right_constraint() {
+        // `constraint_doc_idx` maps solver constraints back to document ones.
+        // Arms that emit two residual ROWS from one `constrain` call used to
+        // push two entries, but `analyze().redundant` indexes by CONSTRAINT —
+        // so everything recorded after one was shifted by one and the badge
+        // landed on the wrong row.
+        //
+        // A Concentric ahead of the group is enough to expose it, because it
+        // lowers through the Coincident arm. Note the component must be seeded
+        // with the circles too: seeding only the lines leaves the Concentric
+        // out of the sketch entirely, and then nothing shifts and the test
+        // proves nothing (which is exactly how an earlier version of this test
+        // passed against the bug).
+        let tau = std::f64::consts::TAU;
+        let mut doc = Document::new();
+        let c1 = doc.add(EntityKind::Curve(Curve::Arc(
+            oxidraft_geometry::CircularArc::new(Point2d::from_f64(0.0, 0.0), 1.0, 0.0, tau),
+        )));
+        let c2 = doc.add(EntityKind::Curve(Curve::Arc(
+            oxidraft_geometry::CircularArc::new(Point2d::from_f64(3.0, 0.0), 2.0, 0.0, tau),
+        )));
+        constrain_lines(&mut doc, &[c1, c2], ConstraintKind::Concentric).expect("concentric");
+
+        let l = doc.add(EntityKind::Curve(Curve::Line(LineSeg::from_endpoints(
+            Point2d::from_f64(0.0, 0.0),
+            Point2d::from_f64(4.0, 0.0),
+        ))));
+        let m = doc.add(EntityKind::Curve(Curve::Line(LineSeg::from_endpoints(
+            Point2d::from_f64(0.0, 2.0),
+            Point2d::from_f64(4.0, 2.0),
+        ))));
+        let _ = constrain_lines(&mut doc, &[l], ConstraintKind::Horizontal);
+        let _ = constrain_lines(&mut doc, &[l, m], ConstraintKind::Parallel);
+        // Redundant: Parallel to an already-horizontal line implies this.
+        let _ = constrain_lines(&mut doc, &[m], ConstraintKind::Horizontal);
+
+        let report = dof_report(&doc, &[c1, c2, l, m]);
+        assert!(
+            !report.redundant.is_empty(),
+            "the trailing Horizontal is redundant and must be reported — an \
+             empty list would make every assertion below vacuous"
+        );
+        for &i in &report.redundant {
+            assert_eq!(
+                doc.constraints[i].kind,
+                ConstraintKind::Horizontal,
+                "blamed doc[{i}] {:?}; the redundant constraint is the second \
+                 Horizontal, so anything else means the mapping is shifted",
+                doc.constraints[i].kind
+            );
+        }
+    }
+
+    #[test]
     fn angular_constraints_rotate_the_follower_instead_of_shrinking_it() {
         // A purely angular residual is least-squares-minimised by projecting
         // the follower onto the target direction, which costs it
