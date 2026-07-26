@@ -640,10 +640,20 @@ fn parse_entity<'a>(
                 p0, p1, p2, p3,
             ))))
         }
-        "RATIONAL" => parse_control_data(tok)
-            .map(|(p, w)| EntityKind::Curve(Curve::Rational(RationalBezier::new(p, w)))),
-        "NURBS" => parse_control_data(tok)
-            .map(|(c, w)| EntityKind::Curve(Curve::Nurbs(NurbsCurve::new(c, w)))),
+        // Fallible constructors: `new` panics, and this is untrusted file
+        // data. The validation above should already have caught anything the
+        // kernel rejects, but the importers must not be the thing that has to
+        // be right — a mismatch between the two rules is a crash on open.
+        "RATIONAL" => parse_control_data(tok).and_then(|(p, w)| {
+            RationalBezier::try_new(p, w)
+                .ok()
+                .map(|rb| EntityKind::Curve(Curve::Rational(rb)))
+        }),
+        "NURBS" => parse_control_data(tok).and_then(|(c, w)| {
+            NurbsCurve::try_new(c, w)
+                .ok()
+                .map(|nc| EntityKind::Curve(Curve::Nurbs(nc)))
+        }),
         "POINT" => Some(EntityKind::Point(parse_pt(tok.next()))),
         "TEXT" => {
             let anchor = parse_pt(tok.next());
@@ -809,9 +819,8 @@ fn parse_segment(line: &str) -> Option<Curve> {
             parse_pt(tok.next()),
             parse_pt(tok.next()),
         ))),
-        "RATIONAL" => {
-            parse_control_data(&mut tok).map(|(p, w)| Curve::Rational(RationalBezier::new(p, w)))
-        }
+        "RATIONAL" => parse_control_data(&mut tok)
+            .and_then(|(p, w)| RationalBezier::try_new(p, w).ok().map(Curve::Rational)),
         "ELLIPSE" => {
             let c = parse_pt(tok.next());
             let major = parse_num(tok.next().unwrap_or("1"));
@@ -843,8 +852,14 @@ fn parse_control_data<'a, I: Iterator<Item = &'a str>>(
         points.push(parse_pt(Some(p)));
         weights.push(parse_num(tok.next().unwrap_or("1")));
     }
-    (points.len() >= 2 && points.len() == weights.len() && weights.iter().all(|&w| w > 0.0))
-        .then_some((points, weights))
+    // `w > 0.0` alone lets +inf through, and the geometry constructors reject
+    // non-finite weights — so an infinite weight in a crafted file reached the
+    // *panicking* constructor and crashed the app on open. Match the kernel's
+    // rule exactly here.
+    (points.len() >= 2
+        && points.len() == weights.len()
+        && weights.iter().all(|&w| w.is_finite() && w > 0.0))
+    .then_some((points, weights))
 }
 
 fn rat(v: f64) -> String {
@@ -1985,6 +2000,22 @@ mod tests {
             }
             other => panic!("expected Hatch, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn crafted_weights_are_rejected_not_panicked() {
+        // `w > 0.0` admits +inf, and the geometry constructors reject
+        // non-finite weights — so an infinite weight in a one-line crafted
+        // file reached the *panicking* constructor and crashed the app on
+        // open. Every weight the kernel refuses must be dropped here instead.
+        for bad in ["inf", "-inf", "NaN", "0", "-1"] {
+            let src = format!("{MAGIC} {VERSION}\nE RATIONAL 0 bylayer 3 0;0 1 1;1 {bad} 2;0 1\n");
+            let doc = from_string(&src).expect("a bad weight must not fail the whole load");
+            assert_eq!(doc.len(), 0, "weight {bad} must be dropped, not accepted");
+        }
+        // A well-formed rational still loads.
+        let ok = format!("{MAGIC} {VERSION}\nE RATIONAL 0 bylayer 3 0;0 1 1;1 2 2;0 1\n");
+        assert_eq!(from_string(&ok).unwrap().len(), 1);
     }
 
     #[test]

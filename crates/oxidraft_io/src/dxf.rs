@@ -471,14 +471,20 @@ fn parse_spline(rec: &[Pair]) -> Vec<EntityKind> {
     weights.truncate(crate::MAX_CURVE_CONTROL_POINTS);
     fit.truncate(crate::MAX_CURVE_CONTROL_POINTS);
     if control.len() >= 2 {
-        let weights = if weights.len() == control.len() && weights.iter().all(|&w| w > 0.0) {
+        // `w > 0.0` alone admits +inf, which the kernel rejects — fall back to
+        // unit weights rather than handing it on, and construct fallibly since
+        // this is untrusted file data (`new` panics).
+        let weights = if weights.len() == control.len()
+            && weights.iter().all(|&w| w.is_finite() && w > 0.0)
+        {
             weights
         } else {
             vec![1.0; control.len()]
         };
-        vec![EntityKind::Curve(Curve::Nurbs(NurbsCurve::new(
-            control, weights,
-        )))]
+        NurbsCurve::try_new(control, weights)
+            .ok()
+            .map(|nc| vec![EntityKind::Curve(Curve::Nurbs(nc))])
+            .unwrap_or_default()
     } else if fit.len() >= 2 {
         let segs: Vec<Curve> = fit
             .windows(2)
