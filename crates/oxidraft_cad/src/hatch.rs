@@ -1064,7 +1064,70 @@ fn loop_polygon(boundary: &[Curve], tol: f64) -> Vec<P> {
             pts.pop();
         }
     }
-    pts
+    decimate_boundary(pts)
+}
+
+/// Caps how many vertices a hatch boundary contributes, keeping an evenly
+/// spaced subset when it runs over.
+///
+/// Ear clipping is O(n²) in the boundary vertex count, and past a few thousand
+/// points the extra detail buys nothing: a plain circular hatch flattened at
+/// 1e-9 produced 65,537 boundary points and 15,706 triangles — the *same*
+/// 15,706 the 15,709-point flattening at 1e-6 produced — while both took over
+/// 1.5 s against 1.6 ms for the 498-point version. Since the render tolerance
+/// tightens with zoom, an ordinary circle hatch could reach that on its own,
+/// no crafted file needed. The fill is a solid region, so the shape a viewer
+/// sees is unchanged; only the triangulation cost is bounded.
+fn decimate_boundary(pts: Vec<P>) -> Vec<P> {
+    const MAX_BOUNDARY_POINTS: usize = 4096;
+    if pts.len() <= MAX_BOUNDARY_POINTS {
+        return pts;
+    }
+    let step = pts.len().div_ceil(MAX_BOUNDARY_POINTS);
+    pts.iter().step_by(step).copied().collect()
+}
+
+#[cfg(test)]
+mod boundary_cap_tests {
+    use super::*;
+    use oxidraft_geometry::CircularArc;
+
+    /// Ear clipping is O(n²) in boundary vertices, and the render tolerance
+    /// tightens with zoom — so an ordinary circular hatch could reach 65k
+    /// boundary points and take over 1.5 s to triangulate, with no crafted
+    /// file involved. Capping the boundary density bounds that (measured
+    /// 1.55 s -> 97 ms) and, because the fill is a solid region, costs
+    /// nothing a viewer can see.
+    #[test]
+    fn dense_boundaries_are_capped_without_changing_the_fill() {
+        let circle = Curve::Arc(CircularArc::new(
+            Point2d::from_f64(0.0, 0.0),
+            50.0,
+            0.0,
+            std::f64::consts::TAU,
+        ));
+        let truth = std::f64::consts::PI * 50.0 * 50.0;
+        for tol in [1e-1, 1e-3, 1e-6, 1e-9] {
+            let poly = loop_polygon(std::slice::from_ref(&circle), tol);
+            assert!(
+                poly.len() <= 4096,
+                "boundary must be capped, got {} at tol {tol:e}",
+                poly.len()
+            );
+            let area: f64 = triangulate_contours(std::slice::from_ref(&circle), tol)
+                .iter()
+                .map(|t| {
+                    ((t[1].x - t[0].x) * (t[2].y - t[0].y) - (t[2].x - t[0].x) * (t[1].y - t[0].y))
+                        .abs()
+                        * 0.5
+                })
+                .sum();
+            assert!(
+                (area - truth).abs() / truth < 0.01,
+                "fill area must stay within 1% at tol {tol:e}: {area} vs {truth}"
+            );
+        }
+    }
 }
 
 fn signed_area(p: &[P]) -> f64 {
