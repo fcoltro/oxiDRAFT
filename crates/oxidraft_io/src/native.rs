@@ -644,12 +644,14 @@ fn parse_entity<'a>(
         // data. The validation above should already have caught anything the
         // kernel rejects, but the importers must not be the thing that has to
         // be right — a mismatch between the two rules is a crash on open.
-        "RATIONAL" => parse_control_data(tok).and_then(|(p, w)| {
-            RationalBezier::try_new(p, w)
-                .ok()
-                .map(|rb| EntityKind::Curve(Curve::Rational(rb)))
-        }),
-        "NURBS" => parse_control_data(tok).and_then(|(c, w)| {
+        "RATIONAL" => {
+            parse_control_data(tok, crate::MAX_RATIONAL_CONTROL_POINTS).and_then(|(p, w)| {
+                RationalBezier::try_new(p, w)
+                    .ok()
+                    .map(|rb| EntityKind::Curve(Curve::Rational(rb)))
+            })
+        }
+        "NURBS" => parse_control_data(tok, crate::MAX_NURBS_CONTROL_POINTS).and_then(|(c, w)| {
             NurbsCurve::try_new(c, w)
                 .ok()
                 .map(|nc| EntityKind::Curve(Curve::Nurbs(nc)))
@@ -819,7 +821,7 @@ fn parse_segment(line: &str) -> Option<Curve> {
             parse_pt(tok.next()),
             parse_pt(tok.next()),
         ))),
-        "RATIONAL" => parse_control_data(&mut tok)
+        "RATIONAL" => parse_control_data(&mut tok, crate::MAX_RATIONAL_CONTROL_POINTS)
             .and_then(|(p, w)| RationalBezier::try_new(p, w).ok().map(Curve::Rational)),
         "ELLIPSE" => {
             let c = parse_pt(tok.next());
@@ -836,8 +838,13 @@ fn parse_segment(line: &str) -> Option<Curve> {
     }
 }
 
+/// Reads a `count point weight …` control block. `max` bounds how many points
+/// are actually taken — it differs by curve kind, since a rational Bézier
+/// costs O(n²) per evaluation while a NURBS decomposes into fixed-degree
+/// segments.
 fn parse_control_data<'a, I: Iterator<Item = &'a str>>(
     tok: &mut I,
+    max: usize,
 ) -> Option<(Vec<Point2d>, Vec<f64>)> {
     let n: usize = tok.next().and_then(|v| v.parse().ok())?;
     let mut points = Vec::with_capacity(n.min(1024));
@@ -845,9 +852,8 @@ fn parse_control_data<'a, I: Iterator<Item = &'a str>>(
     // Bound the *actual* points read, not the declared count: a huge declared
     // count with few real tokens still loads (the loop breaks on token
     // exhaustion), but a crafted line that really carries a pathological
-    // number of points is truncated so a high-degree rational curve can't
-    // freeze rendering. See [`crate::MAX_CURVE_CONTROL_POINTS`].
-    for _ in 0..n.min(crate::MAX_CURVE_CONTROL_POINTS) {
+    // number of points is truncated so the curve can't freeze rendering.
+    for _ in 0..n.min(max) {
         let Some(p) = tok.next() else { break };
         points.push(parse_pt(Some(p)));
         weights.push(parse_num(tok.next().unwrap_or("1")));
@@ -1861,28 +1867,35 @@ mod tests {
 
     #[test]
     fn control_point_count_is_capped() {
-        let cap = crate::MAX_CURVE_CONTROL_POINTS;
-
-        // A crafted line that really carries far more points than the cap is
-        // truncated, so a pathological high-degree rational curve can't be
-        // built and freeze rendering.
-        let mut toks: Vec<String> = vec![(cap + 500).to_string()];
-        for _ in 0..(cap + 500) {
-            toks.push("1;1".into());
-            toks.push("1".into());
+        // Rationals get a far tighter cap than NURBS (asserted at compile time
+        // beside the definitions): a rational Bézier is evaluated as one piece
+        // and is O(n²) per evaluate, while a NURBS decomposes into
+        // fixed-degree cubic segments.
+        for cap in [
+            crate::MAX_RATIONAL_CONTROL_POINTS,
+            crate::MAX_NURBS_CONTROL_POINTS,
+        ] {
+            // A crafted line really carrying far more points than the cap is
+            // truncated, so a pathological curve can't be built.
+            let mut toks: Vec<String> = vec![(cap + 500).to_string()];
+            for _ in 0..(cap + 500) {
+                toks.push("1;1".into());
+                toks.push("1".into());
+            }
+            let refs: Vec<&str> = toks.iter().map(String::as_str).collect();
+            let (points, _) =
+                parse_control_data(&mut refs.into_iter(), cap).expect("still loads, bounded");
+            assert!(
+                points.len() <= cap,
+                "control points must be capped at {cap}: got {}",
+                points.len()
+            );
         }
-        let refs: Vec<&str> = toks.iter().map(String::as_str).collect();
-        let (points, _) = parse_control_data(&mut refs.into_iter()).expect("still loads, bounded");
-        assert!(
-            points.len() <= cap,
-            "control points must be capped: {}",
-            points.len()
-        );
 
         // A normal control set (count, then point/weight pairs) still parses.
         let tokens = ["4", "0;0", "1", "2;4", "1", "6;4", "1", "8;0", "1"];
         let mut ok = tokens.into_iter();
-        assert!(parse_control_data(&mut ok).is_some());
+        assert!(parse_control_data(&mut ok, crate::MAX_RATIONAL_CONTROL_POINTS).is_some());
     }
 
     #[test]

@@ -17,12 +17,29 @@ pub use svg::{export_svg, import_svg};
 
 use oxidraft_geometry::{Curve, CurveSegment, Point2d, tessellate_curve};
 
-/// Upper bound on control points accepted for a single imported curve. A
-/// crafted file can declare a huge count on one line; a high-degree rational
-/// Bézier is then subdivided whole (~O(n²)) and freezes rendering. No
-/// legitimate drawing contains a curve remotely this dense, so counts past
-/// this are rejected rather than built. Shared by the native and DXF readers.
-pub(crate) const MAX_CURVE_CONTROL_POINTS: usize = 10_000;
+/// Upper bound on control points for a single imported *rational Bézier*.
+///
+/// A rational Bézier is evaluated as one piece, so `evaluate` is O(n²) in the
+/// control-point count and allocates the homogeneous array every call.
+/// Measured: n=1,000 costs 65 ms per tessellation and n=10,000 costs 8.4 s —
+/// a 1.78 MB file of such curves took 167 s to open, and at 40 ms per
+/// `evaluate` snapping and picking are unusable long before that. A real
+/// drawing never exceeds degree ~10; this leaves three orders of headroom.
+pub(crate) const MAX_RATIONAL_CONTROL_POINTS: usize = 256;
+
+/// Upper bound on control points for a single imported *NURBS* curve.
+///
+/// Much higher than the rational cap because a NURBS decomposes into
+/// fixed-degree cubic segments, so cost is linear in the control count rather
+/// than quadratic — 10,000 control points measured 0.61 s versus 8.4 s for the
+/// rational of the same size. Still bounded, since a crafted file can declare
+/// any count it likes on one line.
+pub(crate) const MAX_NURBS_CONTROL_POINTS: usize = 10_000;
+
+// The rational cap must stay the tighter of the two — the whole point of
+// separating them is that a rational's cost is quadratic where a NURBS's is
+// linear. Checked at compile time so the relationship can't be inverted.
+const _: () = assert!(MAX_RATIONAL_CONTROL_POINTS < MAX_NURBS_CONTROL_POINTS);
 
 /// Writes through a temp file + fsync + rename so a crash or full disk
 /// mid-write can never leave a truncated file where a good one used to be.

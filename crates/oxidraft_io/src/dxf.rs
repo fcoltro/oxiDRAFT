@@ -466,10 +466,10 @@ fn parse_spline(rec: &[Pair]) -> Vec<EntityKind> {
         }
     }
     // Bound an absurdly dense control/fit set (crafted-file DoS) so a
-    // pathological curve can't be built — see [`crate::MAX_CURVE_CONTROL_POINTS`].
-    control.truncate(crate::MAX_CURVE_CONTROL_POINTS);
-    weights.truncate(crate::MAX_CURVE_CONTROL_POINTS);
-    fit.truncate(crate::MAX_CURVE_CONTROL_POINTS);
+    // pathological curve can't be built — see [`crate::MAX_NURBS_CONTROL_POINTS`].
+    control.truncate(crate::MAX_NURBS_CONTROL_POINTS);
+    weights.truncate(crate::MAX_NURBS_CONTROL_POINTS);
+    fit.truncate(crate::MAX_NURBS_CONTROL_POINTS);
     if control.len() >= 2 {
         // `w > 0.0` alone admits +inf, which the kernel rejects — fall back to
         // unit weights rather than handing it on, and construct fallibly since
