@@ -765,8 +765,21 @@ impl Sketch {
             return res;
         }
         let scale = self.feature_scale();
-        self.vars = perturb(&initial, scale);
-        self.solve()
+        let first_vars = std::mem::replace(&mut self.vars, perturb(&initial, scale));
+        let retry = self.solve();
+        // Keep whichever attempt actually did better. The retry used to be
+        // returned unconditionally, so a sketch the nudge failed to improve
+        // came back with the worse of two answers we had already computed —
+        // measured at 0.099188966 -> 0.099188990 on an over-constrained chain.
+        // Tiny, and the callers in oxidraft_cad gate write_back on
+        // `converged` so it never reached a document, but there is no reason
+        // to discard the better result when both are in hand.
+        if retry.converged || retry.residual < res.residual {
+            retry
+        } else {
+            self.vars = first_vars;
+            res
+        }
     }
 
     /// Only meaningful after `solve()`/`solve_robust()` (started from
@@ -1423,6 +1436,44 @@ mod tests {
         // Same relative accuracy the unit-scale rectangle test demands.
         assert!(dist(s.point(b), (4.0 * S, 0.0)) < 1e-6 * S);
         assert!(dist(s.point(c), (4.0 * S, 3.0 * S)) < 1e-6 * S);
+    }
+
+    #[test]
+    fn solve_robust_never_returns_the_worse_of_its_two_attempts() {
+        // The retry used to be returned unconditionally. When the nudge fails
+        // to help, that hands back the worse of two answers already in hand.
+        // An over-constrained chain with a contradictory closure reproduces
+        // it (measured 0.099188966 -> 0.099188990 before the fix).
+        let build = |n: usize, off: f64| {
+            let mut s = Sketch::new();
+            let pts: Vec<PointVar> = (0..n)
+                .map(|i| {
+                    let t = i as f64;
+                    s.add_point(off + t, off + (t * 1.7).sin())
+                })
+                .collect();
+            s.constrain(Constraint::Fixed(pts[0], off, off));
+            for w in pts.windows(2) {
+                s.constrain(Constraint::Distance(w[0], w[1], 1.0));
+                s.constrain(Constraint::Horizontal(w[0], w[1]));
+            }
+            // Cannot hold: the chain is longer than this closure allows.
+            s.constrain(Constraint::Distance(pts[0], pts[n - 1], 0.5));
+            s
+        };
+        for n in [3usize, 4, 5, 6, 8] {
+            for off in [0.0, 1.0, 1e3, 1e6] {
+                let plain = build(n, off).solve();
+                let robust = build(n, off).solve_robust();
+                assert!(
+                    robust.converged || robust.residual <= plain.residual + 1e-12,
+                    "n={n} off={off:e}: solve_robust returned {:.9}, worse than the \
+                     {:.9} its first attempt already had",
+                    robust.residual,
+                    plain.residual
+                );
+            }
+        }
     }
 
     #[test]
