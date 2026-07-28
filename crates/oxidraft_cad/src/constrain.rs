@@ -2263,27 +2263,40 @@ pub fn resolve_after_transform_rigid(
 
 /// Entities that must travel with `moved` because a `Block` ties them to it.
 ///
-/// `Fixed` is deliberately not a source of followers, and disqualifies an
-/// entity from being one: it is a single-entity pin, and `pin_shape` freezes
-/// the entity wherever it currently sits, so moving it would not fight the
-/// transform — it would silently re-pin it at the new place and lose the
-/// user's anchor.
+/// The walk is transitive, which is not a refinement but the whole job:
+/// `constrain_lines` records an N-entity Block as a *star* of pair
+/// constraints hubbed on the first entity, so from any member except that hub
+/// the rest of the group is two hops away. A single-hop search driven from
+/// the middle of a three-line group moves the hub and abandons the third
+/// line — the same silent deformation this function exists to prevent.
+///
+/// `Fixed` is deliberately not a source of followers, and acts as a wall: it
+/// is a single-entity pin, and `pin_shape` freezes the entity wherever it
+/// currently sits, so moving it would not fight the transform — it would
+/// silently re-pin it at the new place and lose the user's anchor. Nothing
+/// beyond it travels either, which keeps the pin meaningful locally rather
+/// than tearing the group open across it.
 fn rigid_group_followers(doc: &Document, moved: &[EntityId]) -> Vec<EntityId> {
+    let pinned = |id: EntityId| {
+        doc.constraints_on(id)
+            .any(|p| p.kind == ConstraintKind::Fixed && p.a == id)
+    };
     let mut out: Vec<EntityId> = Vec::new();
-    for &id in moved {
+    let mut queue: Vec<EntityId> = moved.to_vec();
+    let mut seen: Vec<EntityId> = moved.to_vec();
+    while let Some(id) = queue.pop() {
         for c in doc.constraints_on(id) {
             if c.kind != ConstraintKind::Block {
                 continue;
             }
             for other in [Some(c.a), c.b, c.c].into_iter().flatten() {
-                if other == id || moved.contains(&other) || out.contains(&other) {
+                if seen.contains(&other) {
                     continue;
                 }
-                let pinned = doc
-                    .constraints_on(other)
-                    .any(|p| p.kind == ConstraintKind::Fixed && p.a == other);
-                if !pinned {
+                seen.push(other);
+                if !pinned(other) {
                     out.push(other);
+                    queue.push(other);
                 }
             }
         }
@@ -3542,6 +3555,46 @@ mod tests {
             "the rest of the group must travel with the transform, not stay \
              behind: {b0:?}..{b1:?} -> {n0:?}..{n1:?}"
         );
+    }
+
+    #[test]
+    fn a_whole_star_group_travels_when_driven_from_the_middle() {
+        // `constrain_lines` records an N-entity Block as pair constraints all
+        // hubbed on the FIRST entity. Driven from any other member, the rest
+        // of the group is two hops away, so a single-hop follower search
+        // moves the hub and leaves the far members behind — the group opens
+        // up exactly as if it had never been blocked.
+        let mut doc = Document::new();
+        let mut ids = Vec::new();
+        for i in 0..3 {
+            ids.push(
+                doc.add(EntityKind::Curve(Curve::Line(LineSeg::from_endpoints(
+                    Point2d::from_f64(0.0, 3.0 * f64::from(i)),
+                    Point2d::from_f64(4.0, 3.0 * f64::from(i)),
+                )))),
+            );
+        }
+        constrain_lines(&mut doc, &ids, ConstraintKind::Block).expect("record");
+        let x_of = |d: &Document, id| match d.get(id).unwrap().as_curve().unwrap() {
+            Curve::Line(l) => l.p0.to_f64().0,
+            _ => panic!("expected a line"),
+        };
+
+        // Drive from the middle — the member that is NOT the hub.
+        let xf = oxidraft_geometry::Transform2d::translation(10.0, 0.0);
+        if let Some(e) = doc.get_mut(ids[1]) {
+            e.transform(&xf);
+        }
+        resolve_after_transform_rigid(&mut doc, &[ids[1]], &xf);
+
+        for &id in &ids {
+            let x = x_of(&doc, id);
+            assert!(
+                (x - 10.0).abs() < 1e-6,
+                "every member of the group must travel, including the ones \
+                 reachable only through the hub; {id:?} sits at x={x}"
+            );
+        }
     }
 
     #[test]
