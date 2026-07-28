@@ -1314,7 +1314,7 @@ impl AppState {
                         moved.push(id);
                     }
                 }
-                if !oxidraft_cad::resolve_after_transform(&mut self.document, &moved) {
+                if !oxidraft_cad::resolve_after_transform_rigid(&mut self.document, &moved, &t) {
                     self.command_log.push(
                         "Constraints not satisfiable after transform (UNCONSTRAIN to drop)".into(),
                     );

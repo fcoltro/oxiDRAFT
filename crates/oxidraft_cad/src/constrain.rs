@@ -2230,6 +2230,67 @@ pub fn resolve_after_edit(
 /// when the constraints cannot be satisfied with the moved geometry pinned
 /// (for example rotating a horizontal-constrained line); the transform is
 /// kept as the user made it.
+/// [`resolve_after_transform`] for a transform the caller still has in hand,
+/// carrying `Block` groups along with it.
+///
+/// `Block` freezes its members' relative arrangement, but the solver rows for
+/// that are derived from the geometry *as it stands when the sketch is built*
+/// — which, on this path, is already after the user's edit. Every residual is
+/// therefore zero on arrival, the solve ends in no iterations, and the
+/// un-moved members stay put while the moved one walks away: the group
+/// silently deforms, and is then permanently redefined around the deformed
+/// shape. `SketchConstraint` stores a single `Option<f64>`, so there is
+/// nowhere to have recorded the original arrangement to restore to.
+///
+/// Applying `xf` to the rest of the group first is what "rigid" actually
+/// means, and needs no stored geometry. The solve then runs as usual, so any
+/// other constraints on those entities still get their say.
+pub fn resolve_after_transform_rigid(
+    doc: &mut Document,
+    moved: &[EntityId],
+    xf: &oxidraft_geometry::Transform2d,
+) -> bool {
+    if xf.is_finite() {
+        let followers = rigid_group_followers(doc, moved);
+        for id in followers {
+            if let Some(e) = doc.get_mut(id) {
+                e.transform(xf);
+            }
+        }
+    }
+    resolve_after_transform(doc, moved)
+}
+
+/// Entities that must travel with `moved` because a `Block` ties them to it.
+///
+/// `Fixed` is deliberately not a source of followers, and disqualifies an
+/// entity from being one: it is a single-entity pin, and `pin_shape` freezes
+/// the entity wherever it currently sits, so moving it would not fight the
+/// transform — it would silently re-pin it at the new place and lose the
+/// user's anchor.
+fn rigid_group_followers(doc: &Document, moved: &[EntityId]) -> Vec<EntityId> {
+    let mut out: Vec<EntityId> = Vec::new();
+    for &id in moved {
+        for c in doc.constraints_on(id) {
+            if c.kind != ConstraintKind::Block {
+                continue;
+            }
+            for other in [Some(c.a), c.b, c.c].into_iter().flatten() {
+                if other == id || moved.contains(&other) || out.contains(&other) {
+                    continue;
+                }
+                let pinned = doc
+                    .constraints_on(other)
+                    .any(|p| p.kind == ConstraintKind::Fixed && p.a == other);
+                if !pinned {
+                    out.push(other);
+                }
+            }
+        }
+    }
+    out
+}
+
 pub fn resolve_after_transform(doc: &mut Document, moved: &[EntityId]) -> bool {
     let seeds: Vec<EntityId> = moved
         .iter()
@@ -3441,6 +3502,115 @@ mod tests {
                 "{kind:?}: follower must rotate, not shrink: {before} -> {after}"
             );
         }
+    }
+
+    #[test]
+    fn rigid_groups_follow_a_transform_instead_of_deforming() {
+        // `lower_block` freezes its targets from the sketch it is handed —
+        // which, on the transform path, is already the post-edit geometry. So
+        // every residual arrives at zero, the solve converges in no iterations
+        // and the un-moved members simply stay behind while the moved one
+        // walks off. `resolve_after_transform` reports success either way.
+        let mut doc = Document::new();
+        let a = doc.add(EntityKind::Curve(Curve::Line(LineSeg::from_endpoints(
+            Point2d::from_f64(0.0, 0.0),
+            Point2d::from_f64(4.0, 0.0),
+        ))));
+        let b = doc.add(EntityKind::Curve(Curve::Line(LineSeg::from_endpoints(
+            Point2d::from_f64(0.0, 3.0),
+            Point2d::from_f64(4.0, 3.0),
+        ))));
+        constrain_lines(&mut doc, &[a, b], ConstraintKind::Block).expect("record");
+        let ends_of = |d: &Document, id| match d.get(id).unwrap().as_curve().unwrap() {
+            Curve::Line(l) => (l.p0.to_f64(), l.p1.to_f64()),
+            _ => panic!("expected a line"),
+        };
+        let (b0, b1) = ends_of(&doc, b);
+
+        let xf = oxidraft_geometry::Transform2d::translation(10.0, 0.0);
+        if let Some(e) = doc.get_mut(a) {
+            e.transform(&xf);
+        }
+        assert!(resolve_after_transform_rigid(&mut doc, &[a], &xf));
+
+        let (n0, n1) = ends_of(&doc, b);
+        assert!(
+            (n0.0 - (b0.0 + 10.0)).abs() < 1e-6
+                && (n1.0 - (b1.0 + 10.0)).abs() < 1e-6
+                && (n0.1 - b0.1).abs() < 1e-6
+                && (n1.1 - b1.1).abs() < 1e-6,
+            "the rest of the group must travel with the transform, not stay \
+             behind: {b0:?}..{b1:?} -> {n0:?}..{n1:?}"
+        );
+    }
+
+    #[test]
+    fn a_pinned_member_is_not_dragged_by_its_group() {
+        // `Fixed` is a single-entity pin, and `pin_shape` freezes the entity
+        // wherever it sits at solve time. So dragging a pinned member along
+        // would not be caught and undone by the solver — it would re-pin the
+        // entity at the new spot and quietly discard the user's anchor.
+        let mut doc = Document::new();
+        let a = doc.add(EntityKind::Curve(Curve::Line(LineSeg::from_endpoints(
+            Point2d::from_f64(0.0, 0.0),
+            Point2d::from_f64(4.0, 0.0),
+        ))));
+        let b = doc.add(EntityKind::Curve(Curve::Line(LineSeg::from_endpoints(
+            Point2d::from_f64(0.0, 3.0),
+            Point2d::from_f64(4.0, 3.0),
+        ))));
+        constrain_lines(&mut doc, &[a, b], ConstraintKind::Block).expect("record");
+        doc.constraints
+            .push(oxidraft_document::SketchConstraint::fixed(b));
+
+        let xf = oxidraft_geometry::Transform2d::translation(10.0, 0.0);
+        if let Some(e) = doc.get_mut(a) {
+            e.transform(&xf);
+        }
+        resolve_after_transform_rigid(&mut doc, &[a], &xf);
+
+        let Curve::Line(l) = doc.get(b).unwrap().as_curve().unwrap() else {
+            panic!("expected a line");
+        };
+        assert!(
+            l.p0.to_f64().0.abs() < 1e-6,
+            "a pinned entity must hold its ground; it moved to x={}",
+            l.p0.to_f64().0
+        );
+    }
+
+    #[test]
+    fn a_non_rigid_neighbour_is_not_dragged_along() {
+        // The follower search keys on Block/Fixed only. A Parallel pair shares
+        // the same shape as the rigid case, so it is the check that the fix
+        // moves geometry for the right reason rather than moving whatever it
+        // finds attached.
+        let mut doc = Document::new();
+        let a = doc.add(EntityKind::Curve(Curve::Line(LineSeg::from_endpoints(
+            Point2d::from_f64(0.0, 0.0),
+            Point2d::from_f64(4.0, 0.0),
+        ))));
+        let b = doc.add(EntityKind::Curve(Curve::Line(LineSeg::from_endpoints(
+            Point2d::from_f64(0.0, 3.0),
+            Point2d::from_f64(4.0, 3.0),
+        ))));
+        constrain_lines(&mut doc, &[a, b], ConstraintKind::Parallel).expect("record");
+
+        let xf = oxidraft_geometry::Transform2d::translation(10.0, 0.0);
+        if let Some(e) = doc.get_mut(a) {
+            e.transform(&xf);
+        }
+        resolve_after_transform_rigid(&mut doc, &[a], &xf);
+
+        let Curve::Line(l) = doc.get(b).unwrap().as_curve().unwrap() else {
+            panic!("expected a line");
+        };
+        assert!(
+            l.p0.to_f64().0.abs() < 1e-6,
+            "Parallel is satisfied where it stands; sliding it {} in x is a \
+             translation nobody asked for",
+            l.p0.to_f64().0
+        );
     }
 
     #[test]
