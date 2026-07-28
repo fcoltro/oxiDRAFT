@@ -3037,6 +3037,15 @@ fn layers_section(ui: &mut egui::Ui, app: &mut AppState) {
                         .text_color(name_col)
                         .font(egui::TextStyle::Monospace),
                 );
+                // Snapshot once, when the field gains focus — `changed()`
+                // fires per keystroke, so snapshotting there would push an
+                // undo entry per letter typed. Taking it before the first
+                // edit also means undo restores the original name, and the
+                // rename now marks the document dirty (a layer name is
+                // written to the .o2d, so losing it silently is data loss).
+                if resp.gained_focus() {
+                    app.history.snapshot(&app.document);
+                }
                 if resp.changed()
                     && let Some(l) = app.document.layers.get_mut(i)
                 {
