@@ -116,7 +116,18 @@ fn snap_endpoints(c: &Curve, s: (f64, f64), e: (f64, f64)) -> Curve {
             set_arc_angles(&mut a.start_angle, &mut a.end_angle, new_start, new_end);
             Curve::Arc(a)
         }
-        Curve::Ellipse(el) => Curve::Ellipse(*el),
+        Curve::Ellipse(el) => {
+            // Returning the arc untouched here meant an ellipse never took
+            // part in a weld: its neighbours snapped to the cluster average
+            // (which its own endpoints had been counted into), so the seam
+            // narrowed but never closed, and `weld_region` handed back a loop
+            // it presents as watertight while it still had a hole in it.
+            let mut el = *el;
+            let new_start = eccentric_angle(&el, s);
+            let new_end = eccentric_angle(&el, e);
+            set_arc_angles(&mut el.start_angle, &mut el.end_angle, new_start, new_end);
+            Curve::Ellipse(el)
+        }
         Curve::Poly(pc) => {
             let mut segs = pc.segments.clone();
             if let Some(first) = segs.first().cloned() {
@@ -164,23 +175,59 @@ fn endpoints_f64(c: &Curve) -> ((f64, f64), (f64, f64)) {
     (c.evaluate_f64(t0), c.evaluate_f64(t1))
 }
 
+/// Rewrites an arc's angles for endpoints that have moved by at most the weld
+/// tolerance.
+///
+/// `atan2` answers in `(-pi, pi]`, so the recovered angles have to be lifted
+/// back onto the branch the arc was already using. Choosing that branch by
+/// forcing `end > start` — which is what this did — silently rewrites every
+/// arc to a positive sweep: a 90-degree clockwise arc came back as the
+/// 270-degree counter-clockwise one with the same endpoints, and a multi-turn
+/// arc was collapsed to a single turn. `reverse_curve` and `mirror_x` both
+/// produce clockwise arcs, and welding runs at the top of every boolean, so
+/// mirroring a shape and then unioning it flipped the arc back across its own
+/// chord.
+///
+/// Since the endpoints only moved by a hair, the branch is not a choice to be
+/// made at all: take each angle's representative nearest the one it is
+/// replacing. Direction and turn count then survive because they are never
+/// consulted.
 fn set_arc_angles(start: &mut f64, end: &mut f64, new_start: f64, new_end: f64) {
+    *start = nearest_branch(new_start, *start);
+    *end = nearest_branch(new_end, *end);
+}
+
+/// The eccentric angle of the point on `el` nearest `p`.
+///
+/// The inverse of `evaluate_f64`: undo the centre offset and the axis
+/// rotation, then divide out the semi-axes so the ellipse becomes the unit
+/// circle and the angle is a plain `atan2`. A weld target need not sit exactly
+/// on the ellipse, which is fine — the same radial slack the circular-arc arm
+/// already accepts.
+fn eccentric_angle(el: &oxidraft_geometry::EllipticalArc, p: (f64, f64)) -> f64 {
+    let (cx, cy) = el.center.to_f64();
+    let (dx, dy) = (p.0 - cx, p.1 - cy);
+    let (cos_r, sin_r) = (el.rotation.cos(), el.rotation.sin());
+    let u = dx * cos_r + dy * sin_r;
+    let v = -dx * sin_r + dy * cos_r;
+    (v / el.semi_minor).atan2(u / el.semi_major)
+}
+
+/// `raw` shifted by whole turns to land as close as possible to `reference`.
+fn nearest_branch(raw: f64, reference: f64) -> f64 {
     let tau = std::f64::consts::TAU;
-    let s = new_start;
-    let mut e = new_end;
-    while e <= s {
-        e += tau;
+    let turns = ((reference - raw) / tau).round();
+    if turns.is_finite() {
+        raw + tau * turns
+    } else {
+        raw
     }
-    while e > s + tau {
-        e -= tau;
-    }
-    *start = s;
-    *end = e;
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use oxidraft_geometry::{CircularArc, EllipticalArc};
 
     fn line(x0: f64, y0: f64, x1: f64, y1: f64) -> Curve {
         Curve::Line(LineSeg::from_endpoints(
@@ -223,6 +270,78 @@ mod tests {
             s0.0.abs() < 1e-9 && s0.1.abs() < 1e-9,
             "far vertex moved: {:?}",
             s0
+        );
+    }
+
+    fn apex(c: &Curve) -> (f64, f64) {
+        let (t0, t1) = c.domain();
+        c.evaluate_f64((t0 + t1) * 0.5)
+    }
+
+    #[test]
+    fn weld_keeps_a_clockwise_arc_on_its_own_side() {
+        // `atan2` lands in (-pi, pi], and picking the branch by forcing
+        // `end > start` turned every clockwise arc into the long way round
+        // with the same endpoints — so a lower half-disc came back as the
+        // upper one. `mirror_x` and `reverse_curve` both produce clockwise
+        // arcs and welding runs at the top of every boolean, so this was
+        // reachable by mirroring a shape and then unioning it.
+        let arc = CircularArc::new(Point2d::from_f64(0.0, 0.0), 1.0, 0.0, -std::f64::consts::PI);
+        let c = Curve::Arc(arc);
+        let (_, t1) = c.domain();
+        let e = c.evaluate_f64(t1);
+        let before = apex(&c);
+        assert!(before.1 < 0.0, "fixture should be the LOWER half-disc");
+
+        let welded = weld_loop(&[c, line(e.0, e.1, 1.0, 0.0)], WELD_TOL);
+        let after = apex(&welded[0]);
+        assert!(
+            after.1 < 0.0,
+            "the arc must stay on the side it was drawn on: apex {before:?} -> {after:?}"
+        );
+    }
+
+    #[test]
+    fn weld_keeps_the_turn_count_of_a_multi_turn_arc() {
+        // The old branch clamp (`while e > s + tau`) collapsed any arc of
+        // more than one turn down to a single turn.
+        let two_turns = 4.0 * std::f64::consts::PI;
+        let arc = CircularArc::new(Point2d::from_f64(0.0, 0.0), 1.0, 0.0, two_turns);
+        let welded = weld_loop(&[Curve::Arc(arc)], WELD_TOL);
+        let Curve::Arc(a) = &welded[0] else {
+            panic!("expected an arc");
+        };
+        let sweep = a.end_angle - a.start_angle;
+        assert!(
+            (sweep - two_turns).abs() < 1e-9,
+            "a two-turn arc must still be two turns: {sweep} vs {two_turns}"
+        );
+    }
+
+    #[test]
+    fn weld_actually_moves_an_ellipse() {
+        // The ellipse arm used to return the arc untouched, so an ellipse
+        // never took part in a weld: its neighbours snapped to a cluster
+        // average its own endpoints had been counted into, which narrowed the
+        // seam without ever closing it, and the loop was still reported
+        // watertight.
+        let el = EllipticalArc::new(
+            Point2d::from_f64(0.0, 0.0),
+            2.0,
+            1.0,
+            0.0,
+            0.0,
+            std::f64::consts::FRAC_PI_2,
+        );
+        let ec = Curve::Ellipse(el);
+        let (a0, a1) = ec.domain();
+        let (es, ee) = (ec.evaluate_f64(a0), ec.evaluate_f64(a1));
+        let welded = weld_loop(&[ec, line(ee.0 + 1e-9, ee.1, es.0, es.1)], WELD_TOL);
+        assert_eq!(welded.len(), 2);
+        assert!(
+            seam_gap(&welded, 0) < 1e-12,
+            "the ellipse seam must close, not just narrow: {:.3e}",
+            seam_gap(&welded, 0)
         );
     }
 
