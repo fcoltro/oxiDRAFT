@@ -110,7 +110,14 @@ pub fn label_text(kind: &EntityKind, style: &DimStyle, units: Units) -> Option<S
     }
     let value = measured_value(kind)?;
     Some(match kind {
-        EntityKind::AngularDim { .. } => format!("{value:.*}\u{00b0}", style.precision),
+        // Angular labels do not go through `format_measure` (no unit suffix),
+        // so they need the same clamp applied directly.
+        EntityKind::AngularDim { .. } => {
+            format!(
+                "{value:.*}\u{00b0}",
+                crate::clamp_precision(style.precision)
+            )
+        }
         EntityKind::RadialDim { diameter, .. } => {
             let prefix = if *diameter { "\u{00d8}" } else { "R" };
             format!("{prefix}{}", units.format_measure(value, style.precision))
@@ -162,6 +169,54 @@ mod tests {
             label_text(&kind, &DimStyle::default(), Units::Millimeters).as_deref(),
             Some("custom")
         );
+    }
+
+    #[test]
+    fn absurd_precision_does_not_bring_the_app_down() {
+        // `DimStyle::precision` is read straight out of the file with no
+        // bound, but Rust's formatting precision is 16-bit: at 65_536
+        // `format!("{v:.*}")` panics rather than truncating. A crafted `.o2d`
+        // loaded cleanly and then took the app down on the frame that first
+        // drew a dimension. Every dimension kind formats through its own
+        // path, so every kind has to be checked.
+        let style = DimStyle {
+            precision: usize::MAX,
+            ..DimStyle::default()
+        };
+        let kinds = [
+            EntityKind::AngularDim {
+                center: p(0.0, 0.0),
+                p1: p(10.0, 0.0),
+                p2: p(0.0, 10.0),
+                line: p(3.0, 3.0),
+                height: 2.5,
+                override_text: None,
+            },
+            EntityKind::RadialDim {
+                center: p(0.0, 0.0),
+                edge: p(5.0, 0.0),
+                diameter: false,
+                height: 2.5,
+                override_text: None,
+            },
+            EntityKind::Dimension {
+                p1: p(0.0, 0.0),
+                p2: p(3.0, 4.0),
+                line: p(0.0, 2.0),
+                height: 2.5,
+                override_text: None,
+            },
+        ];
+        for kind in kinds {
+            let label = label_text(&kind, &style, Units::Millimeters)
+                .unwrap_or_else(|| panic!("{kind:?} should produce a label"));
+            assert!(
+                label.len() < 128,
+                "a label must stay a label, not a {}-byte string: {kind:?}",
+                label.len()
+            );
+        }
+        assert!(Units::Millimeters.format_measure(1.5, usize::MAX).len() < 128);
     }
 
     #[test]

@@ -1983,7 +1983,7 @@ fn canvas(root_ui: &mut egui::Ui, app: &mut AppState, ui_state: &mut UiState, pa
 
 fn format_dim_value(c: &SketchConstraint, precision: usize) -> String {
     c.val
-        .map(|v| format!("{v:.*}", precision))
+        .map(|v| format!("{v:.*}", oxidraft_document::clamp_precision(precision)))
         .unwrap_or_default()
 }
 

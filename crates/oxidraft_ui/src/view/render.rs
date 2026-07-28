@@ -1375,7 +1375,10 @@ pub(super) fn draw_angular_dim(
     let deg = sweep.abs().to_degrees();
     let label = match ovr {
         Some(t) => t.to_string(),
-        None => format!("{deg:.*}\u{00b0}", style.precision),
+        None => format!(
+            "{deg:.*}\u{00b0}",
+            oxidraft_document::clamp_precision(style.precision)
+        ),
     };
     let text_px = (style.text_height as f32 * app.view.zoom as f32).clamp(9.0, 200.0);
     let font_id = crate::fonts::text_font_id(painter.ctx(), style.font.as_deref(), text_px);

@@ -457,7 +457,12 @@ pub fn from_string(text: &str) -> Result<Document, String> {
                 ds.text_height = next_parse(&mut tok, 2.5);
                 ds.arrow_size = next_parse(&mut tok, 2.5);
                 ds.font = parse_opt_text(&mut tok);
-                ds.precision = next_parse(&mut tok, ds.precision);
+                // Clamped here too, not just where it is formatted: a stored
+                // value of 20_000_000 is nonsense whatever reads it next, and
+                // leaving it in the document keeps the panic one unguarded
+                // `format!` away.
+                ds.precision =
+                    oxidraft_document::clamp_precision(next_parse(&mut tok, ds.precision));
             }
             Some("LT") => {
                 if let Some(lt) = parse_lt(&mut tok) {

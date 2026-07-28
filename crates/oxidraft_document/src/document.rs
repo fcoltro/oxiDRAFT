@@ -44,7 +44,10 @@ impl Units {
     }
 
     /// Formats `value` to `precision` decimals with the unit suffix appended.
+    ///
+    /// `precision` is clamped by [`crate::clamp_precision`]; see there for why.
     pub fn format_measure(self, value: f64, precision: usize) -> String {
+        let precision = clamp_precision(precision);
         let s = self.short_name();
         if s.is_empty() {
             format!("{value:.*}", precision)
@@ -88,6 +91,26 @@ pub struct NamedView {
     pub center: (f64, f64),
     /// Zoom level.
     pub zoom: f64,
+}
+
+/// The most decimal places a dimension label will ever be formatted to.
+///
+/// An `f64` carries about 17 significant decimal digits, so past this the
+/// output is an artefact of the binary representation rather than anything the
+/// user entered. The UI offers 0..=8.
+pub const MAX_DISPLAY_PRECISION: usize = 17;
+
+/// Clamps a decimal-place count to [`MAX_DISPLAY_PRECISION`].
+///
+/// `DimStyle::precision` is a plain public `usize` read straight out of the
+/// file with no bound, and Rust's formatting precision is limited to 16 bits:
+/// `format!("{v:.*}", 65_536)` does not truncate, it panics with "Formatting
+/// argument out of range". A crafted `.o2d` therefore loaded cleanly and then
+/// brought the app down on the frame that first drew a dimension. Values below
+/// that were merely absurd — 65,535 decimals is a 65 KB label rebuilt for
+/// every dimension, every frame.
+pub fn clamp_precision(precision: usize) -> usize {
+    precision.min(MAX_DISPLAY_PRECISION)
 }
 
 /// How dimensions are drawn: text size, arrow size, font, and rounding.

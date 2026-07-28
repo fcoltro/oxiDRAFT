@@ -15,7 +15,10 @@ pub mod properties;
 
 pub use constraint::{ANCHOR_DERIVED, ConstraintKind, SketchConstraint, normalize_angle_deg};
 pub use dimension::{AngularSweep, angular_sweep, label_text, linear_orientation, measured_value};
-pub use document::{Block, DIMENSION_LAYER, DimStyle, Document, NamedView, Settings, Units};
+pub use document::{
+    Block, DIMENSION_LAYER, DimStyle, Document, MAX_DISPLAY_PRECISION, NamedView, Settings, Units,
+    clamp_precision,
+};
 pub use entity::{Entity, EntityId, EntityKind, HatchPattern, TangentRef};
 pub use layer::{Layer, LayerTable};
 pub use properties::{Color, LineTypeDef, LineTypeRef, LineWeight, XData};

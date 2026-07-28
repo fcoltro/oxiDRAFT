@@ -481,7 +481,11 @@ fn dim_badge_layout(app: &AppState, c: &SketchConstraint) -> Option<DimBadge> {
             // a label-only badge between the segment midpoints — the value
             // must stay visible and click-deletable even when there is no
             // corner to sweep an arc at.
-            let label = format!("{:.*}\u{00b0}", style.precision, val);
+            let label = format!(
+                "{:.*}\u{00b0}",
+                oxidraft_document::clamp_precision(style.precision),
+                val
+            );
             let (r, s) = (a1 - a0, b1 - b0);
             let denom = r.x * s.y - r.y * s.x;
             let t = ((b0.x - a0.x) * s.y - (b0.y - a0.y) * s.x) / denom;
