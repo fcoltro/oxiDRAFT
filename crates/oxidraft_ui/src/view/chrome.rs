@@ -1398,6 +1398,29 @@ pub(super) fn settings_dialog(ctx: &Context, app: &mut AppState, ui_state: &mut 
                                     );
                                 },
                             );
+                            // The card below binds `&mut ...dim_style` for its
+                            // whole body, so a snapshot cannot be taken inside
+                            // it. Take one up front and drop it again if
+                            // nothing actually changed — the pattern
+                            // `History::discard_last` exists for. Without this
+                            // the dim style (which IS written to the .o2d)
+                            // changed without marking the document dirty, so
+                            // File>New/Open discarded it with no prompt.
+                            //
+                            // Only while the document is still clean: the
+                            // DragValues fire `changed()` on every frame of a
+                            // drag, so snapshotting unconditionally would push
+                            // an undo entry per frame. Once the first edit has
+                            // marked the document dirty this stops firing, so
+                            // a drag costs exactly one entry. If the document
+                            // was already dirty the style change is not
+                            // separately undoable — but it cannot be silently
+                            // lost either, which is the property that matters.
+                            let dim_style_before = app.document.settings.dim_style.clone();
+                            let took_snapshot = !app.is_dirty();
+                            if took_snapshot {
+                                app.history.snapshot(&app.document);
+                            }
                             settings_card(
                                 ui,
                                 "DIMENSIONS",
@@ -1456,6 +1479,13 @@ pub(super) fn settings_dialog(ctx: &Context, app: &mut AppState, ui_state: &mut 
                                     );
                                 },
                             );
+                            // Most frames the dialog is merely open and
+                            // nothing was touched; drop the speculative
+                            // snapshot so the undo stack isn't flooded.
+                            if took_snapshot && app.document.settings.dim_style == dim_style_before
+                            {
+                                app.history.discard_last();
+                            }
                             settings_card(
                                 ui,
                                 "TEXT",
