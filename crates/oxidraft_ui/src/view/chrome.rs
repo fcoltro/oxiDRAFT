@@ -1183,6 +1183,7 @@ pub(super) fn settings_dialog(ctx: &Context, app: &mut AppState, ui_state: &mut 
                                                                 )
                                                                 .clicked() && app.document.settings.units != units
                                                             {
+                                                                app.history.snapshot(&app.document);
                                                                 app.document.settings.units = units;
                                                                 app.sync_zoom_limits();
                                                             }
@@ -2270,6 +2271,7 @@ fn unit_dropdown(ui: &mut egui::Ui, app: &mut AppState) {
                         ] {
                             let selected = app.document.settings.units == units;
                             if ui.selectable_label(selected, name).clicked() {
+                                app.history.snapshot(&app.document);
                                 app.document.settings.units = units;
                                 app.sync_zoom_limits();
                                 open = false;
@@ -2926,6 +2928,7 @@ fn layers_section(ui: &mut egui::Ui, app: &mut AppState) {
             .clicked()
             {
                 let n = app.document.layers.layers.len();
+                app.history.snapshot(&app.document);
                 app.document.layers.add(Layer::new(format!("Layer{}", n)));
             }
         });
@@ -2984,8 +2987,11 @@ fn layers_section(ui: &mut egui::Ui, app: &mut AppState) {
                     ui.color_edit_button_srgb(&mut c).changed()
                 })
                 .inner;
-            if changed && let Some(l) = app.document.layers.get_mut(i) {
-                l.color = (c[0], c[1], c[2]);
+            if changed {
+                app.history.snapshot(&app.document);
+                if let Some(l) = app.document.layers.get_mut(i) {
+                    l.color = (c[0], c[1], c[2]);
+                }
             }
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                 ui.spacing_mut().item_spacing.x = 0.0;
@@ -3002,10 +3008,11 @@ fn layers_section(ui: &mut egui::Ui, app: &mut AppState) {
                     }
                 });
                 let icon = if on { Icon::Eye } else { Icon::EyeOff };
-                if icon_button_sized(ui, icon, "Show / hide this layer", false, 20.0).clicked()
-                    && let Some(l) = app.document.layers.get_mut(i)
-                {
-                    l.on = !on;
+                if icon_button_sized(ui, icon, "Show / hide this layer", false, 20.0).clicked() {
+                    app.history.snapshot(&app.document);
+                    if let Some(l) = app.document.layers.get_mut(i) {
+                        l.on = !on;
+                    }
                 }
                 ui.add_space(6.0);
                 layer_appearance_menus(ui, app, i);
