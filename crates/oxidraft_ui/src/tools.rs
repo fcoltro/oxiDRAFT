@@ -385,6 +385,7 @@ pub fn used_dof(parts: &[Contribution]) -> u8 {
 ///
 /// - a centre makes everything else a free choice — anything 1-DOF finishes it
 /// - rim points and tangents do not mix without a centre
+/// - tangents finish either as three of them, or as two plus a radius
 /// - a typed radius pairs with a centre, or with two tangents, and nothing else
 ///
 /// Every state reachable through these rules ends in a circle [`solve_circle`]
@@ -408,7 +409,7 @@ pub fn pick_readings(pick: &Pick, parts: &[Contribution]) -> Vec<Contribution> {
 
     let allow_centre = !has_centre && remaining >= 2;
     let allow_rim = has_centre || (tangents == 0 && !has_radius && rims < 3);
-    let allow_tangent = has_centre || (rims == 0 && tangents < 2);
+    let allow_tangent = has_centre || (rims == 0 && tangents < 3);
 
     let mut out: Vec<Contribution> = Vec::new();
     match pick.snap.as_ref() {
@@ -557,6 +558,12 @@ pub fn solve_circle(parts: &[Contribution], near: Point2d) -> Option<CircularArc
         .collect();
     if let ([c1, c2], Some(r)) = (tangent_curves.as_slice(), radius) {
         return oxidraft_geometry::tangent_circle_ttr(c1, c2, r, near)
+            .map(|(centre, rr)| CircularArc::new(centre, rr, 0.0, full));
+    }
+    // Three tangents: an Apollonius solve, with up to eight answers. Same
+    // deal — `near` chooses, and the kernel already knows how.
+    if let [c1, c2, c3] = tangent_curves.as_slice() {
+        return oxidraft_geometry::tangent_circle_ttt(c1, c2, c3, near)
             .map(|(centre, rr)| CircularArc::new(centre, rr, 0.0, full));
     }
     if let Some(c) = parts.iter().find_map(Contribution::center) {
@@ -1746,6 +1753,47 @@ mod tests {
                     "{relations:?}"
                 );
             }
+            o => panic!("expected the tangencies to be recorded, got {o:?}"),
+        }
+    }
+
+    #[test]
+    fn three_tangents_build_the_ttt_circle() {
+        // The last of the five constructions, and the one with the most
+        // answers — an Apollonius solve admits up to eight. Three sides of a
+        // right triangle at the origin have exactly one circle inside them,
+        // and that is the one nearest the picks.
+        use oxidraft_cad::SnapKind;
+        let bottom = Curve::Line(LineSeg::from_endpoints(pt(0, 0), pt(12, 0)));
+        let left = Curve::Line(LineSeg::from_endpoints(pt(0, 0), pt(0, 12)));
+        let hyp = Curve::Line(LineSeg::from_endpoints(pt(12, 0), pt(0, 12)));
+
+        let mut t = Tool::circle();
+        t.on_pick(snapped_on(SnapKind::Nearest, 1, pt(4, 0), bottom));
+        t.on_pick(snapped_on(SnapKind::Nearest, 2, pt(0, 4), left));
+        let ev = t.on_pick(snapped_on(SnapKind::Nearest, 3, pt(6, 6), hyp));
+
+        let arc = committed_arc(ev.clone());
+        let (cx, cy) = arc.center.to_f64();
+        // The incircle of that triangle: r = (a + b − c)/2 with legs 12 and
+        // hypotenuse 12√2, and the centre one radius in from each leg.
+        let expect_r = (12.0 + 12.0 - 12.0 * 2f64.sqrt()) / 2.0;
+        assert!(
+            (arc.radius - expect_r).abs() < 1e-6,
+            "expected the incircle r {expect_r}, got {}",
+            arc.radius
+        );
+        assert!(
+            (cx - expect_r).abs() < 1e-6 && (cy - expect_r).abs() < 1e-6,
+            "centre should be one radius in from each leg: ({cx},{cy})"
+        );
+
+        match ev {
+            ToolEvent::CreateConstrained { relations, .. } => assert_eq!(
+                relations.len(),
+                3,
+                "all three tangencies should be recorded: {relations:?}"
+            ),
             o => panic!("expected the tangencies to be recorded, got {o:?}"),
         }
     }
