@@ -1307,6 +1307,41 @@ impl AppState {
                     self.weld_created_loop(&created);
                 }
             }
+            ToolEvent::CreateConstrained {
+                entities,
+                relations,
+            } => {
+                self.history.snapshot(&self.document);
+                let mut created = Vec::with_capacity(entities.len());
+                for k in entities {
+                    let id = self.document.add(k);
+                    self.apply_new_entity_defaults(id);
+                    created.push(id);
+                }
+                // The geometry is already correct — it was solved from the
+                // picks. Recording the relation is what makes it *stay*
+                // correct when the other entity moves later, which is the
+                // whole reason to know why a circle sits where it does.
+                // Behind the same switch as every other inferred constraint.
+                if self.prefs.infer_constraints
+                    && let Some(&new_id) = created.first()
+                {
+                    for r in relations {
+                        // Through `constrain_lines` rather than pushing a
+                        // SketchConstraint directly, so these land identically
+                        // to the same relation applied from the constraint bar
+                        // — same validation, same rejections.
+                        if let Err(e) = oxidraft_cad::constrain_lines(
+                            &mut self.document,
+                            &[new_id, r.other],
+                            r.kind,
+                        ) {
+                            self.command_log
+                                .push(format!("{:?} not recorded: {}", r.kind, e.message));
+                        }
+                    }
+                }
+            }
             ToolEvent::Transform { ids, t } => {
                 if self.reject_nonfinite_transform(&t) {
                     return;
@@ -3057,6 +3092,77 @@ mod tests {
 
     fn app() -> AppState {
         AppState::new(800.0, 600.0)
+    }
+
+    /// Drives the circle tool the way the pointer path does: a pick that
+    /// snapped to `kind` on `id`.
+    fn circle_pick_snapped(
+        a: &mut AppState,
+        kind: oxidraft_cad::SnapKind,
+        id: EntityId,
+        p: Point2d,
+    ) {
+        let ev = a.tool.on_pick(crate::tools::Pick {
+            pos: p,
+            snap: Some(oxidraft_cad::SnapPoint {
+                kind,
+                pos: p.to_f64(),
+                entity: id,
+            }),
+        });
+        a.apply_tool_event(ev);
+    }
+
+    #[test]
+    fn a_tangent_circle_records_the_tangency_rather_than_baking_it() {
+        // The point of knowing *why* a circle sits where it does. Baking the
+        // radius produces the right picture once; recording the relation keeps
+        // it right when the line later moves.
+        let mut a = app();
+        a.prefs.infer_constraints = true;
+        let l = a.add_entity(line(-10, 3, 10, 3));
+
+        a.tool = crate::tools::Tool::circle();
+        a.place_tool_point(pt(0, 0));
+        circle_pick_snapped(&mut a, oxidraft_cad::SnapKind::Tangent, l, pt(0, 3));
+
+        let circle = a
+            .document
+            .iter()
+            .find(|e| matches!(&e.kind, EntityKind::Curve(Curve::Arc(_))))
+            .map(|e| e.id)
+            .expect("a circle should have been created");
+        assert!(
+            a.document
+                .constraints_on(circle)
+                .any(|c| c.kind == oxidraft_document::ConstraintKind::Tangent),
+            "the tangency should be recorded, not just drawn: {:?}",
+            a.document.constraints_on(circle).collect::<Vec<_>>()
+        );
+    }
+
+    #[test]
+    fn recording_is_off_when_inference_is_off() {
+        // Same picks, same geometry, no relation — `infer_constraints` is the
+        // existing switch for "do not put things in my document that I did not
+        // ask for", and this obeys it like every other inferred constraint.
+        let mut a = app();
+        a.prefs.infer_constraints = false;
+        let l = a.add_entity(line(-10, 3, 10, 3));
+
+        a.tool = crate::tools::Tool::circle();
+        a.place_tool_point(pt(0, 0));
+        circle_pick_snapped(&mut a, oxidraft_cad::SnapKind::Tangent, l, pt(0, 3));
+
+        let before = a.document.len();
+        assert!(before >= 2, "the circle should still be created");
+        assert!(
+            a.document
+                .constraints
+                .iter()
+                .all(|c| c.kind != oxidraft_document::ConstraintKind::Tangent),
+            "no tangency should be recorded with inference off"
+        );
     }
 
     fn line(x0: i64, y0: i64, x1: i64, y1: i64) -> EntityKind {

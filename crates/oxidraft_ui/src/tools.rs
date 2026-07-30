@@ -221,8 +221,30 @@ pub enum ToolEvent {
     Transform { ids: Vec<EntityId>, t: Transform2d },
     /// Duplicate the given entities, placing the copies at `t`.
     CopyOf { ids: Vec<EntityId>, t: Transform2d },
+    /// Add these new entities, then record `relations` against the first of
+    /// them — used when a tool knows not just *where* the geometry goes but
+    /// *why*, and that reason is worth keeping.
+    CreateConstrained {
+        /// The entities to add.
+        entities: Vec<EntityKind>,
+        /// Relations to record against the first created entity.
+        relations: Vec<PendingRelation>,
+    },
     /// Both corners of the plot window were picked (raw, unsorted).
     PlotWindow(Point2d, Point2d),
+}
+
+/// A relation to record against an entity that does not exist yet.
+///
+/// A tool cannot build a `SketchConstraint` itself: the entity it is creating
+/// has no [`EntityId`] until the document accepts it. So the tool names the
+/// other side and the kind, and the caller finishes the job once the id exists.
+#[derive(Clone, Debug, PartialEq)]
+pub struct PendingRelation {
+    /// Which relation to record.
+    pub kind: ConstraintKind,
+    /// The already-existing entity on the other side of it.
+    pub other: EntityId,
 }
 
 /// A click delivered to a tool: where it landed, and what it snapped to.
@@ -393,9 +415,18 @@ fn circle_pick(parts: &mut Vec<Contribution>, choice: &mut usize, pick: Pick) ->
         // commit something invalid or hand the kernel a singular system.
         return match solve_circle(&next) {
             Some(arc) => {
+                let relations = pending_relations(&next);
                 parts.clear();
                 *choice = 0;
-                ToolEvent::Create(vec![EntityKind::Curve(Curve::Arc(arc))])
+                let entities = vec![EntityKind::Curve(Curve::Arc(arc))];
+                if relations.is_empty() {
+                    ToolEvent::Create(entities)
+                } else {
+                    ToolEvent::CreateConstrained {
+                        entities,
+                        relations,
+                    }
+                }
             }
             None => ToolEvent::Pending,
         };
@@ -403,6 +434,30 @@ fn circle_pick(parts: &mut Vec<Contribution>, choice: &mut usize, pick: Pick) ->
     *parts = next;
     *choice = 0;
     ToolEvent::Pending
+}
+
+/// The relations worth keeping from a finished set of contributions.
+///
+/// Only the contributions that name an entity produce one. A point picked in
+/// empty space, or a rim point that happened to land on a snap without binding
+/// to it, describes where the circle went but not what it is *held* to — so
+/// there is nothing to record, and inventing something would over-constrain the
+/// sketch for no reason.
+pub fn pending_relations(parts: &[Contribution]) -> Vec<PendingRelation> {
+    parts
+        .iter()
+        .filter_map(|p| match p {
+            Contribution::Concentric(other, _) => Some(PendingRelation {
+                kind: ConstraintKind::Concentric,
+                other: *other,
+            }),
+            Contribution::TangentTo(other, _) => Some(PendingRelation {
+                kind: ConstraintKind::Tangent,
+                other: *other,
+            }),
+            _ => None,
+        })
+        .collect()
 }
 
 /// The circle these contributions determine, or `None` if they do not yet — or
@@ -1519,13 +1574,21 @@ mod tests {
         }
     }
 
+    /// The arc a commit produced, whichever way it committed.
+    ///
+    /// A circle built only from free points commits as `Create`; one bound to
+    /// an entity commits as `CreateConstrained` so the relation can be
+    /// recorded. Both are commits, and a test about geometry should not care
+    /// which — the relation itself is asserted separately.
     fn committed_arc(ev: ToolEvent) -> CircularArc {
-        match ev {
-            ToolEvent::Create(es) => match &es[0] {
-                EntityKind::Curve(Curve::Arc(a)) => *a,
-                o => panic!("expected an arc, got {o:?}"),
-            },
+        let entities = match &ev {
+            ToolEvent::Create(es) => es,
+            ToolEvent::CreateConstrained { entities, .. } => entities,
             o => panic!("expected a commit, got {o:?}"),
+        };
+        match &entities[0] {
+            EntityKind::Curve(Curve::Arc(a)) => *a,
+            o => panic!("expected an arc, got {o:?}"),
         }
     }
 
