@@ -606,6 +606,51 @@ impl Tool {
         self.on_point(pick.pos)
     }
 
+    /// Supplies a typed radius, the one contribution that has no position.
+    ///
+    /// Returns `Pending` for tools this means nothing to. Typing a radius used
+    /// to be faked as a click one radius to the right of the centre, which
+    /// works only because "a point on the rim" and "a radius" happen to
+    /// constrain the same thing when the centre is already known — and stops
+    /// working the moment it is not, which is exactly the tangent-tangent-radius
+    /// case.
+    pub fn supply_radius(&mut self, r: f64) -> ToolEvent {
+        let Tool::Circle { parts, choice } = self else {
+            return ToolEvent::Pending;
+        };
+        if !(r.is_finite() && r > 1e-9) {
+            return ToolEvent::Pending;
+        }
+        let remaining = CIRCLE_DOF.saturating_sub(used_dof(parts));
+        if remaining == 0 || parts.iter().any(|p| matches!(p, Contribution::RadiusIs(_))) {
+            return ToolEvent::Pending;
+        }
+        let mut next = parts.clone();
+        next.push(Contribution::RadiusIs(r));
+        if used_dof(&next) >= CIRCLE_DOF {
+            return match solve_circle(&next) {
+                Some(arc) => {
+                    let relations = pending_relations(&next);
+                    parts.clear();
+                    *choice = 0;
+                    let entities = vec![EntityKind::Curve(Curve::Arc(arc))];
+                    if relations.is_empty() {
+                        ToolEvent::Create(entities)
+                    } else {
+                        ToolEvent::CreateConstrained {
+                            entities,
+                            relations,
+                        }
+                    }
+                }
+                None => ToolEvent::Pending,
+            };
+        }
+        *parts = next;
+        *choice = 0;
+        ToolEvent::Pending
+    }
+
     /// Advances which reading of the next pick is active — the Tab cycle.
     /// Does nothing for tools that have no alternatives to offer.
     pub fn cycle_reading(&mut self) {
@@ -1559,6 +1604,44 @@ mod tests {
         assert!(
             matches!(&t, Tool::Circle { parts, .. } if parts.is_empty()),
             "and the tool must be ready for the next circle straight away"
+        );
+    }
+
+    #[test]
+    fn a_typed_radius_is_recorded_as_a_radius() {
+        // It used to be applied as a click one radius east of the centre,
+        // which lands the same circle but says the wrong thing — and only
+        // works at all because the centre is already known.
+        let mut t = Tool::circle();
+        t.on_pick(Pick::bare(pt(3, 3)));
+        let arc = committed_arc(t.supply_radius(2.5));
+        let (cx, cy) = arc.center.to_f64();
+        assert!(
+            (cx - 3.0).abs() < 1e-9 && (cy - 3.0).abs() < 1e-9,
+            "the centre must not move: ({cx},{cy})"
+        );
+        assert!((arc.radius - 2.5).abs() < 1e-9, "r {}", arc.radius);
+    }
+
+    #[test]
+    fn a_typed_radius_is_ignored_when_it_cannot_apply() {
+        // No centre yet, a nonsense value, or a radius already given: all are
+        // refused rather than banked, so the tool cannot be walked into a
+        // state it will not solve.
+        let mut fresh = Tool::circle();
+        assert!(matches!(fresh.supply_radius(0.0), ToolEvent::Pending));
+        assert!(matches!(fresh.supply_radius(f64::NAN), ToolEvent::Pending));
+        assert!(
+            matches!(&fresh, Tool::Circle { parts, .. } if parts.is_empty()),
+            "nothing should have been banked"
+        );
+
+        let mut other = Tool::circle();
+        other.on_pick(Pick::bare(pt(0, 0)));
+        assert!(matches!(other.supply_radius(-1.0), ToolEvent::Pending));
+        assert!(
+            matches!(&other, Tool::Circle { parts, .. } if parts.len() == 1),
+            "a negative radius must not be banked either"
         );
     }
 

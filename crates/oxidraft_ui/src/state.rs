@@ -719,6 +719,13 @@ impl AppState {
         }
     }
 
+    /// Feeds a typed radius to the active tool. Does nothing for tools that
+    /// have no use for one.
+    pub fn place_tool_radius(&mut self, r: f64) {
+        let ev = self.tool.supply_radius(r);
+        self.apply_tool_event(ev);
+    }
+
     /// Feeds an already-resolved world point directly to the active tool,
     /// bypassing screen-to-world conversion and snapping — used for
     /// programmatic point entry (typed coordinates, command-line input)

@@ -1367,15 +1367,16 @@ pub(super) fn dyn_circle_hud(
     origin: egui::Pos2,
 ) {
     // A typed radius only means something once the centre is pinned; before
-    // that the picks are still deciding where the circle sits.
-    let circle_center = match &app.tool {
+    // that the picks are still deciding where the circle sits. Only whether
+    // there is a centre matters — the radius no longer has to be turned into a
+    // position, so the coordinates themselves are not needed.
+    let centre_pinned = match &app.tool {
         Tool::Circle { parts, .. } => parts
             .iter()
-            .find_map(crate::tools::Contribution::center)
-            .map(|c| c.to_f64()),
-        _ => None,
+            .any(|c| crate::tools::Contribution::center(c).is_some()),
+        _ => false,
     };
-    if let (true, Some((cx, cy))) = (app.prefs.dyn_on, circle_center) {
+    if app.prefs.dyn_on && centre_pinned {
         let rad_id = egui::Id::new("dyn_radius");
         let first_show = !ui_state.dyn_circle_active;
         if first_show {
@@ -1386,7 +1387,9 @@ pub(super) fn dyn_circle_hud(
             && let Ok(rad) = ui_state.dyn_radius.trim().parse::<f64>()
             && rad > 1e-9
         {
-            app.place_tool_point(Point2d::from_f64(cx + rad, cy));
+            // A typed radius is a radius, not a click that happens to be one
+            // radius east of the centre.
+            app.place_tool_radius(rad);
             ui_state.dyn_circle_active = false;
             return;
         }
