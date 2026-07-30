@@ -1809,12 +1809,16 @@ fn canvas(root_ui: &mut egui::Ui, app: &mut AppState, ui_state: &mut UiState, pa
         // way, which is most of the time — the strip is for the moments the
         // software would otherwise be guessing on the user's behalf.
         if let Tool::Circle { parts, choice } = &app.tool {
-            let remaining = crate::tools::CIRCLE_DOF.saturating_sub(crate::tools::used_dof(parts));
             let pick = crate::tools::Pick {
                 pos: Point2d::from_f64(app.cursor_world.0, app.cursor_world.1),
                 snap: app.active_snap.clone(),
+                curve: app
+                    .active_snap
+                    .as_ref()
+                    .and_then(|s| app.document.get(s.entity))
+                    .and_then(|e| e.as_curve().cloned()),
             };
-            let opts = crate::tools::pick_readings(&pick, remaining);
+            let opts = crate::tools::pick_readings(&pick, parts);
             if opts.len() > 1 {
                 let cur = app
                     .view

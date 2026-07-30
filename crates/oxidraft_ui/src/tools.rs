@@ -259,12 +259,22 @@ pub struct Pick {
     pub pos: Point2d,
     /// The snap that produced `pos`, if any.
     pub snap: Option<oxidraft_cad::SnapPoint>,
+    /// The curve the snap landed on, cloned by the caller.
+    ///
+    /// A tool has no document, so it cannot look the entity up itself — but
+    /// solving two tangents and a radius needs the actual geometry, not just
+    /// an id. The caller has the document, so the caller supplies it.
+    pub curve: Option<Curve>,
 }
 
 impl Pick {
     /// A pick with no snap behind it, as if the user clicked empty space.
     pub fn bare(pos: Point2d) -> Self {
-        Pick { pos, snap: None }
+        Pick {
+            pos,
+            snap: None,
+            curve: None,
+        }
     }
 }
 
@@ -278,7 +288,7 @@ pub const CIRCLE_DOF: u8 = 3;
 /// `CIRCLE 3P`, `CIRCLE TTR` and `CIRCLE TTT` are five names for five ways of
 /// removing the same three degrees of freedom; collecting contributions covers
 /// all five, and covers combinations none of them named.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug)]
 pub enum Contribution {
     /// Centre pinned at a point the user chose freely.
     CenterAt(Point2d),
@@ -287,12 +297,34 @@ pub enum Contribution {
     /// The rim passes through this point.
     ThroughPoint(Point2d),
     /// Tangent to an entity. The point is where the tangency was picked, which
-    /// is a point on the finished rim — so it constrains the radius exactly the
-    /// way a through-point does. The entity is carried for the constraint that
-    /// will be recorded once creation can emit them.
-    TangentTo(EntityId, Point2d),
+    /// is a point on the finished rim — so with the centre known it constrains
+    /// the radius exactly the way a through-point does. The entity is carried
+    /// for the constraint recorded on commit, and the curve so that two
+    /// tangents plus a radius can be solved without reaching for the document.
+    TangentTo(EntityId, Point2d, Box<Curve>),
     /// Radius driven to a typed value.
     RadiusIs(f64),
+}
+
+impl PartialEq for Contribution {
+    /// Equal when two contributions say the same thing about the circle.
+    ///
+    /// The curve inside `TangentTo` is a snapshot of the entity it names, so
+    /// comparing it would let a contribution stop equalling itself after an
+    /// unrelated edit elsewhere in the document. Identity here is the entity
+    /// and the point, which is what "the user already picked this" means.
+    fn eq(&self, other: &Self) -> bool {
+        match (self, other) {
+            (Contribution::CenterAt(a), Contribution::CenterAt(b)) => a == b,
+            (Contribution::Concentric(a, p), Contribution::Concentric(b, q)) => a == b && p == q,
+            (Contribution::ThroughPoint(a), Contribution::ThroughPoint(b)) => a == b,
+            (Contribution::TangentTo(a, p, _), Contribution::TangentTo(b, q, _)) => {
+                a == b && p == q
+            }
+            (Contribution::RadiusIs(a), Contribution::RadiusIs(b)) => a == b,
+            _ => false,
+        }
+    }
 }
 
 impl Contribution {
@@ -315,7 +347,7 @@ impl Contribution {
     /// A point known to lie on the rim, if this contribution puts one there.
     pub fn rim_point(&self) -> Option<Point2d> {
         match self {
-            Contribution::ThroughPoint(p) | Contribution::TangentTo(_, p) => Some(*p),
+            Contribution::ThroughPoint(p) | Contribution::TangentTo(_, p, _) => Some(*p),
             _ => None,
         }
     }
@@ -337,48 +369,91 @@ pub fn used_dof(parts: &[Contribution]) -> u8 {
     parts.iter().map(Contribution::dof).sum()
 }
 
-/// The ways this pick could be read, best first, filtered to those that still
-/// fit in `remaining` degrees of freedom.
+/// The ways this pick could be read, best first, filtered to those that can
+/// still lead somewhere this tool knows how to finish.
 ///
-/// The snap kind decides, not the entity type — `Endpoint` means *pass
-/// through*, `Center` means *concentric*, `Tangent` means *tangent*. That is
-/// already what the snap resolver computes, so no geometry is re-derived here.
+/// The snap kind decides what a pick *means* — `Endpoint` is a rim point,
+/// `Center` is concentric, a curve body is tangency — and that is already what
+/// the snap resolver computes, so no geometry is re-derived here.
 ///
-/// Filtering by `remaining` is what stops a pick overshooting: after two
-/// through-points only one degree of freedom is left, so "centre here" — which
-/// costs two — is not offered at all.
-pub fn pick_readings(pick: &Pick, remaining: u8) -> Vec<Contribution> {
+/// What is offered depends on everything banked so far, not just the degrees
+/// of freedom left, because the two are not the same question. Three rim
+/// points describe a circle; two rim points and a tangent describe one too,
+/// but only via an Apollonius solve this does not do. Rather than let a user
+/// build a state and then refuse to finish it, combinations that cannot be
+/// completed are never offered:
+///
+/// - a centre makes everything else a free choice — anything 1-DOF finishes it
+/// - rim points and tangents do not mix without a centre
+/// - a typed radius pairs with a centre, or with two tangents, and nothing else
+///
+/// Every state reachable through these rules ends in a circle [`solve_circle`]
+/// can build.
+pub fn pick_readings(pick: &Pick, parts: &[Contribution]) -> Vec<Contribution> {
     use oxidraft_cad::SnapKind as K;
+    let remaining = CIRCLE_DOF.saturating_sub(used_dof(parts));
+    if remaining == 0 {
+        return Vec::new();
+    }
+    let has_centre = parts.iter().any(|c| c.center().is_some());
+    let has_radius = parts.iter().any(|c| matches!(c, Contribution::RadiusIs(_)));
+    let tangents = parts
+        .iter()
+        .filter(|c| matches!(c, Contribution::TangentTo(..)))
+        .count();
+    let rims = parts
+        .iter()
+        .filter(|c| matches!(c, Contribution::ThroughPoint(_)))
+        .count();
+
+    let allow_centre = !has_centre && remaining >= 2;
+    let allow_rim = has_centre || (tangents == 0 && !has_radius && rims < 3);
+    let allow_tangent = has_centre || (rims == 0 && tangents < 2);
+
     let mut out: Vec<Contribution> = Vec::new();
     match pick.snap.as_ref() {
         // Empty space is a freely chosen point: centre by default, because
         // centre-and-radius is overwhelmingly the common circle.
         None => {
-            out.push(Contribution::CenterAt(pick.pos));
-            out.push(Contribution::ThroughPoint(pick.pos));
+            if allow_centre {
+                out.push(Contribution::CenterAt(pick.pos));
+            }
+            if allow_rim {
+                out.push(Contribution::ThroughPoint(pick.pos));
+            }
         }
         Some(sp) => {
             let p = Point2d::from_f64(sp.pos.0, sp.pos.1);
             match sp.kind {
                 K::Center => {
-                    out.push(Contribution::Concentric(sp.entity, p));
-                    out.push(Contribution::ThroughPoint(p));
-                }
-                // Snapping onto the body of a curve reads as tangency — but
-                // only once the centre is pinned, because that is the case
-                // solvable without handing the constraint solver the relation.
-                K::Tangent | K::Nearest | K::Perpendicular => {
-                    if remaining == 1 {
-                        out.push(Contribution::TangentTo(sp.entity, p));
+                    if allow_centre {
+                        out.push(Contribution::Concentric(sp.entity, p));
                     }
-                    out.push(Contribution::ThroughPoint(p));
+                    if allow_rim {
+                        out.push(Contribution::ThroughPoint(p));
+                    }
+                }
+                // Snapping onto the body of a curve reads as tangency, which
+                // needs the curve itself — without it only the point is known,
+                // and that is a rim point, not a tangency.
+                K::Tangent | K::Nearest | K::Perpendicular => {
+                    if allow_tangent && let Some(c) = pick.curve.as_ref() {
+                        out.push(Contribution::TangentTo(sp.entity, p, Box::new(c.clone())));
+                    }
+                    if allow_rim {
+                        out.push(Contribution::ThroughPoint(p));
+                    }
                 }
                 // Endpoint, Midpoint, Node, Intersection, Quadrant, Insertion:
                 // a specific point the user aimed at, so the rim goes through
                 // it. Centre stays available as the alternative.
                 _ => {
-                    out.push(Contribution::ThroughPoint(p));
-                    out.push(Contribution::CenterAt(p));
+                    if allow_rim {
+                        out.push(Contribution::ThroughPoint(p));
+                    }
+                    if allow_centre {
+                        out.push(Contribution::CenterAt(p));
+                    }
                 }
             }
         }
@@ -394,8 +469,7 @@ pub fn pick_readings(pick: &Pick, remaining: u8) -> Vec<Contribution> {
 /// Takes the fields rather than the `Tool` so both entry points — the bare
 /// `on_point` and the snap-aware `on_pick` — share one implementation.
 fn circle_pick(parts: &mut Vec<Contribution>, choice: &mut usize, pick: Pick) -> ToolEvent {
-    let remaining = CIRCLE_DOF.saturating_sub(used_dof(parts));
-    let opts = pick_readings(&pick, remaining);
+    let opts = pick_readings(&pick, parts);
     let Some(part) = opts.get(*choice % opts.len().max(1)).cloned() else {
         return ToolEvent::Pending;
     };
@@ -413,7 +487,7 @@ fn circle_pick(parts: &mut Vec<Contribution>, choice: &mut usize, pick: Pick) ->
         // and a zero radius are both determined and both degenerate, and
         // `solve_circle` says so by returning None. Hold the pick rather than
         // commit something invalid or hand the kernel a singular system.
-        return match solve_circle(&next) {
+        return match solve_circle(&next, pick.pos) {
             Some(arc) => {
                 let relations = pending_relations(&next);
                 parts.clear();
@@ -451,7 +525,7 @@ pub fn pending_relations(parts: &[Contribution]) -> Vec<PendingRelation> {
                 kind: ConstraintKind::Concentric,
                 other: *other,
             }),
-            Contribution::TangentTo(other, _) => Some(PendingRelation {
+            Contribution::TangentTo(other, ..) => Some(PendingRelation {
                 kind: ConstraintKind::Tangent,
                 other: *other,
             }),
@@ -462,17 +536,36 @@ pub fn pending_relations(parts: &[Contribution]) -> Vec<PendingRelation> {
 
 /// The circle these contributions determine, or `None` if they do not yet — or
 /// if they determine something degenerate, such as three collinear points.
-pub fn solve_circle(parts: &[Contribution]) -> Option<CircularArc> {
+pub fn solve_circle(parts: &[Contribution], near: Point2d) -> Option<CircularArc> {
     if used_dof(parts) < CIRCLE_DOF {
         return None;
     }
     let full = std::f64::consts::TAU;
+    let radius = parts.iter().find_map(|p| match p {
+        Contribution::RadiusIs(r) => Some(*r),
+        _ => None,
+    });
+    // Two tangents and a radius. Up to four circles satisfy that, so `near`
+    // decides which — through the solver the old TTR tool already used, rather
+    // than a second implementation of the same construction.
+    let tangent_curves: Vec<&Curve> = parts
+        .iter()
+        .filter_map(|p| match p {
+            Contribution::TangentTo(_, _, c) => Some(&**c),
+            _ => None,
+        })
+        .collect();
+    if let ([c1, c2], Some(r)) = (tangent_curves.as_slice(), radius) {
+        return oxidraft_geometry::tangent_circle_ttr(c1, c2, r, near)
+            .map(|(centre, rr)| CircularArc::new(centre, rr, 0.0, full));
+    }
     if let Some(c) = parts.iter().find_map(Contribution::center) {
         // Centre plus one more thing. A tangency point sits on the rim, so it
         // fixes the radius exactly as a through-point does.
-        let r = parts.iter().find_map(|p| match p {
-            Contribution::RadiusIs(r) => Some(*r),
-            _ => p.rim_point().map(|q| c.dist_f64(&q)),
+        let r = radius.or_else(|| {
+            parts
+                .iter()
+                .find_map(|p| p.rim_point().map(|q| c.dist_f64(&q)))
         })?;
         return (r > 1e-9).then(|| CircularArc::new(c, r, 0.0, full));
     }
@@ -628,7 +721,16 @@ impl Tool {
         let mut next = parts.clone();
         next.push(Contribution::RadiusIs(r));
         if used_dof(&next) >= CIRCLE_DOF {
-            return match solve_circle(&next) {
+            // No cursor here — a typed radius has no position. The last thing
+            // the user actually pointed at is the closest stand-in for where
+            // they are looking, which is what picks among the four circles a
+            // tangent-tangent-radius admits.
+            let near = next
+                .iter()
+                .rev()
+                .find_map(|c| c.rim_point().or_else(|| c.center()))
+                .unwrap_or(Point2d::from_f64(0.0, 0.0));
+            return match solve_circle(&next, near) {
                 Some(arc) => {
                     let relations = pending_relations(&next);
                     parts.clear();
@@ -1203,7 +1305,7 @@ impl Tool {
             Tool::Circle { parts, .. } if !parts.is_empty() => {
                 let mut trial = parts.clone();
                 trial.push(Contribution::ThroughPoint(*cursor));
-                match solve_circle(&trial) {
+                match solve_circle(&trial, *cursor) {
                     Some(arc) => vec![Curve::Arc(arc)],
                     None => vec![],
                 }
@@ -1608,6 +1710,78 @@ mod tests {
     }
 
     #[test]
+    fn two_tangents_and_a_radius_build_the_ttr_circle() {
+        // The construction that used to need its own tool and its own menu
+        // entry, reached by picking two edges and typing a number. Two axes
+        // and radius 2 put the centre at (2,2) — one of the four solutions,
+        // chosen because it is the one nearest the picks.
+        use oxidraft_cad::SnapKind;
+        let x_axis = Curve::Line(LineSeg::from_endpoints(pt(-10, 0), pt(10, 0)));
+        let y_axis = Curve::Line(LineSeg::from_endpoints(pt(0, -10), pt(0, 10)));
+
+        let mut t = Tool::circle();
+        assert!(matches!(
+            t.on_pick(snapped_on(SnapKind::Nearest, 1, pt(4, 0), x_axis)),
+            ToolEvent::Pending
+        ));
+        assert!(matches!(
+            t.on_pick(snapped_on(SnapKind::Nearest, 2, pt(0, 4), y_axis)),
+            ToolEvent::Pending
+        ));
+        let ev = t.supply_radius(2.0);
+        let arc = committed_arc(ev.clone());
+        let (cx, cy) = arc.center.to_f64();
+        assert!(
+            (cx.abs() - 2.0).abs() < 1e-6 && (cy.abs() - 2.0).abs() < 1e-6,
+            "centre should sit one radius off each axis, got ({cx},{cy})"
+        );
+        assert!((arc.radius - 2.0).abs() < 1e-6, "r {}", arc.radius);
+
+        // And it commits knowing what it is tangent to, not just where it is.
+        match ev {
+            ToolEvent::CreateConstrained { relations, .. } => {
+                assert_eq!(relations.len(), 2, "both tangencies: {relations:?}");
+                assert!(
+                    relations.iter().all(|r| r.kind == ConstraintKind::Tangent),
+                    "{relations:?}"
+                );
+            }
+            o => panic!("expected the tangencies to be recorded, got {o:?}"),
+        }
+    }
+
+    #[test]
+    fn a_rim_point_and_a_tangent_are_never_mixed_without_a_centre() {
+        // Two rim points and a tangent is a real construction, but an
+        // Apollonius one this does not solve. Offering it would let a user
+        // bank three picks and then be told no, so it is never offered: after
+        // a rim point a curve snap reads as another rim point, and after a
+        // tangent no rim point is offered at all.
+        use oxidraft_cad::SnapKind;
+        let after_rim = [Contribution::ThroughPoint(pt(0, 0))];
+        let readings = pick_readings(&snapped(SnapKind::Nearest, 7, pt(5, 5)), &after_rim);
+        assert!(
+            !readings
+                .iter()
+                .any(|c| matches!(c, Contribution::TangentTo(..))),
+            "tangency must not be offered after a rim point: {readings:?}"
+        );
+
+        let after_tangent = [Contribution::TangentTo(
+            EntityId(7),
+            pt(5, 5),
+            Box::new(Curve::Line(LineSeg::from_endpoints(pt(0, 5), pt(9, 5)))),
+        )];
+        let readings = pick_readings(&snapped(SnapKind::Endpoint, 8, pt(1, 1)), &after_tangent);
+        assert!(
+            !readings
+                .iter()
+                .any(|c| matches!(c, Contribution::ThroughPoint(_))),
+            "a rim point must not be offered after a tangency: {readings:?}"
+        );
+    }
+
+    #[test]
     fn a_typed_radius_is_recorded_as_a_radius() {
         // It used to be applied as a click one radius east of the centre,
         // which lands the same circle but says the wrong thing — and only
@@ -1645,9 +1819,24 @@ mod tests {
         );
     }
 
-    /// A pick that snapped to `kind` on entity `id`, at `p`.
+    /// A pick that snapped to `kind` on entity `id`, at `p`, carrying a
+    /// horizontal line as the snapped curve — enough for tangency to read.
     fn snapped(kind: oxidraft_cad::SnapKind, id: u64, p: Point2d) -> Pick {
+        snapped_on(
+            kind,
+            id,
+            p,
+            Curve::Line(LineSeg::from_endpoints(
+                Point2d::from_f64(p.x - 10.0, p.y),
+                Point2d::from_f64(p.x + 10.0, p.y),
+            )),
+        )
+    }
+
+    /// A snapped pick carrying an explicit curve.
+    fn snapped_on(kind: oxidraft_cad::SnapKind, id: u64, p: Point2d, curve: Curve) -> Pick {
         Pick {
+            curve: Some(curve),
             pos: p,
             snap: Some(oxidraft_cad::SnapPoint {
                 kind,
@@ -1744,11 +1933,11 @@ mod tests {
         };
         assert_eq!(parts.len(), 1, "the centre should be banked");
 
-        let readings = pick_readings(&snapped(SnapKind::Tangent, 4, pt(0, 3)), 1);
+        let readings = pick_readings(&snapped(SnapKind::Tangent, 4, pt(0, 3)), parts);
         assert!(
             matches!(
                 readings.first(),
-                Some(Contribution::TangentTo(EntityId(4), _))
+                Some(Contribution::TangentTo(EntityId(4), ..))
             ),
             "a curve snap with the centre already pinned should read as \
              tangent first, got {readings:?}"
@@ -1763,14 +1952,18 @@ mod tests {
         // "Centre here" costs two of the three degrees of freedom. After two
         // rim points only one is left, so offering it would overshoot — this
         // is what stops a pick spending more than the circle has.
-        let all = pick_readings(&Pick::bare(pt(1, 1)), 3);
+        let all = pick_readings(&Pick::bare(pt(1, 1)), &[]);
         assert!(
             all.iter().any(|c| matches!(c, Contribution::CenterAt(_))),
             "with everything free, centre should be the default: {all:?}"
         );
         assert_eq!(all.first().map(Contribution::label), Some("Center"));
 
-        let tight = pick_readings(&Pick::bare(pt(1, 1)), 1);
+        let two_rim = [
+            Contribution::ThroughPoint(pt(0, 0)),
+            Contribution::ThroughPoint(pt(4, 0)),
+        ];
+        let tight = pick_readings(&Pick::bare(pt(1, 1)), &two_rim);
         assert!(
             !tight.iter().any(|c| matches!(c, Contribution::CenterAt(_))),
             "centre costs 2 and only 1 was left, so it must not be offered: {tight:?}"

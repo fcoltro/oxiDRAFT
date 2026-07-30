@@ -705,9 +705,16 @@ impl AppState {
         let snap_now = self.active_snap.clone();
         // The pointer path is the one place a pick carries a snap, so it is the
         // only caller that hands the tool anything beyond a coordinate.
+        // The tool has no document, so the curve behind the snap is cloned
+        // here — it is what lets two tangents and a radius be solved.
+        let snapped_curve = snap_now
+            .as_ref()
+            .and_then(|s| self.document.get(s.entity))
+            .and_then(|e| e.as_curve().cloned());
         let ev = self.tool.on_pick(crate::tools::Pick {
             pos: p,
             snap: snap_now.clone(),
+            curve: snapped_curve,
         });
         let created = matches!(ev, ToolEvent::Create(_));
         self.apply_tool_event(ev);
@@ -3111,6 +3118,7 @@ mod tests {
     ) {
         let ev = a.tool.on_pick(crate::tools::Pick {
             pos: p,
+            curve: a.document.get(id).and_then(|e| e.as_curve().cloned()),
             snap: Some(oxidraft_cad::SnapPoint {
                 kind,
                 pos: p.to_f64(),
