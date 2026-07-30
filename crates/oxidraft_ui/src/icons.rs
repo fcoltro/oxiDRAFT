@@ -9,7 +9,7 @@
 
 use egui::{Align2, Color32, Rect, Response, Sense, Stroke, Ui, Vec2, pos2};
 /// One toolbar or UI icon, backed by a glyph in the bundled icon font.
-#[derive(Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 pub enum Icon {
     Select,
     Point,
@@ -173,6 +173,47 @@ impl Icon {
         Icon::Plus,
         Icon::Minus,
     ];
+
+    /// The icon for a constraint kind — the single place that decision is made.
+    ///
+    /// It used to be made at each call site, and drifted: the constraint bar
+    /// showed a padlock for Smart Dimension, `const_parallel` for Collinear,
+    /// `const_equal` for Symmetric, and `const_fix` for Block — the last one
+    /// identical to the Fix button directly beneath it. Nothing was wrong with
+    /// the code; every arm was just a separate chance to pick the wrong mark.
+    ///
+    /// Kinds with no mark of their own borrow a related one, which is why this
+    /// is not a bijection: the three point-incidence relations all read as
+    /// coincidence, and the driving-dimension kinds all show the dimension
+    /// mark.
+    pub fn for_constraint(kind: oxidraft_document::ConstraintKind) -> Icon {
+        use oxidraft_document::ConstraintKind as K;
+        match kind {
+            K::Horizontal => Icon::ConHorizontal,
+            K::Vertical => Icon::ConVertical,
+            K::Parallel => Icon::ConParallel,
+            K::Perpendicular => Icon::ConPerpendicular,
+            K::Collinear => Icon::ConCollinear,
+            K::Concentric => Icon::ConConcentric,
+            K::Tangent => Icon::ConTangent,
+            K::Symmetric => Icon::ConSymmetric,
+            K::Block => Icon::ConBlock,
+            K::Fixed => Icon::ConFix,
+            // Equal length and equal radius are the same idea, and the font
+            // draws it once.
+            K::EqualLength | K::EqualRadius => Icon::ConEqual,
+            // Point-incidence relations: all four hold one point against
+            // something, which is what the coincident mark shows.
+            K::Coincident | K::Midpoint | K::PointOnLine | K::PointOnCircle => Icon::ConCoincident,
+            // Driving dimensions. The radius/length pair reads as a padlock on
+            // a measurement; the angular and free-form ones show the dimension.
+            K::Radius => Icon::ConRadiusLock,
+            K::Distance | K::LineDistance | K::PointDistance | K::HDistance | K::VDistance => {
+                Icon::ConLengthLock
+            }
+            K::Angle => Icon::ConAngle,
+        }
+    }
 
     /// The icon's codepoint in the font's private-use block.
     ///

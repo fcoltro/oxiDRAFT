@@ -902,6 +902,36 @@ mod tests {
     }
 
     #[test]
+    fn constraint_entries_agree_with_the_constraint_bar() {
+        // The bar and the palette are two views of the same commands, and they
+        // had drifted: the bar showed a padlock for Smart Dimension,
+        // `const_parallel` for Collinear, `const_equal` for Symmetric, and
+        // `const_fix` for Block — that last one identical to the Fix button
+        // right beneath it. The bar now derives its mark from the kind, so
+        // pinning the palette to the same function is what stops the two
+        // parting company again.
+        let mut checked = 0;
+        for e in ENTRIES {
+            let Action::Cmd(c) = e.action else { continue };
+            if let crate::command::Command::Constrain(k) = crate::command::parse_command(c) {
+                assert_eq!(
+                    e.icon,
+                    Icon::for_constraint(k),
+                    "palette entry {:?} shows a different mark than the \
+                     constraint bar does for {k:?}",
+                    e.name
+                );
+                checked += 1;
+            }
+        }
+        assert!(
+            checked >= 12,
+            "only {checked} constraint entries were checked; the palette should \
+             carry the whole set, so this test has stopped covering it"
+        );
+    }
+
+    #[test]
     fn every_group_is_listed_in_the_display_order() {
         // An entry whose group is missing from `GROUP_ORDER` is dropped from
         // the browse list entirely — it stays findable by typing, so the

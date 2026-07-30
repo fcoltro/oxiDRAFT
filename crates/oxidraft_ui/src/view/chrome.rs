@@ -2599,7 +2599,7 @@ pub(super) fn constraint_bar(ctx: &Context, app: &mut AppState, canvas_rect: egu
                         ui,
                         "Smart Dimension (DIMCON) — click a line for length, \
                          a circle/arc for radius, or two lines for angle",
-                        Icon::ConLengthLock,
+                        Icon::SmartDim,
                     )
                     .clicked()
                     {
@@ -2616,7 +2616,10 @@ pub(super) fn constraint_bar(ctx: &Context, app: &mut AppState, canvas_rect: egu
                     // selection is a valid target, with the requirement shown
                     // as a disabled-hover tooltip. Pick-based relations stay
                     // enabled (they open a pick tool regardless of selection).
-                    let mut geo = |ui: &mut egui::Ui, icon: Icon, tip: &str, k: K| {
+                    // The mark comes from the kind, so a button cannot show
+                    // one relation's icon while applying another.
+                    let mut geo = |ui: &mut egui::Ui, tip: &str, k: K| {
+                        let icon = Icon::for_constraint(k);
                         let validity =
                             oxidraft_cad::selection_validity(&app.document, &app.selection, k);
                         let pick_based =
@@ -2635,55 +2638,46 @@ pub(super) fn constraint_bar(ctx: &Context, app: &mut AppState, canvas_rect: egu
                     };
                     geo(
                         ui,
-                        Icon::ConHorizontal,
                         "Horizontal (HOR) — level the selected line(s)",
                         K::Horizontal,
                     );
                     geo(
                         ui,
-                        Icon::ConVertical,
                         "Vertical (VER) — plumb the selected line(s)",
                         K::Vertical,
                     );
                     geo(
                         ui,
-                        Icon::ConParallel,
                         "Parallel (PAR) — align the 2nd line to the 1st",
                         K::Parallel,
                     );
                     geo(
                         ui,
-                        Icon::ConPerpendicular,
                         "Perpendicular (PERP) — square the 2nd line to the 1st",
                         K::Perpendicular,
                     );
                     geo(
                         ui,
-                        Icon::ConParallel,
                         "Collinear (COLL) — lay the 2nd line on the 1st's carrier",
                         K::Collinear,
                     );
                     geo(
                         ui,
-                        Icon::ConEqual,
                         "Equal length (EQL) — match the 2nd line to the 1st",
                         K::EqualLength,
                     );
                     geo(
                         ui,
-                        Icon::ConTangent,
                         "Tangent (TANCON) — a line and an arc, or two arcs",
                         K::Tangent,
                     );
                     geo(
                         ui,
-                        Icon::ConConcentric,
                         "Concentric (CONC) — share the two circles'/arcs' center",
                         K::Concentric,
                     );
                     geo(
                         ui,
-                        Icon::ConEqual,
                         "Equal radius (EQR) — match the 2nd circle/arc to the 1st",
                         K::EqualRadius,
                     );
@@ -2691,32 +2685,27 @@ pub(super) fn constraint_bar(ctx: &Context, app: &mut AppState, canvas_rect: egu
                     // Pick-based relations.
                     geo(
                         ui,
-                        Icon::ConCoincident,
                         "Coincident (COI/WELD) — with two lines selected, weld their \
                          nearest endpoints; otherwise pick any two points to weld",
                         K::Coincident,
                     );
                     geo(
                         ui,
-                        Icon::ConCoincident,
                         "Midpoint (MID) — hold a picked point at a line's midpoint",
                         K::Midpoint,
                     );
                     geo(
                         ui,
-                        Icon::ConCoincident,
                         "Point on line (POL) — hold a picked point on a line",
                         K::PointOnLine,
                     );
                     geo(
                         ui,
-                        Icon::ConCoincident,
                         "Point on circle (POC) — hold a picked point on a circle/arc",
                         K::PointOnCircle,
                     );
                     geo(
                         ui,
-                        Icon::ConEqual,
                         "Symmetric (SYM) — mirror two picked points about a line",
                         K::Symmetric,
                     );
@@ -2732,7 +2721,7 @@ pub(super) fn constraint_bar(ctx: &Context, app: &mut AppState, canvas_rect: egu
                                 con_glyph_button(
                                     ui,
                                     "Block (BLOCK) — lock the selection into a rigid group",
-                                    Icon::ConFix,
+                                    Icon::for_constraint(K::Block),
                                 )
                             })
                             .inner;
@@ -2748,7 +2737,7 @@ pub(super) fn constraint_bar(ctx: &Context, app: &mut AppState, canvas_rect: egu
                         if con_glyph_button(
                             ui,
                             "Fix (GCFIX) — pin the selected geometry in place",
-                            Icon::ConFix,
+                            Icon::for_constraint(K::Fixed),
                         )
                         .clicked()
                         {
