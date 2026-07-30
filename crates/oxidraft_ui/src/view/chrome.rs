@@ -173,10 +173,17 @@ fn search_button() -> impl egui::Widget {
             egui::Stroke::new(1.0, crate::theme::OUTLINE),
             egui::StrokeKind::Inside,
         );
-        p.circle_stroke(
-            egui::pos2(rect.left() + 15.0, rect.center().y),
-            4.5,
-            egui::Stroke::new(1.4, crate::theme::TEXT_DIM),
+        // The search affordance used to be a bare stroked circle — a magnifier
+        // with no handle, because there was no glyph for one.
+        crate::icons::paint_icon(
+            p,
+            ui.ctx(),
+            crate::icons::Icon::Find,
+            egui::Rect::from_center_size(
+                egui::pos2(rect.left() + 16.0, rect.center().y),
+                egui::Vec2::splat(15.0),
+            ),
+            crate::theme::TEXT_DIM,
         );
         p.text(
             egui::pos2(rect.left() + 28.0, rect.center().y),
@@ -221,7 +228,7 @@ fn search_button() -> impl egui::Widget {
 
 fn export_button() -> impl egui::Widget {
     move |ui: &mut egui::Ui| {
-        let desired = egui::vec2(86.0, 30.0);
+        let desired = egui::vec2(96.0, 30.0);
         let (rect, resp) = ui.allocate_exact_size(desired, egui::Sense::click());
         let fill = if resp.hovered() {
             crate::theme::ACCENT_BRIGHT
@@ -230,9 +237,30 @@ fn export_button() -> impl egui::Widget {
         };
         let p = ui.painter();
         p.rect_filled(rect, 9.0, fill);
+        // Mark and label as one unit: measure the text, then centre the pair so
+        // the button stays balanced rather than the glyph hanging off one edge.
+        const GLYPH: f32 = 16.0;
+        const GAP: f32 = 6.0;
+        let galley = p.layout_no_wrap(
+            "Export".to_owned(),
+            egui::FontId::proportional(13.0),
+            Color32::WHITE,
+        );
+        let total = GLYPH + GAP + galley.size().x;
+        let left = rect.center().x - total * 0.5;
+        crate::icons::paint_icon(
+            p,
+            ui.ctx(),
+            crate::icons::Icon::Export,
+            egui::Rect::from_center_size(
+                egui::pos2(left + GLYPH * 0.5, rect.center().y),
+                egui::Vec2::splat(GLYPH),
+            ),
+            Color32::WHITE,
+        );
         p.text(
-            rect.center(),
-            egui::Align2::CENTER_CENTER,
+            egui::pos2(left + GLYPH + GAP, rect.center().y),
+            egui::Align2::LEFT_CENTER,
             "Export",
             egui::FontId::proportional(13.0),
             Color32::WHITE,
@@ -2784,42 +2812,19 @@ pub(super) fn constraint_bar(ctx: &Context, app: &mut AppState, canvas_rect: egu
         )
         .order(egui::Order::Foreground)
         .show(ctx, |ui| {
-            if bar_toggle(
+            // Two marks, not one dimmed one: the font carries a drawn off
+            // state, so the toggle reads at a glance instead of asking whether
+            // this icon is dim or just unhovered.
+            if bar_toggle_onoff(
                 ui,
                 app.prefs.comb_on,
                 "Curvature Comb — show curvature teeth on selected curves",
                 crate::icons::Icon::CurvComb,
+                crate::icons::Icon::CurvCombOff,
             ) {
                 app.prefs.comb_on = !app.prefs.comb_on;
             }
         });
-}
-
-fn bar_toggle(ui: &mut egui::Ui, on: bool, tooltip: &str, icon: crate::icons::Icon) -> bool {
-    let (rect, mut resp) = ui.allocate_exact_size(egui::Vec2::splat(28.0), egui::Sense::click());
-    let hovered = resp.hovered();
-    let anim = ui.ctx().animate_bool(resp.id, hovered);
-    let painter = ui.painter_at(rect);
-    if anim > 0.001 {
-        painter.rect_filled(
-            rect,
-            7.0,
-            crate::theme::WIDGET_HOVER.gamma_multiply(anim * 0.8),
-        );
-    }
-    let alpha = if on {
-        255
-    } else if hovered {
-        200
-    } else {
-        140
-    };
-    let tint = egui::Color32::from_white_alpha(alpha);
-    crate::icons::paint_icon(&painter, ui.ctx(), icon, rect.shrink(5.0), tint);
-    if hovered {
-        resp = resp.on_hover_ui(|ui| crate::icons::rich_tooltip(ui, tooltip));
-    }
-    resp.clicked()
 }
 
 fn bar_toggle_onoff(

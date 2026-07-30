@@ -81,11 +81,14 @@ pub enum Icon {
     ConstShowHide,
     ConstShowHideOff,
     CurvComb,
+    CurvCombOff,
     Grid,
     GridSnap,
     Guides,
     Track,
     DynamicInput,
+    Export,
+    Find,
 }
 
 impl Icon {
@@ -149,6 +152,8 @@ impl Icon {
         Icon::Guides,
         Icon::Track,
         Icon::DynamicInput,
+        Icon::Export,
+        Icon::Find,
         Icon::ConstAuto,
         Icon::ConstAutoOff,
         Icon::Eye,
@@ -156,6 +161,7 @@ impl Icon {
         Icon::EyeOff,
         Icon::ConstShowHideOff,
         Icon::CurvComb,
+        Icon::CurvCombOff,
         Icon::Undo,
         Icon::Redo,
         Icon::ZoomIn,
@@ -244,6 +250,7 @@ impl Icon {
             Icon::Eye | Icon::ConstShowHide => '\u{f007}', // ui_show
             Icon::EyeOff | Icon::ConstShowHideOff => '\u{f008}', // ui_hide
             Icon::CurvComb => '\u{f01b}',     // ui_curv_comb_on
+            Icon::CurvCombOff => '\u{f01c}',  // ui_curv_comb_off
             // Drafting aids, each with its own mark rather than the stand-ins
             // the palette used to show for them.
             Icon::Grid => '\u{f014}',         // ui_grid
@@ -251,6 +258,8 @@ impl Icon {
             Icon::Guides => '\u{f012}',       // ui_guides
             Icon::Track => '\u{f006}',        // ui_track
             Icon::DynamicInput => '\u{f019}', // ui_dynamic_input
+            Icon::Export => '\u{f017}',       // ui_export
+            Icon::Find => '\u{f016}',         // ui_find
             Icon::Undo => '\u{f005}',         // ui_undo
             Icon::Redo => '\u{f00a}',         // ui_redo
             Icon::ZoomIn => '\u{f001}',       // ui_zoom_in
@@ -597,11 +606,14 @@ mod tests {
             Icon::EyeOff => "ui_hide",
             Icon::ConstShowHideOff => "ui_hide",
             Icon::CurvComb => "ui_curv_comb_on",
+            Icon::CurvCombOff => "ui_curv_comb_off",
             Icon::Grid => "ui_grid",
             Icon::GridSnap => "ui_grid_snap",
             Icon::Guides => "ui_guides",
             Icon::Track => "ui_track",
             Icon::DynamicInput => "ui_dynamic_input",
+            Icon::Export => "ui_export",
+            Icon::Find => "ui_find",
             Icon::Undo => "ui_undo",
             Icon::Redo => "ui_redo",
             Icon::ZoomIn => "ui_zoom_in",
