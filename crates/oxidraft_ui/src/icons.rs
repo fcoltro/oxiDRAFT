@@ -237,11 +237,18 @@ impl Icon {
 
 /// Draws `icon` in `tint`, centred in `rect`.
 ///
-/// `rect`'s height is used as the font size, which is the same thing as the
-/// icon's design size: the glyphs were built on a 24-unit grid at 1024 units
-/// per em, so an em box of N pixels reproduces the source artwork at N pixels.
+/// `rect`'s height is the icon's design size: the glyphs were built on a
+/// 24-unit grid at 1024 units per em, so an em box of N points reproduces the
+/// source artwork at N pixels — [`GLYPH_PX`] is 24 for exactly that reason.
 /// Each glyph's ink is centred on its line box, so `CENTER_CENTER` seats the
 /// mark without a per-glyph nudge.
+///
+/// The size is rounded to a whole number of *physical* pixels before use. At
+/// 100/125/150/200% scaling that changes nothing, since 24 points is already a
+/// whole pixel count. At the awkward fractions — 110%, 120% — it stops the
+/// rasterised size from wobbling with sub-pixel position, which otherwise both
+/// softens the grid the art was drawn on and makes the atlas hold the same
+/// icon several times over.
 pub fn paint_icon(
     painter: &egui::Painter,
     ctx: &egui::Context,
@@ -249,11 +256,13 @@ pub fn paint_icon(
     rect: Rect,
     tint: Color32,
 ) {
-    let Some(font) = crate::fonts::icon_font_id(ctx, rect.height()) else {
+    let ppp = ctx.pixels_per_point();
+    let size = ((rect.height() * ppp).round() / ppp).max(1.0);
+    let Some(font) = crate::fonts::icon_font_id(ctx, size) else {
         return;
     };
     painter.text(
-        rect.center(),
+        snap_pos(rect.center(), ppp),
         Align2::CENTER_CENTER,
         icon.glyph(),
         font,
@@ -400,10 +409,11 @@ pub fn icon_button_sized(
         Color32::WHITE.gamma_multiply(0.4)
     };
     let glyph = GLYPH_PX.min(size - 4.0).max(8.0);
-    let area = snap_rect(
-        Rect::from_center_size(rect.center(), Vec2::splat(glyph)),
-        ppp,
-    );
+    // Snap the centre, then size from it — not `snap_rect`, which rounds min
+    // and max independently and so changes the box's *height* by up to a pixel
+    // depending on where it happens to sit. The icons are drawn on a 24-unit
+    // grid, so the height is the one number that has to survive exactly.
+    let area = Rect::from_center_size(snap_pos(rect.center(), ppp), Vec2::splat(glyph));
     paint_icon(&painter, ui.ctx(), icon, area, tint);
 
     if hovered {
@@ -473,6 +483,16 @@ fn snap_rect(r: Rect, pixels_per_point: f32) -> Rect {
         pos2(snap(r.min.x), snap(r.min.y)),
         pos2(snap(r.max.x), snap(r.max.y)),
     )
+}
+
+/// A point moved onto the physical pixel grid.
+///
+/// Distinct from [`snap_rect`] on purpose: snapping a rect's two corners moves
+/// them independently, which is fine for a filled background but changes the
+/// size of anything measured from the result.
+fn snap_pos(p: egui::Pos2, pixels_per_point: f32) -> egui::Pos2 {
+    let snap = |v: f32| (v * pixels_per_point).round() / pixels_per_point;
+    pos2(snap(p.x), snap(p.y))
 }
 
 #[cfg(test)]
@@ -600,6 +620,60 @@ mod tests {
                 ink.0 > 0,
                 "{want} (U+{cp:04X}) has no outline — an export carrying \
                  neither a glyf nor a CFF table draws every icon blank"
+            );
+        }
+    }
+
+    /// What `icon_button_sized` hands to [`paint_icon`] as the em box.
+    fn glyph_box(button: f32) -> f32 {
+        GLYPH_PX.min(button - 4.0).max(8.0)
+    }
+
+    /// What [`paint_icon`] rasterises at, given an em box and a scale factor.
+    fn rasterised_size(box_pts: f32, ppp: f32) -> f32 {
+        ((box_pts * ppp).round() / ppp).max(1.0)
+    }
+
+    #[test]
+    fn the_default_toolbar_draws_icons_at_their_design_size() {
+        // The art is drawn on a 24-unit grid, so 24 is the one size where a
+        // stroke the designer put on a pixel boundary lands on one.
+        assert_eq!(glyph_box(ICON_SIZE), 24.0);
+        // Anything roomier still gets 24 rather than scaling up.
+        assert_eq!(glyph_box(38.0), 24.0);
+        // Below 28 the box has to shrink to fit, and the grid is lost. This is
+        // a real visual compromise on those buttons, not an accident, so it is
+        // written down rather than left to be rediscovered.
+        assert_eq!(glyph_box(20.0), 16.0);
+    }
+
+    #[test]
+    fn the_rasterised_size_does_not_move_with_sub_pixel_position() {
+        // `snap_rect` used to round a rect's corners independently, so a
+        // 24-point box became anywhere from 23.33 to 24.62 points depending on
+        // where it sat — the em box changed size as the widget moved, which
+        // both blurs the grid and makes the atlas cache one icon several times.
+        for ppp in [1.0f32, 1.1, 1.25, 1.2, 1.5, 1.3, 1.75, 2.0] {
+            let centre_offsets = (0..100).map(|k| k as f32 / 100.0);
+            let sizes: Vec<f32> = centre_offsets
+                .map(|off| {
+                    let centre = egui::pos2(100.0 + off, 100.0 + off);
+                    let area = Rect::from_center_size(snap_pos(centre, ppp), Vec2::splat(GLYPH_PX));
+                    rasterised_size(area.height(), ppp)
+                })
+                .collect();
+            let first = sizes[0];
+            assert!(
+                sizes.iter().all(|s| (s - first).abs() < 1e-6),
+                "at {ppp}x the size varies with position: {:?}..{:?}",
+                sizes.iter().cloned().fold(f32::INFINITY, f32::min),
+                sizes.iter().cloned().fold(f32::NEG_INFINITY, f32::max)
+            );
+            // And it must land on whole physical pixels.
+            let physical = first * ppp;
+            assert!(
+                (physical - physical.round()).abs() < 1e-4,
+                "at {ppp}x the em box is {physical} physical pixels, not a whole number"
             );
         }
     }
