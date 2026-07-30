@@ -1257,7 +1257,7 @@ pub fn solve_fillet(
     }
     match (a, b) {
         (CornerEdge::Line { p0: a0, p1: a1 }, CornerEdge::Line { p0: b0, p1: b1 }) => {
-            solve_fillet_ll((a0, a1), (b0, b1), radius)
+            solve_fillet_ll((a0, a1), (b0, b1), radius, pick)
         }
         (
             CornerEdge::Line { p0, p1 },
@@ -1370,10 +1370,15 @@ pub fn solve_chamfer(
     })
 }
 
-fn solve_fillet_ll(la: LineData, lb: LineData, radius: f64) -> Option<FilletSolution> {
+fn solve_fillet_ll(
+    la: LineData,
+    lb: LineData,
+    radius: f64,
+    pick: (f64, f64),
+) -> Option<FilletSolution> {
     let (cx, cy) = infinite_line_intersection(la, lb)?;
-    let dir_a = dir_from_corner(cx, cy, la);
-    let dir_b = dir_from_corner(cx, cy, lb);
+    let dir_a = dir_from_corner_toward(cx, cy, la, pick);
+    let dir_b = dir_from_corner_toward(cx, cy, lb, pick);
     let cos_t = (dir_a.0 * dir_b.0 + dir_a.1 * dir_b.1).clamp(-1.0, 1.0);
     let theta = cos_t.acos();
     if theta < 1e-6 || (std::f64::consts::PI - theta) < 1e-6 {
@@ -1977,6 +1982,36 @@ fn endpoint_nearer_is_p1(l: LineData, cx: f64, cy: f64) -> bool {
     d1 < d0
 }
 
+/// The direction to run along `l` from the corner, choosing the side the user
+/// picked when the line genuinely has two.
+///
+/// [`dir_from_corner`] takes the end farther from the corner, which is right
+/// for two segments meeting in an L — only one side exists. But two lines that
+/// *cross* have equal halves either side, so "farther" is arbitrary: filleting
+/// an X rounded a fixed quadrant no matter where the user clicked, and trimmed
+/// away the two legs they were pointing at. `fillet_freeform` already treats
+/// the pick as marking the corner to round; this makes the exact line/line
+/// path agree.
+fn dir_from_corner_toward(cx: f64, cy: f64, l: LineData, pick: (f64, f64)) -> (f64, f64) {
+    let want = (pick.0 - cx, pick.1 - cy);
+    let mut best: Option<(f64, (f64, f64))> = None;
+    for end in [l.0, l.1] {
+        let (dx, dy) = (end.0 - cx, end.1 - cy);
+        let n = (dx * dx + dy * dy).sqrt();
+        // An end sitting on the corner offers no direction — which is how an
+        // L-corner ends up with a single candidate and keeps its old answer.
+        if n < 1e-12 {
+            continue;
+        }
+        let d = (dx / n, dy / n);
+        let score = d.0 * want.0 + d.1 * want.1;
+        if best.is_none_or(|(s, _)| score > s) {
+            best = Some((score, d));
+        }
+    }
+    best.map_or_else(|| dir_from_corner(cx, cy, l), |(_, d)| d)
+}
+
 fn dir_from_corner(cx: f64, cy: f64, l: LineData) -> (f64, f64) {
     let far = if endpoint_nearer_is_p1(l, cx, cy) {
         l.0
@@ -2215,6 +2250,51 @@ mod tests {
             .collect();
         assert_eq!(welds.len(), 1, "only the moved end's weld dropped");
         assert!(welds[0].references(c), "the untouched-end weld survives");
+    }
+
+    #[test]
+    fn filleting_a_crossing_rounds_the_corner_that_was_picked() {
+        // Two lines that cross have four corners, and the pick says which.
+        // `dir_from_corner` took the end farther from the crossing, which for
+        // equal halves is arbitrary: every pick rounded the same quadrant and
+        // trimmed away the two legs the user was pointing at — the operation
+        // reported success and destroyed the geometry it was aimed at.
+        for (px, py) in [(3.0, 3.0), (-3.0, 3.0), (-3.0, -3.0), (3.0, -3.0)] {
+            let mut doc = Document::new();
+            let a = draw::line(&mut doc, pt(-10, 0), pt(10, 0));
+            let b = draw::line(&mut doc, pt(0, -10), pt(0, 10));
+            let id = fillet(&mut doc, a, b, 2.0, px, py).expect("fillet applies");
+            let Some(Curve::Arc(arc)) = doc.get(id).and_then(|e| e.as_curve()) else {
+                panic!("expected a fillet arc");
+            };
+            let (cx, cy) = arc.center.to_f64();
+            assert!(
+                cx.signum() == px.signum() && cy.signum() == py.signum(),
+                "picking ({px},{py}) should round that corner, but the arc \
+                 centre came out at ({cx:.3},{cy:.3})"
+            );
+        }
+    }
+
+    #[test]
+    fn filleting_an_l_corner_is_unchanged_by_the_pick() {
+        // Two segments meeting at an end have only one corner, so the pick has
+        // nothing to choose between and must not be able to move the result.
+        for (px, py) in [(1.0, 1.0), (-5.0, -5.0), (20.0, 20.0)] {
+            let mut doc = Document::new();
+            let a = draw::line(&mut doc, pt(10, 0), pt(0, 0));
+            let b = draw::line(&mut doc, pt(0, 0), pt(0, 10));
+            let id = fillet(&mut doc, a, b, 2.0, px, py).expect("fillet applies");
+            let Some(Curve::Arc(arc)) = doc.get(id).and_then(|e| e.as_curve()) else {
+                panic!("expected a fillet arc");
+            };
+            let (cx, cy) = arc.center.to_f64();
+            assert!(
+                (cx - 2.0).abs() < 1e-6 && (cy - 2.0).abs() < 1e-6,
+                "the only corner there is sits at (2,2); pick ({px},{py}) gave \
+                 ({cx:.3},{cy:.3})"
+            );
+        }
     }
 
     #[test]
