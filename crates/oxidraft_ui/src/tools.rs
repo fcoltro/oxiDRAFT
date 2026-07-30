@@ -41,8 +41,15 @@ pub enum Tool {
     Line {
         last: Option<Point2d>,
     },
+    /// One circle tool for every construction: picks accumulate as
+    /// [`Contribution`]s until the three degrees of freedom are gone, then it
+    /// commits. See [`pick_readings`] for how a pick is read.
     Circle {
-        center: Option<Point2d>,
+        /// What has been banked so far.
+        parts: Vec<Contribution>,
+        /// Which reading of the *next* pick is active, as an index into
+        /// [`pick_readings`]. Tab advances it; it resets on every commit.
+        choice: usize,
     },
     Arc3 {
         pts: Vec<Point2d>,
@@ -218,7 +225,220 @@ pub enum ToolEvent {
     PlotWindow(Point2d, Point2d),
 }
 
+/// A click delivered to a tool: where it landed, and what it snapped to.
+///
+/// `snap` is `None` for a pick that resolved to nothing — empty space, or
+/// snapping switched off. That absence is meaningful rather than missing data:
+/// it is how a tool distinguishes "a point the user chose freely" from "a point
+/// on something".
+#[derive(Clone, Debug)]
+pub struct Pick {
+    /// Where the pick landed, after snapping.
+    pub pos: Point2d,
+    /// The snap that produced `pos`, if any.
+    pub snap: Option<oxidraft_cad::SnapPoint>,
+}
+
+impl Pick {
+    /// A pick with no snap behind it, as if the user clicked empty space.
+    pub fn bare(pos: Point2d) -> Self {
+        Pick { pos, snap: None }
+    }
+}
+
+/// A circle has three degrees of freedom: two for the centre, one for the
+/// radius.
+pub const CIRCLE_DOF: u8 = 3;
+
+/// One thing a pick contributed towards the circle being built.
+///
+/// The point is to stop enumerating constructions. `CIRCLE`, `CIRCLE 2P`,
+/// `CIRCLE 3P`, `CIRCLE TTR` and `CIRCLE TTT` are five names for five ways of
+/// removing the same three degrees of freedom; collecting contributions covers
+/// all five, and covers combinations none of them named.
+#[derive(Clone, Debug, PartialEq)]
+pub enum Contribution {
+    /// Centre pinned at a point the user chose freely.
+    CenterAt(Point2d),
+    /// Centre shared with another entity's centre.
+    Concentric(EntityId, Point2d),
+    /// The rim passes through this point.
+    ThroughPoint(Point2d),
+    /// Tangent to an entity. The point is where the tangency was picked, which
+    /// is a point on the finished rim — so it constrains the radius exactly the
+    /// way a through-point does. The entity is carried for the constraint that
+    /// will be recorded once creation can emit them.
+    TangentTo(EntityId, Point2d),
+    /// Radius driven to a typed value.
+    RadiusIs(f64),
+}
+
+impl Contribution {
+    /// How many degrees of freedom this removes.
+    pub fn dof(&self) -> u8 {
+        match self {
+            Contribution::CenterAt(_) | Contribution::Concentric(..) => 2,
+            _ => 1,
+        }
+    }
+
+    /// The centre, if this contribution fixes one.
+    pub fn center(&self) -> Option<Point2d> {
+        match self {
+            Contribution::CenterAt(p) | Contribution::Concentric(_, p) => Some(*p),
+            _ => None,
+        }
+    }
+
+    /// A point known to lie on the rim, if this contribution puts one there.
+    pub fn rim_point(&self) -> Option<Point2d> {
+        match self {
+            Contribution::ThroughPoint(p) | Contribution::TangentTo(_, p) => Some(*p),
+            _ => None,
+        }
+    }
+
+    /// A short word for the chooser chip.
+    pub fn label(&self) -> &'static str {
+        match self {
+            Contribution::CenterAt(_) => "Center",
+            Contribution::Concentric(..) => "Concentric",
+            Contribution::ThroughPoint(_) => "On rim",
+            Contribution::TangentTo(..) => "Tangent",
+            Contribution::RadiusIs(_) => "Radius",
+        }
+    }
+}
+
+/// Degrees of freedom already spoken for.
+pub fn used_dof(parts: &[Contribution]) -> u8 {
+    parts.iter().map(Contribution::dof).sum()
+}
+
+/// The ways this pick could be read, best first, filtered to those that still
+/// fit in `remaining` degrees of freedom.
+///
+/// The snap kind decides, not the entity type — `Endpoint` means *pass
+/// through*, `Center` means *concentric*, `Tangent` means *tangent*. That is
+/// already what the snap resolver computes, so no geometry is re-derived here.
+///
+/// Filtering by `remaining` is what stops a pick overshooting: after two
+/// through-points only one degree of freedom is left, so "centre here" — which
+/// costs two — is not offered at all.
+pub fn pick_readings(pick: &Pick, remaining: u8) -> Vec<Contribution> {
+    use oxidraft_cad::SnapKind as K;
+    let mut out: Vec<Contribution> = Vec::new();
+    match pick.snap.as_ref() {
+        // Empty space is a freely chosen point: centre by default, because
+        // centre-and-radius is overwhelmingly the common circle.
+        None => {
+            out.push(Contribution::CenterAt(pick.pos));
+            out.push(Contribution::ThroughPoint(pick.pos));
+        }
+        Some(sp) => {
+            let p = Point2d::from_f64(sp.pos.0, sp.pos.1);
+            match sp.kind {
+                K::Center => {
+                    out.push(Contribution::Concentric(sp.entity, p));
+                    out.push(Contribution::ThroughPoint(p));
+                }
+                // Snapping onto the body of a curve reads as tangency — but
+                // only once the centre is pinned, because that is the case
+                // solvable without handing the constraint solver the relation.
+                K::Tangent | K::Nearest | K::Perpendicular => {
+                    if remaining == 1 {
+                        out.push(Contribution::TangentTo(sp.entity, p));
+                    }
+                    out.push(Contribution::ThroughPoint(p));
+                }
+                // Endpoint, Midpoint, Node, Intersection, Quadrant, Insertion:
+                // a specific point the user aimed at, so the rim goes through
+                // it. Centre stays available as the alternative.
+                _ => {
+                    out.push(Contribution::ThroughPoint(p));
+                    out.push(Contribution::CenterAt(p));
+                }
+            }
+        }
+    }
+    out.retain(|c| c.dof() <= remaining);
+    out.dedup();
+    out
+}
+
+/// Banks one pick against the circle being built, committing when the three
+/// degrees of freedom are gone.
+///
+/// Takes the fields rather than the `Tool` so both entry points — the bare
+/// `on_point` and the snap-aware `on_pick` — share one implementation.
+fn circle_pick(parts: &mut Vec<Contribution>, choice: &mut usize, pick: Pick) -> ToolEvent {
+    let remaining = CIRCLE_DOF.saturating_sub(used_dof(parts));
+    let opts = pick_readings(&pick, remaining);
+    let Some(part) = opts.get(*choice % opts.len().max(1)).cloned() else {
+        return ToolEvent::Pending;
+    };
+    // A pick that repeats one already banked adds nothing — most often a
+    // double click on the same spot — so it must not spend a degree of
+    // freedom.
+    if parts.contains(&part) {
+        return ToolEvent::Pending;
+    }
+
+    let mut next = parts.clone();
+    next.push(part);
+    if used_dof(&next) >= CIRCLE_DOF {
+        // Determined. That is not the same as solvable: three collinear points
+        // and a zero radius are both determined and both degenerate, and
+        // `solve_circle` says so by returning None. Hold the pick rather than
+        // commit something invalid or hand the kernel a singular system.
+        return match solve_circle(&next) {
+            Some(arc) => {
+                parts.clear();
+                *choice = 0;
+                ToolEvent::Create(vec![EntityKind::Curve(Curve::Arc(arc))])
+            }
+            None => ToolEvent::Pending,
+        };
+    }
+    *parts = next;
+    *choice = 0;
+    ToolEvent::Pending
+}
+
+/// The circle these contributions determine, or `None` if they do not yet — or
+/// if they determine something degenerate, such as three collinear points.
+pub fn solve_circle(parts: &[Contribution]) -> Option<CircularArc> {
+    if used_dof(parts) < CIRCLE_DOF {
+        return None;
+    }
+    let full = std::f64::consts::TAU;
+    if let Some(c) = parts.iter().find_map(Contribution::center) {
+        // Centre plus one more thing. A tangency point sits on the rim, so it
+        // fixes the radius exactly as a through-point does.
+        let r = parts.iter().find_map(|p| match p {
+            Contribution::RadiusIs(r) => Some(*r),
+            _ => p.rim_point().map(|q| c.dist_f64(&q)),
+        })?;
+        return (r > 1e-9).then(|| CircularArc::new(c, r, 0.0, full));
+    }
+    let rim: Vec<Point2d> = parts.iter().filter_map(Contribution::rim_point).collect();
+    if rim.len() == 3 {
+        // Returns None for collinear points, which is the caller's cue to hold
+        // the pick rather than commit something degenerate.
+        return CircularArc::from_three_points(&rim[0], &rim[1], &rim[2]);
+    }
+    None
+}
+
 impl Tool {
+    /// A fresh circle tool with nothing banked.
+    pub fn circle() -> Tool {
+        Tool::Circle {
+            parts: Vec::new(),
+            choice: 0,
+        }
+    }
+
     /// The tool's display name, as shown in the status bar (also the command
     /// verb for tools activated by typed command).
     pub fn name(&self) -> &'static str {
@@ -312,6 +532,45 @@ impl Tool {
         )
     }
 
+    /// Feeds a pick to the tool — the position plus the snap that produced it.
+    ///
+    /// [`Self::on_point`] takes a bare coordinate, so by the time a tool sees a
+    /// click it can no longer tell that the point was a *tangent point on
+    /// entity 7* rather than an arbitrary spot: `AppState::pointer_moved`
+    /// resolves the full [`Pick::snap`], uses it to place the crosshair, and
+    /// drops it. A tool that wants to read intent from what was snapped needs
+    /// it, so this is the channel that carries it.
+    ///
+    /// The default forwards to `on_point` and discards the snap, which is the
+    /// right answer for every tool whose behaviour does not depend on it. Only
+    /// tools that override this see any difference.
+    pub fn on_pick(&mut self, pick: Pick) -> ToolEvent {
+        if let Tool::Circle { parts, choice } = self {
+            return circle_pick(parts, choice, pick);
+        }
+        self.on_point(pick.pos)
+    }
+
+    /// Advances which reading of the next pick is active — the Tab cycle.
+    /// Does nothing for tools that have no alternatives to offer.
+    pub fn cycle_reading(&mut self) {
+        if let Tool::Circle { choice, .. } = self {
+            *choice = choice.wrapping_add(1);
+        }
+    }
+
+    /// Drops the last banked contribution, undoing one pick without leaving
+    /// the tool. Returns whether anything was there to drop.
+    pub fn drop_last_part(&mut self) -> bool {
+        match self {
+            Tool::Circle { parts, choice } => {
+                *choice = 0;
+                parts.pop().is_some()
+            }
+            _ => false,
+        }
+    }
+
     /// Feeds a clicked/typed point to the tool, advancing its internal state
     /// and returning what to do with the document (if anything yet).
     pub fn on_point(&mut self, p: Point2d) -> ToolEvent {
@@ -331,27 +590,9 @@ impl Tool {
                 ev
             }
 
-            Tool::Circle { center } => {
-                match center.take() {
-                    None => {
-                        *center = Some(p);
-                        ToolEvent::Pending
-                    }
-                    Some(c) => {
-                        let d = c.dist_f64(&p);
-                        if d < 1e-9 {
-                            *center = Some(c);
-                            ToolEvent::Pending
-                        } else {
-                            let r = d;
-                            *self = Tool::Circle { center: None };
-                            ToolEvent::Create(vec![EntityKind::Curve(Curve::Arc(
-                                CircularArc::new(c, r, 0.0, std::f64::consts::TAU),
-                            ))])
-                        }
-                    }
-                }
-            }
+            // A bare coordinate carries no snap, so it can only ever read as a
+            // freely chosen point. `on_pick` is the path that sees more.
+            Tool::Circle { parts, choice } => circle_pick(parts, choice, Pick::bare(p)),
 
             Tool::Arc3 { pts } => {
                 pts.push(p);
@@ -736,7 +977,10 @@ impl Tool {
     pub fn reset(&mut self) {
         match self {
             Tool::Line { last } => *last = None,
-            Tool::Circle { center } => *center = None,
+            Tool::Circle { parts, choice } => {
+                parts.clear();
+                *choice = 0;
+            }
             Tool::Arc3 { pts } => pts.clear(),
             Tool::ArcStartCenterEnd { start, center } => {
                 *start = None;
@@ -815,7 +1059,7 @@ impl Tool {
     pub fn has_pending_input(&self) -> bool {
         match self {
             Tool::Line { last } => last.is_some(),
-            Tool::Circle { center } => center.is_some(),
+            Tool::Circle { parts, .. } => !parts.is_empty(),
             Tool::Arc3 { pts } => !pts.is_empty(),
             Tool::ArcStartCenterEnd { start, .. } => start.is_some(),
             Tool::ArcCenterStartEnd { center, .. } => center.is_some(),
@@ -854,18 +1098,14 @@ impl Tool {
     pub fn preview(&self, cursor: &Point2d) -> Vec<Curve> {
         match self {
             Tool::Line { last: Some(p) } => vec![Curve::Line(LineSeg::from_endpoints(*p, *cursor))],
-            Tool::Circle { center: Some(c) } => {
-                let d = c.dist_f64(cursor);
-                if d < 1e-9 {
-                    vec![]
-                } else {
-                    let r = d;
-                    vec![Curve::Arc(CircularArc::new(
-                        *c,
-                        r,
-                        0.0,
-                        std::f64::consts::TAU,
-                    ))]
+            // Preview the circle that would commit if the cursor were the
+            // next pick, whatever combination has been banked so far.
+            Tool::Circle { parts, .. } if !parts.is_empty() => {
+                let mut trial = parts.clone();
+                trial.push(Contribution::ThroughPoint(*cursor));
+                match solve_circle(&trial) {
+                    Some(arc) => vec![Curve::Arc(arc)],
+                    None => vec![],
                 }
             }
             Tool::Rectangle { first: Some(c0) } | Tool::PlotWindow { first: Some(c0) } => {
@@ -995,7 +1235,10 @@ impl Tool {
     pub fn reference_point(&self) -> Option<Point2d> {
         match self {
             Tool::Line { last } => *last,
-            Tool::Circle { center } => *center,
+            Tool::Circle { parts, .. } => parts
+                .iter()
+                .find_map(Contribution::center)
+                .or_else(|| parts.iter().rev().find_map(Contribution::rim_point)),
             Tool::Rectangle { first } | Tool::PlotWindow { first } => *first,
             Tool::Arc3 { pts } => pts.last().cloned(),
             Tool::ArcStartCenterEnd { start, center } => (*center).or(*start),
@@ -1244,8 +1487,216 @@ mod tests {
     }
 
     #[test]
+    fn a_plain_circle_is_still_two_clicks_with_no_stop() {
+        // The acceptance test for the whole redesign. Centre-and-radius in
+        // empty space is the circle people draw hundreds of times, and it was
+        // two clicks before contributions existed. If collecting constraints
+        // ever costs it a third click, or a confirmation, the redesign has
+        // made the common case worse than the five tools it replaced — which
+        // is the one outcome that is not worth any amount of inference.
+        let mut t = Tool::circle();
+        assert!(
+            matches!(t.on_pick(Pick::bare(pt(0, 0))), ToolEvent::Pending),
+            "the first click must simply bank the centre"
+        );
+        let arc = committed_arc(t.on_pick(Pick::bare(pt(0, 6))));
+        assert!((arc.radius - 6.0).abs() < 1e-6, "r {}", arc.radius);
+        assert!(
+            matches!(&t, Tool::Circle { parts, .. } if parts.is_empty()),
+            "and the tool must be ready for the next circle straight away"
+        );
+    }
+
+    /// A pick that snapped to `kind` on entity `id`, at `p`.
+    fn snapped(kind: oxidraft_cad::SnapKind, id: u64, p: Point2d) -> Pick {
+        Pick {
+            pos: p,
+            snap: Some(oxidraft_cad::SnapPoint {
+                kind,
+                pos: p.to_f64(),
+                entity: EntityId(id),
+            }),
+        }
+    }
+
+    fn committed_arc(ev: ToolEvent) -> CircularArc {
+        match ev {
+            ToolEvent::Create(es) => match &es[0] {
+                EntityKind::Curve(Curve::Arc(a)) => *a,
+                o => panic!("expected an arc, got {o:?}"),
+            },
+            o => panic!("expected a commit, got {o:?}"),
+        }
+    }
+
+    #[test]
+    fn three_snapped_points_make_a_circle_through_them() {
+        // No centre is ever picked. Three endpoints each read as "the rim
+        // passes through here", which is the 3-point construction — reached
+        // without the user naming it.
+        use oxidraft_cad::SnapKind;
+        let mut t = Tool::circle();
+        assert!(matches!(
+            t.on_pick(snapped(SnapKind::Endpoint, 1, pt(-5, 0))),
+            ToolEvent::Pending
+        ));
+        assert!(matches!(
+            t.on_pick(snapped(SnapKind::Endpoint, 2, pt(5, 0))),
+            ToolEvent::Pending
+        ));
+        let arc = committed_arc(t.on_pick(snapped(SnapKind::Midpoint, 3, pt(0, 5))));
+        let (cx, cy) = arc.center.to_f64();
+        assert!(
+            cx.abs() < 1e-6 && cy.abs() < 1e-6 && (arc.radius - 5.0).abs() < 1e-6,
+            "expected the circle through (-5,0),(5,0),(0,5): centre ({cx},{cy}) r {}",
+            arc.radius
+        );
+    }
+
+    #[test]
+    fn a_center_snap_reads_as_concentric_not_as_a_rim_point() {
+        // Snapping the centre of an existing circle should place *this*
+        // circle's centre there — two degrees of freedom — so one more pick
+        // finishes it. If it were read as a rim point it would take three.
+        use oxidraft_cad::SnapKind;
+        let mut t = Tool::circle();
+        assert!(matches!(
+            t.on_pick(snapped(SnapKind::Center, 9, pt(2, 2))),
+            ToolEvent::Pending
+        ));
+        // Assert the *contribution*, not just the resulting circle. A plain
+        // `CenterAt` at the same spot produces identical geometry, so checking
+        // only the centre and radius would pass even if the snap never
+        // reached the tool.
+        let Tool::Circle { parts, .. } = &t else {
+            panic!("expected the circle tool")
+        };
+        assert!(
+            matches!(parts.as_slice(), [Contribution::Concentric(EntityId(9), _)]),
+            "expected a concentric contribution naming entity 9, got {parts:?}"
+        );
+
+        let arc = committed_arc(t.on_pick(Pick::bare(pt(2, 7))));
+        let (cx, cy) = arc.center.to_f64();
+        assert!(
+            (cx - 2.0).abs() < 1e-6 && (cy - 2.0).abs() < 1e-6 && (arc.radius - 5.0).abs() < 1e-6,
+            "centre ({cx},{cy}) r {}",
+            arc.radius
+        );
+    }
+
+    #[test]
+    fn a_curve_snap_reads_as_tangent_once_the_centre_is_pinned() {
+        // The tangency point lies on the finished rim, so it fixes the radius.
+        // The entity is carried on the contribution for the constraint that
+        // will be recorded later.
+        use oxidraft_cad::SnapKind;
+        let mut t = Tool::circle();
+        t.on_point(pt(0, 0));
+        let Tool::Circle { parts, .. } = &t else {
+            panic!("expected the circle tool")
+        };
+        assert_eq!(parts.len(), 1, "the centre should be banked");
+
+        let readings = pick_readings(&snapped(SnapKind::Tangent, 4, pt(0, 3)), 1);
+        assert!(
+            matches!(
+                readings.first(),
+                Some(Contribution::TangentTo(EntityId(4), _))
+            ),
+            "a curve snap with the centre already pinned should read as \
+             tangent first, got {readings:?}"
+        );
+
+        let arc = committed_arc(t.on_pick(snapped(SnapKind::Tangent, 4, pt(0, 3))));
+        assert!((arc.radius - 3.0).abs() < 1e-6, "r {}", arc.radius);
+    }
+
+    #[test]
+    fn centre_stops_being_offered_once_it_cannot_fit() {
+        // "Centre here" costs two of the three degrees of freedom. After two
+        // rim points only one is left, so offering it would overshoot — this
+        // is what stops a pick spending more than the circle has.
+        let all = pick_readings(&Pick::bare(pt(1, 1)), 3);
+        assert!(
+            all.iter().any(|c| matches!(c, Contribution::CenterAt(_))),
+            "with everything free, centre should be the default: {all:?}"
+        );
+        assert_eq!(all.first().map(Contribution::label), Some("Center"));
+
+        let tight = pick_readings(&Pick::bare(pt(1, 1)), 1);
+        assert!(
+            !tight.iter().any(|c| matches!(c, Contribution::CenterAt(_))),
+            "centre costs 2 and only 1 was left, so it must not be offered: {tight:?}"
+        );
+        assert!(
+            tight
+                .iter()
+                .any(|c| matches!(c, Contribution::ThroughPoint(_)))
+        );
+    }
+
+    #[test]
+    fn three_collinear_points_are_held_rather_than_committed() {
+        // Determined is not the same as solvable. The third pick completes the
+        // degrees of freedom but describes no circle, so it must not commit —
+        // and must not hand the kernel a singular system either.
+        use oxidraft_cad::SnapKind;
+        let mut t = Tool::circle();
+        t.on_pick(snapped(SnapKind::Endpoint, 1, pt(0, 0)));
+        t.on_pick(snapped(SnapKind::Endpoint, 2, pt(5, 0)));
+        let ev = t.on_pick(snapped(SnapKind::Endpoint, 3, pt(10, 0)));
+        assert!(
+            matches!(ev, ToolEvent::Pending),
+            "collinear points should be held, got {ev:?}"
+        );
+        let Tool::Circle { parts, .. } = &t else {
+            panic!("expected the circle tool")
+        };
+        assert_eq!(
+            parts.len(),
+            2,
+            "the refused pick must not be banked, or the tool deadlocks"
+        );
+    }
+
+    #[test]
+    fn tab_cycles_to_the_other_reading_of_the_same_pick() {
+        // The override path: an endpoint reads as a rim point by default, but
+        // Tab should reach "centre here" without leaving the tool.
+        use oxidraft_cad::SnapKind;
+        let mut t = Tool::circle();
+        t.cycle_reading();
+        let arc = committed_arc({
+            t.on_pick(snapped(SnapKind::Endpoint, 1, pt(0, 0)));
+            t.on_pick(Pick::bare(pt(0, 4)))
+        });
+        let (cx, cy) = arc.center.to_f64();
+        assert!(
+            cx.abs() < 1e-6 && cy.abs() < 1e-6 && (arc.radius - 4.0).abs() < 1e-6,
+            "after Tab the endpoint should have been the centre: ({cx},{cy}) r {}",
+            arc.radius
+        );
+    }
+
+    #[test]
+    fn a_repeated_pick_does_not_spend_a_degree_of_freedom() {
+        let mut t = Tool::circle();
+        t.on_point(pt(0, 0));
+        assert!(matches!(t.on_point(pt(0, 0)), ToolEvent::Pending));
+        let Tool::Circle { parts, .. } = &t else {
+            panic!("expected the circle tool")
+        };
+        assert_eq!(
+            parts.len(),
+            1,
+            "a double click on one spot is still one pick"
+        );
+    }
+
+    #[test]
     fn circle_tool_center_radius() {
-        let mut t = Tool::Circle { center: None };
+        let mut t = Tool::circle();
         assert!(matches!(t.on_point(pt(0, 0)), ToolEvent::Pending));
         match t.on_point(pt(3, 4)) {
             ToolEvent::Create(es) => {

@@ -703,7 +703,12 @@ impl AppState {
             Tool::Arc3 { .. } | Tool::ArcStartCenterEnd { .. } | Tool::ArcCenterStartEnd { .. }
         );
         let snap_now = self.active_snap.clone();
-        let ev = self.tool.on_point(p);
+        // The pointer path is the one place a pick carries a snap, so it is the
+        // only caller that hands the tool anything beyond a coordinate.
+        let ev = self.tool.on_pick(crate::tools::Pick {
+            pos: p,
+            snap: snap_now.clone(),
+        });
         let created = matches!(ev, ToolEvent::Create(_));
         self.apply_tool_event(ev);
         if was_line {
@@ -731,7 +736,9 @@ impl AppState {
             self.tool,
             Tool::Arc3 { .. } | Tool::ArcStartCenterEnd { .. } | Tool::ArcCenterStartEnd { .. }
         );
-        let ev = self.tool.on_point(p);
+        // This path documents itself as bypassing snapping, and already
+        // tells `after_line_point` there was none.
+        let ev = self.tool.on_pick(crate::tools::Pick::bare(p));
         let created = matches!(ev, ToolEvent::Create(_));
         self.apply_tool_event(ev);
         if was_line {
@@ -1478,7 +1485,7 @@ impl AppState {
                 (1.0, 0.0)
             };
             let target_pt = Point2d::from_f64(rx + dist * ux, ry + dist * uy);
-            let ev = self.tool.on_point(target_pt);
+            let ev = self.tool.on_pick(crate::tools::Pick::bare(target_pt));
             self.apply_tool_event(ev);
             self.command_log.push(trimmed.to_string());
             return;
@@ -1501,7 +1508,9 @@ impl AppState {
                     (rx + dist * a.cos(), ry + dist * a.sin())
                 }
             };
-            let ev = self.tool.on_point(Point2d::from_f64(x, y));
+            let ev = self
+                .tool
+                .on_pick(crate::tools::Pick::bare(Point2d::from_f64(x, y)));
             self.apply_tool_event(ev);
             self.command_log.push(trimmed.to_string());
             return;

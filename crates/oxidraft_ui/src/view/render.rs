@@ -24,11 +24,12 @@ pub(super) fn tool_prompt(tool: &Tool) -> String {
                 "Specify next point or length".into()
             }
         }
-        Tool::Circle { center } => {
-            if center.is_none() {
-                "Specify center point".into()
-            } else {
-                "Specify radius".into()
+        Tool::Circle { parts, .. } => {
+            let left = crate::tools::CIRCLE_DOF.saturating_sub(crate::tools::used_dof(parts));
+            match (parts.is_empty(), left) {
+                (true, _) => "Specify center, or pick a point / edge".into(),
+                (_, 1) => "Specify radius, or pick a point / edge".into(),
+                _ => "Pick another point or edge".into(),
             }
         }
         Tool::Rectangle { first } => {

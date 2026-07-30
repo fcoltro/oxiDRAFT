@@ -667,6 +667,18 @@ fn canvas(root_ui: &mut egui::Ui, app: &mut AppState, ui_state: &mut UiState, pa
                 || f == Some(egui::Id::new("dyn_tf_factor"))
                 || f == Some(egui::Id::new("palette_input"))
         };
+        // Tab re-reads the pick under the cursor; Backspace un-picks. Scoped to
+        // the circle tool, so the ellipse tool's Tab — which moves focus
+        // between its axis fields over in `overlays.rs` — is left alone, and
+        // `consume_key` stops egui treating it as focus navigation.
+        if !palette_open && !in_text_field && matches!(app.tool, Tool::Circle { .. }) {
+            if ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Tab)) {
+                app.tool.cycle_reading();
+            }
+            if ui.input(|i| i.key_pressed(egui::Key::Backspace)) {
+                app.tool.drop_last_part();
+            }
+        }
         if !palette_open
             && !grip_consumed_enter
             && !app.grip_editing()
@@ -1791,6 +1803,68 @@ fn canvas(root_ui: &mut egui::Ui, app: &mut AppState, ui_state: &mut UiState, pa
             painter.rect_filled(chip, 4.0, snap_col);
             painter.galley((chip_min + pad).round(), galley, ink);
         }
+        // Chooser strip: what this pick would contribute, and what else it
+        // could. Sits down-right of the crosshair because the snap chip
+        // already owns up-left. Nothing is drawn when the pick reads only one
+        // way, which is most of the time — the strip is for the moments the
+        // software would otherwise be guessing on the user's behalf.
+        if let Tool::Circle { parts, choice } = &app.tool {
+            let remaining = crate::tools::CIRCLE_DOF.saturating_sub(crate::tools::used_dof(parts));
+            let pick = crate::tools::Pick {
+                pos: Point2d::from_f64(app.cursor_world.0, app.cursor_world.1),
+                snap: app.active_snap.clone(),
+            };
+            let opts = crate::tools::pick_readings(&pick, remaining);
+            if opts.len() > 1 {
+                let cur = app
+                    .view
+                    .world_to_screen(app.cursor_world.0, app.cursor_world.1);
+                let mut x = cur.0 as f32 + 14.0;
+                let y = cur.1 as f32 + 14.0;
+                let active = *choice % opts.len();
+                for (i, opt) in opts.iter().enumerate() {
+                    let on = i == active;
+                    let ink = if on {
+                        Color32::from_rgb(12, 18, 28)
+                    } else {
+                        Color32::from_rgb(196, 210, 228)
+                    };
+                    let galley = painter.layout_no_wrap(
+                        opt.label().to_owned(),
+                        egui::FontId::proportional(11.0),
+                        ink,
+                    );
+                    let pad = vec2(6.0, 3.0);
+                    let size = galley.size() + pad * 2.0;
+                    let chip = egui::Rect::from_min_size(pos2(x.round(), y.round()), size);
+                    if on {
+                        painter.rect_filled(chip, 3.0, Color32::from_rgb(0, 128, 255));
+                    } else {
+                        painter.rect(
+                            chip,
+                            3.0,
+                            Color32::from_rgba_unmultiplied(20, 26, 36, 225),
+                            Stroke::new(1.0, Color32::from_rgb(60, 74, 92)),
+                            egui::StrokeKind::Inside,
+                        );
+                    }
+                    painter.galley((chip.min + pad).round(), galley, ink);
+                    x += size.x + 4.0;
+                }
+                // Only worth saying once there is a second reading to reach.
+                let hint = painter.layout_no_wrap(
+                    "Tab".to_owned(),
+                    egui::FontId::monospace(10.0),
+                    Color32::from_rgb(120, 136, 156),
+                );
+                painter.galley(
+                    pos2(x.round() + 2.0, (y + 3.0).round()),
+                    hint,
+                    Color32::WHITE,
+                );
+            }
+        }
+
         let has_dims = app.tool.has_pending_input();
         let is_drawing = !matches!(app.tool, Tool::Select);
         let has_input = is_drawing || !ui_state.command_input.is_empty() || has_dims;
@@ -1812,10 +1886,10 @@ fn canvas(root_ui: &mut egui::Ui, app: &mut AppState, ui_state: &mut UiState, pa
                         let angle_deg = oxidraft_geometry::wrap_deg360(dy.atan2(dx).to_degrees());
                         Some(format!("L: {:.4}\nA: {:.1}°", d, angle_deg))
                     }
-                    Tool::Circle { center: Some(c) } => {
-                        let r = c.dist_f64(&cursor);
-                        Some(format!("R: {:.4}", r))
-                    }
+                    Tool::Circle { parts, .. } if !parts.is_empty() => app
+                        .tool
+                        .reference_point()
+                        .map(|c| format!("R: {:.4}", c.dist_f64(&cursor))),
                     Tool::Rectangle { first: Some(c0) } => {
                         let (x0, y0) = c0.to_f64();
                         let (x1, y1) = cursor.to_f64();

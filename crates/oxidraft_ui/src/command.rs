@@ -111,7 +111,7 @@ pub fn parse_command(input: &str) -> Command {
 
     match verb.as_str() {
         "LINE" | "L" => Command::Activate(Tool::Line { last: None }),
-        "CIRCLE" | "C" => Command::Activate(Tool::Circle { center: None }),
+        "CIRCLE" | "C" => Command::Activate(Tool::circle()),
         "ARC" | "A" => Command::Activate(Tool::Arc3 { pts: vec![] }),
         "ARCSCE" | "ASCE" => Command::Activate(Tool::ArcStartCenterEnd {
             start: None,

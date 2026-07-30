@@ -1366,10 +1366,14 @@ pub(super) fn dyn_circle_hud(
     ui_state: &mut UiState,
     origin: egui::Pos2,
 ) {
-    let circle_center = if let Tool::Circle { center: Some(c) } = &app.tool {
-        Some(c.to_f64())
-    } else {
-        None
+    // A typed radius only means something once the centre is pinned; before
+    // that the picks are still deciding where the circle sits.
+    let circle_center = match &app.tool {
+        Tool::Circle { parts, .. } => parts
+            .iter()
+            .find_map(crate::tools::Contribution::center)
+            .map(|c| c.to_f64()),
+        _ => None,
     };
     if let (true, Some((cx, cy))) = (app.prefs.dyn_on, circle_center) {
         let rad_id = egui::Id::new("dyn_radius");

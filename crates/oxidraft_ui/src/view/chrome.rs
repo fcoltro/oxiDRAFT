@@ -654,9 +654,9 @@ fn menu_items(ui: &mut egui::Ui, app: &mut AppState) {
         ui.separator();
         tool_menu_item(ui, app, "Line", Tool::Line { last: None });
         tool_menu_item(ui, app, "Tangent Line", Tool::TangentLine { first: None });
-        tool_menu_item(ui, app, "Circle", Tool::Circle { center: None });
+        tool_menu_item(ui, app, "Circle", Tool::circle());
         ui.menu_button("Circle", |ui| {
-            tool_menu_item(ui, app, "Center, Radius", Tool::Circle { center: None });
+            tool_menu_item(ui, app, "Center, Radius", Tool::circle());
             tool_menu_item(
                 ui,
                 app,
@@ -1748,11 +1748,7 @@ pub(super) fn draw_entries() -> Vec<(crate::icons::Icon, &'static str, Act)> {
             "Polyline  (P)",
             Act::Tool(Tool::Polyline { pts: vec![] }),
         ),
-        (
-            Icon::Circle,
-            "Circle  (C)",
-            Act::Tool(Tool::Circle { center: None }),
-        ),
+        (Icon::Circle, "Circle  (C)", Act::Tool(Tool::circle())),
         (
             Icon::Ellipse,
             "Ellipse  (E) — center, axis end, then minor axis",
@@ -1959,11 +1955,7 @@ pub(super) fn group_entries(id: u8) -> Vec<(crate::icons::Icon, &'static str, Ac
         }
         1 => {
             vec![
-                (
-                    Icon::Circle,
-                    "Center, radius",
-                    Act::Tool(Tool::Circle { center: None }),
-                ),
+                (Icon::Circle, "Center, radius", Act::Tool(Tool::circle())),
                 (
                     Icon::Circle2P,
                     "2 points (diameter)",
