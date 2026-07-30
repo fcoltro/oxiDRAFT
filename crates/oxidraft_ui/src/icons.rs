@@ -72,11 +72,20 @@ pub enum Icon {
     ConConcentric,
     ConFix,
     ConRemove,
+    ConSymmetric,
+    ConCollinear,
+    ConBlock,
+    SmartDim,
     ConstAuto,
     ConstAutoOff,
     ConstShowHide,
     ConstShowHideOff,
     CurvComb,
+    Grid,
+    GridSnap,
+    Guides,
+    Track,
+    DynamicInput,
 }
 
 impl Icon {
@@ -131,6 +140,15 @@ impl Icon {
         Icon::ConLengthLock,
         Icon::ConAngle,
         Icon::ConRemove,
+        Icon::ConSymmetric,
+        Icon::ConCollinear,
+        Icon::ConBlock,
+        Icon::SmartDim,
+        Icon::Grid,
+        Icon::GridSnap,
+        Icon::Guides,
+        Icon::Track,
+        Icon::DynamicInput,
         Icon::ConstAuto,
         Icon::ConstAutoOff,
         Icon::Eye,
@@ -209,9 +227,14 @@ impl Icon {
             Icon::ConCoincident => '\u{f042}', // const_coincident
             Icon::ConConcentric => '\u{f040}', // const_concentric
             Icon::ConFix => '\u{f03e}',        // const_fix
+            Icon::ConSymmetric => '\u{f039}',  // const_symmetric
+            Icon::ConCollinear => '\u{f041}',  // const_colinear
+            Icon::ConBlock => '\u{f043}',      // const_block
             // A locked radius and a locked length are both a padlock.
             Icon::ConRadiusLock | Icon::ConLengthLock => '\u{f00e}', // ui_locked
-            Icon::ConAngle => '\u{f03a}',                            // const_smart_dimension
+            // The angle constraint and the smart-dimension tool both put a
+            // driving dimension on the sketch, which is what the mark shows.
+            Icon::ConAngle | Icon::SmartDim => '\u{f03a}', // const_smart_dimension
             // Dropping a constraint is a delete.
             Icon::ConRemove => '\u{f01a}', // ui_delete
 
@@ -221,6 +244,13 @@ impl Icon {
             Icon::Eye | Icon::ConstShowHide => '\u{f007}', // ui_show
             Icon::EyeOff | Icon::ConstShowHideOff => '\u{f008}', // ui_hide
             Icon::CurvComb => '\u{f01b}',     // ui_curv_comb_on
+            // Drafting aids, each with its own mark rather than the stand-ins
+            // the palette used to show for them.
+            Icon::Grid => '\u{f014}',         // ui_grid
+            Icon::GridSnap => '\u{f013}',     // ui_grid_snap
+            Icon::Guides => '\u{f012}',       // ui_guides
+            Icon::Track => '\u{f006}',        // ui_track
+            Icon::DynamicInput => '\u{f019}', // ui_dynamic_input
             Icon::Undo => '\u{f005}',         // ui_undo
             Icon::Redo => '\u{f00a}',         // ui_redo
             Icon::ZoomIn => '\u{f001}',       // ui_zoom_in
@@ -556,6 +586,10 @@ mod tests {
             Icon::ConLengthLock => "ui_locked",
             Icon::ConAngle => "const_smart_dimension",
             Icon::ConRemove => "ui_delete",
+            Icon::ConSymmetric => "const_symmetric",
+            Icon::ConCollinear => "const_colinear",
+            Icon::ConBlock => "const_block",
+            Icon::SmartDim => "const_smart_dimension",
             Icon::ConstAuto => "ui_auto_contrain_on",
             Icon::ConstAutoOff => "ui_auto_contrain_off",
             Icon::Eye => "ui_show",
@@ -563,6 +597,11 @@ mod tests {
             Icon::EyeOff => "ui_hide",
             Icon::ConstShowHideOff => "ui_hide",
             Icon::CurvComb => "ui_curv_comb_on",
+            Icon::Grid => "ui_grid",
+            Icon::GridSnap => "ui_grid_snap",
+            Icon::Guides => "ui_guides",
+            Icon::Track => "ui_track",
+            Icon::DynamicInput => "ui_dynamic_input",
             Icon::Undo => "ui_undo",
             Icon::Redo => "ui_redo",
             Icon::ZoomIn => "ui_zoom_in",

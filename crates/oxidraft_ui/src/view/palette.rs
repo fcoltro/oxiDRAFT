@@ -273,7 +273,7 @@ const ENTRIES: &[Entry] = &[
         hint: "F7",
         keywords: "snap osnap endpoint midpoint",
         group: "View",
-        icon: Icon::Select,
+        icon: Icon::ConCoincident,
         action: Action::ToggleSnap,
     },
     Entry {
@@ -281,7 +281,7 @@ const ENTRIES: &[Entry] = &[
         hint: "F8",
         keywords: "view background lines",
         group: "View",
-        icon: Icon::ZoomFit,
+        icon: Icon::Grid,
         action: Action::ToggleGrid,
     },
     Entry {
@@ -289,7 +289,7 @@ const ENTRIES: &[Entry] = &[
         hint: "F9",
         keywords: "gsnap grid snap step",
         group: "View",
-        icon: Icon::ZoomFit,
+        icon: Icon::GridSnap,
         action: Action::ToggleGridSnap,
     },
     Entry {
@@ -297,7 +297,7 @@ const ENTRIES: &[Entry] = &[
         hint: "F10",
         keywords: "guides polar angle 45",
         group: "View",
-        icon: Icon::Pan,
+        icon: Icon::Guides,
         action: Action::TogglePolar,
     },
     Entry {
@@ -305,7 +305,7 @@ const ENTRIES: &[Entry] = &[
         hint: "F11",
         keywords: "track extension guide colinear axis",
         group: "View",
-        icon: Icon::Pan,
+        icon: Icon::Track,
         action: Action::ToggleTrack,
     },
     Entry {
@@ -313,12 +313,184 @@ const ENTRIES: &[Entry] = &[
         hint: "F12",
         keywords: "dyn hud length angle",
         group: "View",
-        icon: Icon::Pan,
+        icon: Icon::DynamicInput,
         action: Action::ToggleDyn,
+    },
+    // Constraints. The solver has carried these since well before the palette
+    // did — they were reachable only by typing the command, which is exactly
+    // the gap the palette exists to close. `hint` carries the short alias,
+    // since none of them has a single-key binding.
+    Entry {
+        name: "Horizontal",
+        hint: "HOR",
+        keywords: "constrain level flat align",
+        group: "Constraints",
+        icon: Icon::ConHorizontal,
+        action: Action::Cmd("HORIZONTAL"),
+    },
+    Entry {
+        name: "Vertical",
+        hint: "VER",
+        keywords: "constrain upright plumb align",
+        group: "Constraints",
+        icon: Icon::ConVertical,
+        action: Action::Cmd("VERTICAL"),
+    },
+    Entry {
+        name: "Parallel",
+        hint: "PAR",
+        keywords: "constrain same direction",
+        group: "Constraints",
+        icon: Icon::ConParallel,
+        action: Action::Cmd("PARALLEL"),
+    },
+    Entry {
+        name: "Perpendicular",
+        hint: "PERP",
+        keywords: "constrain right angle square normal",
+        group: "Constraints",
+        icon: Icon::ConPerpendicular,
+        action: Action::Cmd("PERPENDICULAR"),
+    },
+    Entry {
+        name: "Collinear",
+        hint: "COLL",
+        keywords: "constrain same line axis colinear",
+        group: "Constraints",
+        icon: Icon::ConCollinear,
+        action: Action::Cmd("COLLINEAR"),
+    },
+    Entry {
+        name: "Concentric",
+        hint: "CONC",
+        keywords: "constrain same centre center circles",
+        group: "Constraints",
+        icon: Icon::ConConcentric,
+        action: Action::Cmd("CONCENTRIC"),
+    },
+    Entry {
+        name: "Coincident",
+        hint: "COI",
+        keywords: "constrain weld join points together merge",
+        group: "Constraints",
+        icon: Icon::ConCoincident,
+        action: Action::Cmd("COINCIDENT"),
+    },
+    Entry {
+        name: "Tangent",
+        hint: "TANCON",
+        keywords: "constrain touch smooth circle arc",
+        group: "Constraints",
+        icon: Icon::ConTangent,
+        action: Action::Cmd("TANCON"),
+    },
+    Entry {
+        name: "Equal Length",
+        hint: "EQL",
+        keywords: "constrain same size match",
+        group: "Constraints",
+        icon: Icon::ConEqual,
+        action: Action::Cmd("EQUALLENGTH"),
+    },
+    Entry {
+        name: "Equal Radius",
+        hint: "EQR",
+        keywords: "constrain same size circles arcs match",
+        group: "Constraints",
+        icon: Icon::ConEqual,
+        action: Action::Cmd("EQUALRADIUS"),
+    },
+    Entry {
+        name: "Symmetric",
+        hint: "SYM",
+        keywords: "constrain mirror about axis reflect",
+        group: "Constraints",
+        icon: Icon::ConSymmetric,
+        action: Action::Cmd("SYMMETRIC"),
+    },
+    Entry {
+        name: "Midpoint",
+        hint: "MID",
+        keywords: "constrain centre point halfway",
+        group: "Constraints",
+        icon: Icon::ConCoincident,
+        action: Action::Cmd("MIDPOINT"),
+    },
+    Entry {
+        name: "Point on Line",
+        hint: "PTL",
+        keywords: "constrain onto edge attach",
+        group: "Constraints",
+        icon: Icon::ConCoincident,
+        action: Action::Cmd("POINTONLINE"),
+    },
+    Entry {
+        name: "Point on Circle",
+        hint: "POC",
+        keywords: "constrain onto arc attach",
+        group: "Constraints",
+        icon: Icon::ConCoincident,
+        action: Action::Cmd("POINTONCIRCLE"),
+    },
+    Entry {
+        name: "Fix",
+        hint: "FIX",
+        keywords: "constrain anchor pin lock in place ground",
+        group: "Constraints",
+        icon: Icon::ConFix,
+        action: Action::Cmd("FIX"),
+    },
+    Entry {
+        name: "Block (Rigid Set)",
+        hint: "BLOCK",
+        keywords: "constrain rigid group weld together freeze",
+        group: "Constraints",
+        icon: Icon::ConBlock,
+        action: Action::Cmd("BLOCK"),
+    },
+    Entry {
+        name: "Lock Radius",
+        hint: "RADCON",
+        keywords: "constrain driving dimension circle size",
+        group: "Constraints",
+        icon: Icon::ConRadiusLock,
+        action: Action::Cmd("RADCON"),
+    },
+    Entry {
+        name: "Lock Length",
+        hint: "LENCON",
+        keywords: "constrain driving dimension distance size",
+        group: "Constraints",
+        icon: Icon::ConLengthLock,
+        action: Action::Cmd("LENCON"),
+    },
+    Entry {
+        name: "Lock Angle",
+        hint: "ANGCON",
+        keywords: "constrain driving dimension degrees between",
+        group: "Constraints",
+        icon: Icon::ConAngle,
+        action: Action::Cmd("ANGCON"),
+    },
+    Entry {
+        name: "Smart Dimension",
+        hint: "SMARTDIM",
+        keywords: "constrain driving dimension pick measure drive",
+        group: "Constraints",
+        icon: Icon::SmartDim,
+        action: Action::Cmd("SMARTDIM"),
+    },
+    Entry {
+        name: "Unconstrain",
+        hint: "UNCON",
+        keywords: "remove drop clear release constraints",
+        group: "Constraints",
+        icon: Icon::ConRemove,
+        action: Action::Cmd("UNCONSTRAIN"),
     },
 ];
 
-const GROUP_ORDER: [&str; 3] = ["Tools", "Modify", "View"];
+const GROUP_ORDER: [&str; 4] = ["Tools", "Modify", "Constraints", "View"];
 
 fn score(entry: &Entry, q: &str) -> Option<u8> {
     if q.is_empty() {
@@ -704,4 +876,64 @@ pub(super) fn command_bar(
     ui_state.palette_nav = nav;
     ctx.data_mut(|d| d.insert_temp(open_id, open));
     open
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn every_palette_command_actually_resolves() {
+        // An `Action::Cmd` is just a string handed to the parser. A typo, or a
+        // rename on the parser's side, leaves an entry that looks live in the
+        // palette, highlights on hover, and then does nothing at all when
+        // chosen — no error, no log line. So every string is parsed here.
+        for e in ENTRIES {
+            if let Action::Cmd(c) = e.action {
+                let parsed = crate::command::parse_command(c);
+                assert!(
+                    !matches!(parsed, crate::command::Command::Unknown(_)),
+                    "palette entry {:?} sends {c:?}, which the parser does not \
+                     recognise — the entry would silently do nothing",
+                    e.name
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn every_group_is_listed_in_the_display_order() {
+        // An entry whose group is missing from `GROUP_ORDER` is dropped from
+        // the browse list entirely — it stays findable by typing, so the
+        // omission is easy to miss.
+        for e in ENTRIES {
+            assert!(
+                GROUP_ORDER.contains(&e.group),
+                "{:?} is in group {:?}, which GROUP_ORDER does not list, so it \
+                 never appears when the palette is opened without a query",
+                e.name,
+                e.group
+            );
+        }
+    }
+
+    #[test]
+    fn entries_are_searchable_by_their_own_name() {
+        // `score` is what stands between a command and the user; an entry that
+        // cannot match its own name is unreachable except by scrolling.
+        for e in ENTRIES {
+            let first = e
+                .name
+                .to_ascii_lowercase()
+                .split_whitespace()
+                .next()
+                .expect("entry names are not blank")
+                .to_string();
+            assert!(
+                score(e, &first).is_some(),
+                "{:?} does not match a search for {first:?}",
+                e.name
+            );
+        }
+    }
 }
