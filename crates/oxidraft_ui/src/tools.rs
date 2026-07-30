@@ -18,6 +18,13 @@ pub enum ConPickStep {
     Line,
     /// A circle/arc entity (its rim is the target).
     Arc,
+    /// Any curve the point can be held against — a line or a circle/arc.
+    ///
+    /// Which relation that turns into is read from what was picked rather
+    /// than chosen beforehand, because "midpoint", "point on line" and "point
+    /// on circle" are the same gesture aimed at different things. See
+    /// [`point_on_kind`].
+    Anything,
 }
 
 /// The ordered pick steps a pick-based constraint kind needs. Empty for
@@ -25,11 +32,36 @@ pub enum ConPickStep {
 pub fn con_pick_plan(kind: ConstraintKind) -> &'static [ConPickStep] {
     use ConPickStep::*;
     match kind {
-        ConstraintKind::Midpoint => &[Point, Line],
-        ConstraintKind::PointOnLine => &[Point, Line],
-        ConstraintKind::PointOnCircle => &[Point, Arc],
+        // One plan for all three: pick the point, then pick the thing to hold
+        // it against. Midpoint and PointOnLine had identical plans already,
+        // which is the tell that the choice was never the user's to make.
+        ConstraintKind::Midpoint | ConstraintKind::PointOnLine | ConstraintKind::PointOnCircle => {
+            &[Point, Anything]
+        }
         ConstraintKind::Symmetric => &[Point, Point, Line],
         _ => &[],
+    }
+}
+
+/// Which relation holding a point against `target` means, given where on it
+/// the user clicked.
+///
+/// `None` when the target is neither a line nor a circle, so a pick that
+/// cannot mean anything is refused rather than guessed at.
+pub fn point_on_kind(target: &Curve, click: Point2d, tol: f64) -> Option<ConstraintKind> {
+    match target {
+        Curve::Line(l) => {
+            // Aiming at the middle of a line is how you ask for the midpoint;
+            // anywhere else along it just means "on this line".
+            let mid = l.p0.midpoint(&l.p1);
+            Some(if mid.dist_f64(&click) <= tol {
+                ConstraintKind::Midpoint
+            } else {
+                ConstraintKind::PointOnLine
+            })
+        }
+        Curve::Arc(_) | Curve::Ellipse(_) => Some(ConstraintKind::PointOnCircle),
+        _ => None,
     }
 }
 
@@ -1693,6 +1725,64 @@ mod tests {
         }
         assert!(matches!(t.on_point(pt(5, 5)), ToolEvent::Create(_)));
         assert!(t.is_continuous());
+    }
+
+    #[test]
+    fn holding_a_point_against_something_reads_the_target() {
+        // Midpoint and point-on-line had *identical* pick plans, which is the
+        // tell that choosing between them was never the user's job — the same
+        // two clicks, aimed at the same kinds of thing, and only the command
+        // name differed. Now the target decides.
+        let line = Curve::Line(LineSeg::from_endpoints(pt(0, 0), pt(10, 0)));
+        assert_eq!(
+            point_on_kind(&line, pt(5, 0), 0.5),
+            Some(ConstraintKind::Midpoint),
+            "aiming at the middle of a line asks for the midpoint"
+        );
+        assert_eq!(
+            point_on_kind(&line, pt(2, 0), 0.5),
+            Some(ConstraintKind::PointOnLine),
+            "anywhere else along it just means on this line"
+        );
+        // The boundary is the pick tolerance, not a guess about intent.
+        assert_eq!(
+            point_on_kind(&line, Point2d::from_f64(5.4, 0.0), 0.5),
+            Some(ConstraintKind::Midpoint)
+        );
+        assert_eq!(
+            point_on_kind(&line, Point2d::from_f64(5.6, 0.0), 0.5),
+            Some(ConstraintKind::PointOnLine)
+        );
+
+        let circle = Curve::Arc(CircularArc::new(pt(0, 0), 4.0, 0.0, std::f64::consts::TAU));
+        assert_eq!(
+            point_on_kind(&circle, pt(4, 0), 0.5),
+            Some(ConstraintKind::PointOnCircle)
+        );
+    }
+
+    #[test]
+    fn a_target_that_cannot_hold_a_point_is_refused() {
+        // A spline is a curve, but `constrain_point_pair` has no relation for
+        // holding a point against one. Returning None refuses the pick rather
+        // than recording a constraint the solver will not honour.
+        let spline = Curve::Bezier(oxidraft_geometry::CubicBezier::new(
+            pt(0, 0),
+            pt(1, 2),
+            pt(3, 2),
+            pt(4, 0),
+        ));
+        assert_eq!(point_on_kind(&spline, pt(2, 1), 0.5), None);
+    }
+
+    #[test]
+    fn the_three_point_on_relations_share_one_plan() {
+        // If these ever diverge again, the tool has grown a second way to ask
+        // the same question.
+        let plan = con_pick_plan(ConstraintKind::Midpoint);
+        assert_eq!(plan, con_pick_plan(ConstraintKind::PointOnLine));
+        assert_eq!(plan, con_pick_plan(ConstraintKind::PointOnCircle));
+        assert!(matches!(plan, [ConPickStep::Point, ConPickStep::Anything]));
     }
 
     #[test]

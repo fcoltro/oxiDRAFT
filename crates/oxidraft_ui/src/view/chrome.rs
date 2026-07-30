@@ -2681,20 +2681,14 @@ pub(super) fn constraint_bar(ctx: &Context, app: &mut AppState, canvas_rect: egu
                          nearest endpoints; otherwise pick any two points to weld",
                         K::Coincident,
                     );
+                    // One button, because it was always one gesture: pick a
+                    // point, then pick what holds it. Aiming at a line's
+                    // middle asks for the midpoint, elsewhere on it for
+                    // point-on-line, and a circle for point-on-circle.
                     geo(
                         ui,
-                        "Midpoint (MID) — hold a picked point at a line's midpoint",
-                        K::Midpoint,
-                    );
-                    geo(
-                        ui,
-                        "Point on line (POL) — hold a picked point on a line",
+                        "Point on (PON) — hold a picked point on a line, on its                          midpoint, or on a circle/arc",
                         K::PointOnLine,
-                    );
-                    geo(
-                        ui,
-                        "Point on circle (POC) — hold a picked point on a circle/arc",
-                        K::PointOnCircle,
                     );
                     geo(
                         ui,

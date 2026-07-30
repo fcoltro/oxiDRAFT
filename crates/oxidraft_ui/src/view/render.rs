@@ -139,6 +139,9 @@ pub(super) fn tool_prompt(tool: &Tool) -> String {
                 }
                 Some(crate::tools::ConPickStep::Line) => "Pick a line".into(),
                 Some(crate::tools::ConPickStep::Arc) => "Pick a circle or arc".into(),
+                Some(crate::tools::ConPickStep::Anything) => {
+                    "Pick a line (its middle for a midpoint) or a circle/arc".into()
+                }
                 None => "Applying…".into(),
             }
         }

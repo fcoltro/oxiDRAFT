@@ -303,7 +303,12 @@ pub fn parse_command(input: &str) -> Command {
         "EQUALRADIUS" | "EQR" | "GCEQUALRADIUS" => Command::Constrain(ConstraintKind::EqualRadius),
         "MIDPOINT" | "MID" | "GCMID" => Command::Constrain(ConstraintKind::Midpoint),
         // `POL` is already the Polygon alias, so point-on-line uses PTL/GCPOL.
-        "POINTONLINE" | "PTL" | "GCPOL" => Command::Constrain(ConstraintKind::PointOnLine),
+        // MID, PTL and POC all land here now: the plan is the same for all
+        // three and the relation is read from what the second pick lands on,
+        // so the old names are aliases rather than different commands.
+        "POINTON" | "PON" | "POINTONLINE" | "PTL" | "GCPOL" => {
+            Command::Constrain(ConstraintKind::PointOnLine)
+        }
         "POINTONCIRCLE" | "POC" | "GCPOC" => Command::Constrain(ConstraintKind::PointOnCircle),
         "SYMMETRIC" | "SYM" | "GCSYM" | "GCSYMMETRIC" => {
             Command::Constrain(ConstraintKind::Symmetric)

@@ -210,7 +210,22 @@ impl AppState {
                     };
                     return true;
                 };
+                // What the second pick lands on decides the relation, so the
+                // kind the tool was started with is only a starting guess.
+                let mut applied = kind;
                 let resolved = match step {
+                    crate::tools::ConPickStep::Anything => self
+                        .document
+                        .get(id)
+                        .and_then(|e| e.as_curve())
+                        .and_then(|c| {
+                            crate::tools::point_on_kind(c, Point2d::from_f64(px, py), tol).map(
+                                |k| {
+                                    applied = k;
+                                    (id, 0u8, Point2d::from_f64(px, py))
+                                },
+                            )
+                        }),
                     crate::tools::ConPickStep::Point => {
                         weld_anchor_at(self, id, px, py, tol).map(|(a, p)| (id, a, p))
                     }
@@ -231,12 +246,15 @@ impl AppState {
                         }
                         crate::tools::ConPickStep::Line => "Pick a line".into(),
                         crate::tools::ConPickStep::Arc => "Pick a circle or arc".into(),
+                        crate::tools::ConPickStep::Anything => {
+                            "Pick a line or a circle/arc to hold the point against".into()
+                        }
                     });
                     return true;
                 };
                 picks.push(pick);
                 if picks.len() == plan.len() {
-                    self.constrain_picked(kind, &picks);
+                    self.constrain_picked(applied, &picks);
                     self.tool = Tool::ConPick {
                         kind,
                         picks: Vec::new(),
