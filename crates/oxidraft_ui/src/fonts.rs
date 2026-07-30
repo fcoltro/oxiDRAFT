@@ -114,6 +114,13 @@ fn initialized_id() -> egui::Id {
 
 const NOTO_SANS: &[u8] = include_bytes!("../assets/NotoSans-Regular.ttf");
 const NOTO_SANS_SEMIBOLD: &[u8] = include_bytes!("../assets/NotoSans-SemiBold.ttf");
+/// The UI icon set, as a font rather than a folder of bitmaps: one glyph per
+/// icon in the private-use area, so icons scale crisply at any DPI and inherit
+/// the text colour instead of needing a tinted texture each.
+///
+/// The `.ttf` and not the `.otf` sitting beside it — that one exports with
+/// neither a `glyf` nor a `CFF` table, so every glyph is blank.
+const ICON_FONT: &[u8] = include_bytes!("../assets/icons/icon.ttf");
 
 /// Name of the bundled heavier-weight family, for chrome text that needs
 /// real emphasis (headings, `.strong()` labels) rather than color alone.
@@ -135,6 +142,24 @@ pub fn strong_font_id(ctx: &Context, size: f32) -> FontId {
     } else {
         FontId::proportional(size)
     }
+}
+
+/// Name of the bundled UI icon family. Always registered by [`ensure_fonts`];
+/// use [`icon_font_id`] to build a [`FontId`] for it.
+pub const ICON_FAMILY: &str = "oxiDRAFT Icons";
+
+/// A [`FontId`] in the bundled icon family at `size`, or `None` while the
+/// family is not registered yet.
+///
+/// There is no sensible textual fallback for an icon — the proportional font
+/// has nothing at these codepoints, so asking it would draw tofu. Laying text
+/// out in an unregistered named family panics, and `set_fonts` only takes
+/// effect from the *next* pass, so the honest answer for that one pass is
+/// "nothing to draw"; callers skip painting and the icon appears a pass later.
+pub fn icon_font_id(ctx: &Context, size: f32) -> Option<FontId> {
+    let target = FontFamily::Name(ICON_FAMILY.into());
+    ctx.fonts(|f| f.families().contains(&target))
+        .then(|| FontId::new(size, target))
 }
 
 /// Makes sure every font family in `needed` (plus the bundled default) is
@@ -168,6 +193,17 @@ pub fn ensure_fonts(ctx: &Context, needed: &BTreeSet<String>) {
     fonts
         .families
         .insert(FontFamily::Name(STRONG_FAMILY.into()), strong_chain);
+    // Deliberately a chain of one: with no text fallback behind it, a glyph
+    // this font lacks stays blank instead of surfacing as a stray letter from
+    // Noto Sans.
+    fonts.font_data.insert(
+        ICON_FAMILY.to_owned(),
+        std::sync::Arc::new(egui::FontData::from_static(ICON_FONT)),
+    );
+    fonts.families.insert(
+        FontFamily::Name(ICON_FAMILY.into()),
+        vec![ICON_FAMILY.to_owned()],
+    );
     for family in &want {
         if let Some((bytes, index)) = family_bytes(family) {
             let mut data = egui::FontData::from_owned(bytes);

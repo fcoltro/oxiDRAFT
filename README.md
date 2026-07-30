@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="crates/oxidraft_ui/assets/logotype/oxidraft_logotype.png" alt="oxiDRAFT" width="460">
+  <img src="crates/oxidraft_ui/assets/logotype/oxidraft_logotype.svg" alt="oxiDRAFT" width="460">
 </p>
 
 <h1 align="center">oxiDRAFT</h1>
