@@ -665,6 +665,27 @@ impl AppState {
 
     /// The live preview for the Trim/Extend tool's entity under the cursor:
     /// what would be removed (Trim) or added (Extend) if clicked now.
+    /// Trims whatever lies under `(px, py)`, reporting whether it cut anything.
+    ///
+    /// One step of a power-trim sweep. History is deliberately untouched: the
+    /// caller snapshots once for the whole stroke, so dragging across twenty
+    /// edges is one undo rather than twenty.
+    pub fn trim_along(&mut self, px: f64, py: f64) -> bool {
+        let tol = self.view.pixel_world_size() * 6.0;
+        let Some(id) = pick_at(&self.document, px, py, tol) else {
+            return false;
+        };
+        let cutters: Vec<EntityId> = self
+            .document
+            .iter()
+            .map(|e| e.id)
+            .filter(|&i| i != id && i != self.origin_id)
+            .collect();
+        // `trim` hands back the target unchanged exactly when the point found
+        // no span worth removing — the same signal the click path reads.
+        oxidraft_cad::edit::trim(&mut self.document, id, &cutters, px, py) != vec![id]
+    }
+
     pub fn trim_extend_preview(&self) -> Option<TrimExtendPreview> {
         use oxidraft_cad::edit;
         let (px, py) = self.cursor_world;

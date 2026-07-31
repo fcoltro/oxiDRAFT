@@ -111,6 +111,12 @@ pub struct UiState {
     pub radial_center: Option<egui::Pos2>,
     pub radial_category: Option<RadialRing>,
     pub radial_expanded: Option<u8>,
+    /// The stroke the pointer has swept while power-trimming, in screen
+    /// space. Drawn behind the cursor so it is obvious what has been crossed.
+    pub trim_trail: Vec<egui::Pos2>,
+    /// Whether that stroke has actually cut anything yet — a sweep across
+    /// empty space must not leave an undo step behind.
+    pub trim_trail_cut: bool,
 }
 
 /// Draws one full frame of the app UI (menus, toolbars, panels, canvas,
@@ -556,6 +562,44 @@ fn canvas(root_ui: &mut egui::Ui, app: &mut AppState, ui_state: &mut UiState, pa
         }
         if app.grip_editing() || grip_consumed_click {
             press_consumed = true;
+        }
+        // Power trim: sweep the pointer across geometry and everything the
+        // stroke crosses is cut. One snapshot for the whole sweep, so a stroke
+        // through twenty edges is one undo — the gesture is the edit, not each
+        // edge it happened to touch.
+        if matches!(app.tool, Tool::Trim) {
+            if response.drag_started_by(egui::PointerButton::Primary) {
+                ui_state.trim_trail.clear();
+                ui_state.trim_trail_cut = false;
+                app.history.snapshot(&app.document);
+            }
+            if response.dragged_by(egui::PointerButton::Primary)
+                && let Some(p) = response.interact_pointer_pos()
+            {
+                // Sample sparsely. Consecutive samples a fraction of a pixel
+                // apart cost a pick and a trim each and add nothing.
+                let far_enough = ui_state
+                    .trim_trail
+                    .last()
+                    .is_none_or(|q| (p - *q).length() > 2.0);
+                if far_enough {
+                    ui_state.trim_trail.push(p);
+                    let (wx, wy) = app
+                        .view
+                        .screen_to_world((p.x - origin.x) as f64, (p.y - origin.y) as f64);
+                    if app.trim_along(wx, wy) {
+                        ui_state.trim_trail_cut = true;
+                    }
+                }
+            }
+            if response.drag_stopped() {
+                // A sweep over empty space must not leave an undo step behind.
+                if !ui_state.trim_trail_cut && !ui_state.trim_trail.is_empty() {
+                    app.history.discard_last();
+                }
+                ui_state.trim_trail.clear();
+                ui_state.trim_trail_cut = false;
+            }
         }
         if !press_consumed && matches!(app.tool, Tool::Select) {
             if response.drag_started_by(egui::PointerButton::Primary)
@@ -1803,6 +1847,24 @@ fn canvas(root_ui: &mut egui::Ui, app: &mut AppState, ui_state: &mut UiState, pa
             painter.rect_filled(chip, 4.0, snap_col);
             painter.galley((chip_min + pad).round(), galley, ink);
         }
+        // The power-trim stroke, drawn behind the cursor. A trim that happens
+        // under the pointer with no mark left behind is hard to trust — and on
+        // a fast sweep it is the only way to see which edges were crossed.
+        // Fades along its length so the live end reads as the active one.
+        if ui_state.trim_trail.len() > 1 {
+            let n = ui_state.trim_trail.len();
+            for (i, pair) in ui_state.trim_trail.windows(2).enumerate() {
+                let age = (i + 1) as f32 / n as f32;
+                painter.line_segment(
+                    [pair[0], pair[1]],
+                    Stroke::new(
+                        1.0 + 1.6 * age,
+                        Color32::from_rgb(255, 96, 72).gamma_multiply(0.25 + 0.65 * age),
+                    ),
+                );
+            }
+        }
+
         // Chooser strip: what this pick would contribute, and what else it
         // could. Sits down-right of the crosshair because the snap chip
         // already owns up-left. Nothing is drawn when the pick reads only one

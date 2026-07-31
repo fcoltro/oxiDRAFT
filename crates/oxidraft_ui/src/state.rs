@@ -4709,6 +4709,65 @@ mod tests {
     }
 
     #[test]
+    fn a_trim_sweep_cuts_every_edge_it_crosses() {
+        // Power trim: sweep across a ladder of rungs and each one loses the
+        // span the stroke passed through, rather than picking them off one
+        // click at a time.
+        let mut a = app();
+        // Two long rails to cut against, and three rungs between them.
+        a.add_entity(line(0, -5, 0, 25));
+        a.add_entity(line(10, -5, 10, 25));
+        let rungs: Vec<EntityId> = (0..3)
+            .map(|i| a.add_entity(line(-5, i * 10, 15, i * 10)))
+            .collect();
+        let before = a.document.len();
+
+        a.tool = Tool::Trim;
+        // Sweep down the middle of the ladder, crossing all three rungs.
+        let mut cut = 0;
+        for step in 0..=20 {
+            let y = f64::from(step);
+            if a.trim_along(5.0, y) {
+                cut += 1;
+            }
+        }
+        assert!(
+            cut >= 3,
+            "the sweep should have cut all three rungs, cut {cut}"
+        );
+
+        // Each rung keeps its two outer stubs and loses the middle span, so
+        // the document grows rather than shrinks — the point is that every
+        // rung changed, not that entities disappeared.
+        for &r in &rungs {
+            assert!(
+                a.document.get(r).is_none()
+                    || !matches!(
+                        a.document.get(r).and_then(|e| e.as_curve()),
+                        Some(Curve::Line(l)) if l.p0.to_f64().0 <= -5.0 && l.p1.to_f64().0 >= 15.0
+                    ),
+                "rung {r:?} came through the sweep untouched"
+            );
+        }
+        assert_ne!(a.document.len(), before, "the sweep changed nothing");
+    }
+
+    #[test]
+    fn a_trim_sweep_over_empty_space_cuts_nothing() {
+        // `trim_along` reporting false is what tells the caller to drop the
+        // snapshot, so a stroke through thin air leaves no undo step.
+        let mut a = app();
+        a.add_entity(line(0, 0, 10, 0));
+        a.tool = Tool::Trim;
+        for step in 0..10 {
+            assert!(
+                !a.trim_along(f64::from(step), 50.0),
+                "nothing is up there to cut"
+            );
+        }
+    }
+
+    #[test]
     fn trim_no_op_does_not_leave_a_phantom_undo_entry() {
         let mut a = app();
         a.run_command("LINE");
