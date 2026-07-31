@@ -1,8 +1,8 @@
 <p align="center">
-  <img src="crates/oxidraft_ui/assets/logotype/oxidraft_logotype.svg" alt="oxiDRAFT" width="460">
+  <img src="crates/oxidraft_ui/assets/logotype/oxidraft_logotype.svg" alt="oxiDraft" width="460">
 </p>
 
-<h1 align="center">oxiDRAFT</h1>
+<h1 align="center">oxiDraft</h1>
 
 <p align="center">
   <em>A fast, from-scratch 2D CAD system written in Rust — an exact geometry kernel under a modern, direct-manipulation interface.</em>
@@ -18,7 +18,7 @@
 
 ---
 
-**oxiDRAFT** is a 2D CAD drafting environment built entirely from the ground up in
+**oxiDraft** is a 2D CAD drafting environment built entirely from the ground up in
 Rust — no CAD engine dependencies, no port of an existing kernel. It pairs the
 precision of a real geometry core with the feel of a modern app: a deep,
 glass-panelled dark UI, a `Ctrl+F` command palette, live object snapping, and
@@ -190,7 +190,7 @@ cargo run -p oxidraft_app -- demo  # headless geometry-kernel demo
 
 ## 🧱 Architecture
 
-oxiDRAFT is a Cargo **workspace** — the kernel is fully decoupled from the UI, so
+oxiDraft is a Cargo **workspace** — the kernel is fully decoupled from the UI, so
 every crate below `oxidraft_ui` is headless and independently testable. Shared
 package metadata, dependency versions and lints are defined once at the workspace
 root and inherited by every crate.
@@ -207,12 +207,12 @@ root and inherited by every crate.
 | `apps/oxidraft_app` | eframe GUI host + headless kernel demo |
 
 > `.o2d` is the current native format (was `.e2d` before the project's rename
-> from eiderFLAT to oxiDRAFT) — the loader still reads old `.e2d` files, it
+> from eiderFLAT to oxiDraft) — the loader still reads old `.e2d` files, it
 > just no longer writes them.
 
 ## 📄 License
 
-**oxiDRAFT is free software, licensed under the GNU General Public License v3.0 or
+**oxiDraft is free software, licensed under the GNU General Public License v3.0 or
 later** (`GPL-3.0-or-later`) — see [LICENSE](LICENSE). You may use, study, modify
 and redistribute it under those terms; derivative works must remain GPL-licensed
 and share their source.

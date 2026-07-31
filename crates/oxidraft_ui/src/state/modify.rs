@@ -665,25 +665,59 @@ impl AppState {
 
     /// The live preview for the Trim/Extend tool's entity under the cursor:
     /// what would be removed (Trim) or added (Extend) if clicked now.
-    /// Trims whatever lies under `(px, py)`, reporting whether it cut anything.
+    /// Trims everything the stroke from `from` to `to` genuinely crosses,
+    /// reporting whether it cut anything.
     ///
-    /// One step of a power-trim sweep. History is deliberately untouched: the
-    /// caller snapshots once for the whole stroke, so dragging across twenty
-    /// edges is one undo rather than twenty.
-    pub fn trim_along(&mut self, px: f64, py: f64) -> bool {
-        let tol = self.view.pixel_world_size() * 6.0;
-        let Some(id) = pick_at(&self.document, px, py, tol) else {
-            return false;
-        };
-        let cutters: Vec<EntityId> = self
+    /// One step of a power-trim sweep. Crossing is the rule, not proximity:
+    /// asking what lies *under* each sample meant a stroke run along an edge
+    /// kept finding it and kept eating it a span at a time — sweeping the
+    /// length of a rung between two rails consumed the whole rung. A stroke
+    /// that runs alongside geometry never crosses it, so now it leaves it be.
+    ///
+    /// History is deliberately untouched: the caller snapshots once for the
+    /// whole stroke, so dragging across twenty edges is one undo, not twenty.
+    pub fn trim_across(&mut self, from: (f64, f64), to: (f64, f64)) -> bool {
+        use oxidraft_geometry::{Curve, LineSeg, Point2d};
+        let stroke = Curve::Line(LineSeg::from_endpoints(
+            Point2d::from_f64(from.0, from.1),
+            Point2d::from_f64(to.0, to.1),
+        ));
+        let ids: Vec<EntityId> = self
             .document
             .iter()
             .map(|e| e.id)
-            .filter(|&i| i != id && i != self.origin_id)
+            .filter(|&i| i != self.origin_id)
             .collect();
-        // `trim` hands back the target unchanged exactly when the point found
-        // no span worth removing — the same signal the click path reads.
-        oxidraft_cad::edit::trim(&mut self.document, id, &cutters, px, py) != vec![id]
+        let mut cut = false;
+        for id in ids {
+            let Some(curve) = self.document.get(id).and_then(|e| e.as_curve()).cloned() else {
+                continue;
+            };
+            // The first crossing is enough: one step of the stroke takes one
+            // bite out of any given edge, so a slow drag does not chew through
+            // an edge it is merely resting on.
+            let Some(hit) = oxidraft_geometry::intersect(&stroke, &curve)
+                .into_iter()
+                .next()
+            else {
+                continue;
+            };
+            let cutters: Vec<EntityId> = self
+                .document
+                .iter()
+                .map(|e| e.id)
+                .filter(|&i| i != id && i != self.origin_id)
+                .collect();
+            // `trim` hands back the target unchanged exactly when the point
+            // found no span worth removing — the same signal the click path
+            // reads, and what keeps an edge nothing else crosses intact.
+            if oxidraft_cad::edit::trim(&mut self.document, id, &cutters, hit.point.0, hit.point.1)
+                != vec![id]
+            {
+                cut = true;
+            }
+        }
+        cut
     }
 
     pub fn trim_extend_preview(&self) -> Option<TrimExtendPreview> {

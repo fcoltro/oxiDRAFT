@@ -1,4 +1,4 @@
-//! The oxiDRAFT executable: launches the eframe/egui desktop GUI, falling
+//! The oxiDraft executable: launches the eframe/egui desktop GUI, falling
 //! back to a small non-interactive kernel demo if the GUI can't start (e.g.
 //! no display) or if run with `demo`/`cli`/`--demo`.
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
@@ -43,7 +43,7 @@ fn log_path() -> std::path::PathBuf {
 
 /// Truncates the log file and writes its header, for a fresh log per run.
 fn log_init() {
-    let _ = std::fs::write(log_path(), "oxiDRAFT log\n=============\n");
+    let _ = std::fs::write(log_path(), "oxiDraft log\n=============\n");
 }
 
 /// Appends a line to the log file and echoes it to stderr.
@@ -81,7 +81,7 @@ impl eframe::App for OxidraftCad {
 fn run_gui() -> eframe::Result<()> {
     let options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
-            .with_title("oxiDRAFT")
+            .with_title("oxiDraft")
             .with_icon(std::sync::Arc::new(oxidraft_ui::icons::app_icon()))
             .with_min_inner_size([900.0, 560.0])
             .with_inner_size([1200.0, 800.0]),
@@ -89,7 +89,7 @@ fn run_gui() -> eframe::Result<()> {
         ..Default::default()
     };
     eframe::run_native(
-        "oxiDRAFT",
+        "oxiDraft",
         options,
         Box::new(|cc| {
             log("Window created. Using the adaptive-tessellation egui painter.");
@@ -116,7 +116,7 @@ fn run_gui() -> eframe::Result<()> {
 /// intersection) to stdout — the fallback when the GUI can't start, and the
 /// `demo`/`cli`/`--demo` command-line mode.
 fn run_demo() {
-    println!("=== oxiDRAFT — Geometry Kernel Demo ===\n");
+    println!("=== oxiDraft — Geometry Kernel Demo ===\n");
 
     let line = Curve::Line(LineSeg::from_endpoints(
         Point2d::from_f64(-8.0, 7.25),

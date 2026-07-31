@@ -120,7 +120,7 @@ const NOTO_SANS_SEMIBOLD: &[u8] = include_bytes!("../assets/NotoSans-SemiBold.tt
 ///
 /// The `.ttf` and not the `.otf` sitting beside it — that one exports with
 /// neither a `glyf` nor a `CFF` table, so every glyph is blank.
-const ICON_FONT: &[u8] = include_bytes!("../assets/icons/icon.ttf");
+const ICON_FONT: &[u8] = include_bytes!("../assets/icons/oxidraft.ttf");
 
 /// Name of the bundled heavier-weight family, for chrome text that needs
 /// real emphasis (headings, `.strong()` labels) rather than color alone.

@@ -941,7 +941,7 @@ fn menu_items(ui: &mut egui::Ui, app: &mut AppState) {
         }
     });
     ui.menu_button("Help", |ui| {
-        if ui.button("About oxiDRAFT").clicked() {
+        if ui.button("About oxiDraft").clicked() {
             ui.ctx()
                 .data_mut(|d| d.insert_temp(egui::Id::new("open_about"), true));
             ui.close();
@@ -2843,12 +2843,13 @@ fn con_glyph_button(ui: &mut egui::Ui, tooltip: &str, icon: crate::icons::Icon) 
         );
     }
     let area = egui::Rect::from_center_size(rect.center(), egui::Vec2::splat(20.0));
-    // Dim the glyph when the button is disabled, matching the app's other
+    // Amber, so a relation reads as a different class of thing from the tools
+    // and chrome around it. Dimmed when disabled, matching the app's other
     // enabled/disabled icon buttons.
     let tint = if enabled {
-        egui::Color32::WHITE
+        crate::theme::STATUS_AMBER
     } else {
-        egui::Color32::WHITE.gamma_multiply(0.35)
+        crate::theme::STATUS_AMBER.gamma_multiply(0.35)
     };
     crate::icons::paint_icon(&painter, ui.ctx(), icon, area, tint);
     if hovered {
@@ -4501,7 +4502,7 @@ fn file_open(app: &mut AppState) {
             "All supported (o2d, e2d, dxf, svg)",
             &["o2d", "e2d", "dxf", "svg"],
         )
-        .add_filter("oxiDRAFT drawing", &["o2d", "e2d"])
+        .add_filter("oxiDraft drawing", &["o2d", "e2d"])
         .add_filter("DXF (ASCII)", &["dxf"])
         .add_filter("SVG", &["svg"])
         .pick_file()
@@ -4518,7 +4519,7 @@ fn file_save_as(app: &mut AppState) {
         .map(|n| n.to_string_lossy().into_owned())
         .unwrap_or_else(|| "untitled.o2d".to_string());
     if let Some(path) = FileDialog::new()
-        .add_filter("oxiDRAFT drawing", &["o2d"])
+        .add_filter("oxiDraft drawing", &["o2d"])
         .add_filter("DXF (ASCII)", &["dxf"])
         .add_filter("SVG", &["svg"])
         .set_file_name(&suggested)

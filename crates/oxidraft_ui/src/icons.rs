@@ -223,7 +223,7 @@ impl Icon {
     fn glyph(self) -> char {
         match self {
             // Tools.
-            Icon::Select => '\u{f009}', // ui_selection
+            Icon::Select => '\u{f008}', // ui_selection
             Icon::Point => '\u{f027}',  // tool_point
             Icon::Line => '\u{f028}',   // tool_line
             // No polyline mark; a polyline is a chain of lines.
@@ -271,25 +271,26 @@ impl Icon {
             Icon::ConPerpendicular => '\u{f03b}', // const_perpendicular
             Icon::ConEqual => '\u{f03f}',      // const_equal
             Icon::ConTangent => '\u{f038}',    // const_tangent
-            Icon::ConCoincident => '\u{f042}', // const_coincident
-            Icon::ConConcentric => '\u{f040}', // const_concentric
+            Icon::ConCoincident => '\u{f043}', // const_coincident
+            Icon::ConConcentric => '\u{f041}', // const_concentric
             Icon::ConFix => '\u{f03e}',        // const_fix
             Icon::ConSymmetric => '\u{f039}',  // const_symmetric
-            Icon::ConCollinear => '\u{f041}',  // const_colinear
-            Icon::ConBlock => '\u{f043}',      // const_block
+            Icon::ConCollinear => '\u{f042}',  // const_colinear
+            Icon::ConBlock => '\u{f044}',      // const_block
             // A locked radius and a locked length are both a padlock.
-            Icon::ConRadiusLock | Icon::ConLengthLock => '\u{f00e}', // ui_locked
+            Icon::ConRadiusLock | Icon::ConLengthLock => '\u{f00d}', // ui_locked
             // The angle constraint and the smart-dimension tool both put a
             // driving dimension on the sketch, which is what the mark shows.
             Icon::ConAngle | Icon::SmartDim => '\u{f03a}', // const_smart_dimension
-            // Dropping a constraint is a delete.
-            Icon::ConRemove => '\u{f01a}', // ui_delete
+            // The font now draws this one; it used to borrow the generic
+            // delete mark.
+            Icon::ConRemove => '\u{f040}', // const_delete
 
             // Toggles and chrome.
             Icon::ConstAuto => '\u{f01d}',    // ui_auto_contrain_on
             Icon::ConstAutoOff => '\u{f01e}', // ui_auto_contrain_off
             Icon::Eye | Icon::ConstShowHide => '\u{f007}', // ui_show
-            Icon::EyeOff | Icon::ConstShowHideOff => '\u{f008}', // ui_hide
+            Icon::EyeOff | Icon::ConstShowHideOff => '\u{f011}', // ui_hide
             Icon::CurvComb => '\u{f01b}',     // ui_curv_comb_on
             Icon::CurvCombOff => '\u{f01c}',  // ui_curv_comb_off
             // Drafting aids, each with its own mark rather than the stand-ins
@@ -302,15 +303,15 @@ impl Icon {
             Icon::Export => '\u{f017}',       // ui_export
             Icon::Find => '\u{f016}',         // ui_find
             Icon::Undo => '\u{f005}',         // ui_undo
-            Icon::Redo => '\u{f00a}',         // ui_redo
+            Icon::Redo => '\u{f009}',         // ui_redo
             Icon::ZoomIn => '\u{f001}',       // ui_zoom_in
             Icon::ZoomOut => '\u{f000}',      // ui_zoom_out
             Icon::ZoomFit => '\u{f002}',      // ui_zoom_extents
-            Icon::Pan => '\u{f00c}',          // ui_pan
-            Icon::AddLayer => '\u{f011}',     // ui_layer_add
+            Icon::Pan => '\u{f00b}',          // ui_pan
+            Icon::AddLayer => '\u{f010}',     // ui_layer_add
             Icon::Delete => '\u{f01a}',       // ui_delete
-            Icon::Plus => '\u{f00b}',         // ui_plus
-            Icon::Minus => '\u{f00d}',        // ui_minus
+            Icon::Plus => '\u{f00a}',         // ui_plus
+            Icon::Minus => '\u{f00c}',        // ui_minus
         }
     }
 }
@@ -579,7 +580,7 @@ fn snap_pos(p: egui::Pos2, pixels_per_point: f32) -> egui::Pos2 {
 mod tests {
     use super::*;
 
-    const ICON_FONT: &[u8] = include_bytes!("../assets/icons/icon.ttf");
+    const ICON_FONT: &[u8] = include_bytes!("../assets/icons/oxidraft.ttf");
 
     /// The glyph the font must hold at the codepoint each icon maps to.
     ///
@@ -635,7 +636,7 @@ mod tests {
             Icon::ConRadiusLock => "ui_locked",
             Icon::ConLengthLock => "ui_locked",
             Icon::ConAngle => "const_smart_dimension",
-            Icon::ConRemove => "ui_delete",
+            Icon::ConRemove => "const_delete",
             Icon::ConSymmetric => "const_symmetric",
             Icon::ConCollinear => "const_colinear",
             Icon::ConBlock => "const_block",

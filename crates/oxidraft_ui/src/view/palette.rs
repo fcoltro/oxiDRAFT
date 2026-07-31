@@ -820,7 +820,7 @@ pub(super) fn command_bar(
                                     |ui| {
                                         ui.label(
                                             egui::RichText::new(concat!(
-                                                "oxiDRAFT · v",
+                                                "oxiDraft · v",
                                                 env!("CARGO_PKG_VERSION")
                                             ))
                                             .monospace()

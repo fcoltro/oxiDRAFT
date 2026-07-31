@@ -583,12 +583,20 @@ fn canvas(root_ui: &mut egui::Ui, app: &mut AppState, ui_state: &mut UiState, pa
                     .last()
                     .is_none_or(|q| (p - *q).length() > 2.0);
                 if far_enough {
+                    let prev = ui_state.trim_trail.last().copied();
                     ui_state.trim_trail.push(p);
-                    let (wx, wy) = app
-                        .view
-                        .screen_to_world((p.x - origin.x) as f64, (p.y - origin.y) as f64);
-                    if app.trim_along(wx, wy) {
-                        ui_state.trim_trail_cut = true;
+                    // Cut along the step just taken, not at the point: what
+                    // the stroke crossed is the question, not what it is near.
+                    if let Some(q) = prev {
+                        let a = app
+                            .view
+                            .screen_to_world((q.x - origin.x) as f64, (q.y - origin.y) as f64);
+                        let b = app
+                            .view
+                            .screen_to_world((p.x - origin.x) as f64, (p.y - origin.y) as f64);
+                        if app.trim_across(a, b) {
+                            ui_state.trim_trail_cut = true;
+                        }
                     }
                 }
             }
@@ -1852,16 +1860,9 @@ fn canvas(root_ui: &mut egui::Ui, app: &mut AppState, ui_state: &mut UiState, pa
         // a fast sweep it is the only way to see which edges were crossed.
         // Fades along its length so the live end reads as the active one.
         if ui_state.trim_trail.len() > 1 {
-            let n = ui_state.trim_trail.len();
-            for (i, pair) in ui_state.trim_trail.windows(2).enumerate() {
-                let age = (i + 1) as f32 / n as f32;
-                painter.line_segment(
-                    [pair[0], pair[1]],
-                    Stroke::new(
-                        1.0 + 1.6 * age,
-                        Color32::from_rgb(255, 96, 72).gamma_multiply(0.25 + 0.65 * age),
-                    ),
-                );
+            let stroke = Stroke::new(1.6, crate::theme::ACCENT);
+            for pair in ui_state.trim_trail.windows(2) {
+                draw_dashed_line(&painter, pair[0], pair[1], stroke, 6.0, 4.0);
             }
         }
 
