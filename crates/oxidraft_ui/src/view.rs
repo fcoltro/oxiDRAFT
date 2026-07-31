@@ -1860,9 +1860,15 @@ fn canvas(root_ui: &mut egui::Ui, app: &mut AppState, ui_state: &mut UiState, pa
         // a fast sweep it is the only way to see which edges were crossed.
         // Fades along its length so the live end reads as the active one.
         if ui_state.trim_trail.len() > 1 {
-            let stroke = Stroke::new(1.6, crate::theme::ACCENT);
-            for pair in ui_state.trim_trail.windows(2) {
-                draw_dashed_line(&painter, pair[0], pair[1], stroke, 6.0, 4.0);
+            let n = ui_state.trim_trail.len() as f32;
+            for (i, pair) in ui_state.trim_trail.windows(2).enumerate() {
+                // The stroke fades along its age, so the live end reads as the
+                // active one and a long sweep does not settle into a solid
+                // wall of dashes behind the cursor.
+                let life = (i + 1) as f32 / n;
+                let stroke =
+                    Stroke::new(1.0, crate::theme::ACCENT.gamma_multiply(0.08 + 0.85 * life));
+                draw_dashed_line(&painter, pair[0], pair[1], stroke, 5.0, 4.0);
             }
         }
 
