@@ -119,6 +119,62 @@ pub struct UiState {
     pub trim_trail_cut: bool,
 }
 
+/// Dash and gap of the power-trim trail, in points.
+const TRAIL_DASH: f32 = 5.0;
+const TRAIL_GAP: f32 = 4.0;
+
+/// Cuts `trail` into dash segments, each with how far along the whole stroke
+/// it sits (0 at the tail, 1 at the live end).
+///
+/// The phase advances with distance travelled, not with the points the trail
+/// happens to be made of. Dashing each sampled segment on its own restarted
+/// the pattern at every sample, and samples are laid down as the pointer
+/// moves — so the dashes stretched when the drag was quick and collapsed into
+/// a solid line when it was slow. The pattern belongs to the path, not to how
+/// fast it was drawn.
+fn trail_dashes(trail: &[egui::Pos2], dash: f32, gap: f32) -> Vec<(egui::Pos2, egui::Pos2, f32)> {
+    let period = dash + gap;
+    if trail.len() < 2 || period <= 0.0 {
+        return Vec::new();
+    }
+    let total: f32 = trail.windows(2).map(|w| (w[1] - w[0]).length()).sum();
+    if total <= f32::EPSILON {
+        return Vec::new();
+    }
+    let mut out = Vec::new();
+    let mut travelled = 0.0f32;
+    for w in trail.windows(2) {
+        let span = w[1] - w[0];
+        let len = span.length();
+        if len <= f32::EPSILON {
+            continue;
+        }
+        let dir = span / len;
+        let mut t = 0.0f32;
+        while t < len {
+            let phase = (travelled + t) % period;
+            // Inside a dash: emit up to wherever the dash or the segment ends.
+            // Inside a gap: skip to the start of the next dash.
+            let run = if phase < dash {
+                let run = (dash - phase).min(len - t);
+                out.push((
+                    w[0] + dir * t,
+                    w[0] + dir * (t + run),
+                    (travelled + t) / total,
+                ));
+                run
+            } else {
+                (period - phase).min(len - t)
+            };
+            // `run` is positive by construction, but guard the loop against a
+            // rounding result of zero rather than trust that.
+            t += run.max(1e-4);
+        }
+        travelled += len;
+    }
+    out
+}
+
 /// Draws one full frame of the app UI (menus, toolbars, panels, canvas,
 /// dialogs) and handles input for it. Called once per egui update.
 pub fn draw_ui(ui: &mut egui::Ui, app: &mut AppState, ui_state: &mut UiState) {
@@ -1859,17 +1915,14 @@ fn canvas(root_ui: &mut egui::Ui, app: &mut AppState, ui_state: &mut UiState, pa
         // under the pointer with no mark left behind is hard to trust — and on
         // a fast sweep it is the only way to see which edges were crossed.
         // Fades along its length so the live end reads as the active one.
-        if ui_state.trim_trail.len() > 1 {
-            let n = ui_state.trim_trail.len() as f32;
-            for (i, pair) in ui_state.trim_trail.windows(2).enumerate() {
-                // The stroke fades along its age, so the live end reads as the
-                // active one and a long sweep does not settle into a solid
-                // wall of dashes behind the cursor.
-                let life = (i + 1) as f32 / n;
-                let stroke =
-                    Stroke::new(1.0, crate::theme::ACCENT.gamma_multiply(0.08 + 0.85 * life));
-                draw_dashed_line(&painter, pair[0], pair[1], stroke, 5.0, 4.0);
-            }
+        for (a, b, life) in trail_dashes(&ui_state.trim_trail, TRAIL_DASH, TRAIL_GAP) {
+            // Fades along its length, so the live end reads as the active one
+            // and a long sweep does not settle into a solid wall of dashes
+            // behind the cursor.
+            painter.line_segment(
+                [a, b],
+                Stroke::new(1.0, crate::theme::ACCENT.gamma_multiply(0.08 + 0.85 * life)),
+            );
         }
 
         // Chooser strip: what this pick would contribute, and what else it
@@ -2138,6 +2191,71 @@ fn dim_unit_suffix(c: &SketchConstraint, units: oxidraft_document::Units) -> &'s
     match c.kind {
         oxidraft_document::ConstraintKind::Angle => "\u{00b0}",
         _ => units.short_name(),
+    }
+}
+
+#[cfg(test)]
+mod trail_tests {
+    use super::{TRAIL_DASH, TRAIL_GAP, trail_dashes};
+    use egui::pos2;
+
+    /// Total inked length, which is what the eye reads as "the dash pattern".
+    fn inked(pieces: &[(egui::Pos2, egui::Pos2, f32)]) -> f32 {
+        pieces.iter().map(|(a, b, _)| (*b - *a).length()).sum()
+    }
+
+    #[test]
+    fn the_dash_pattern_does_not_depend_on_how_the_stroke_was_sampled() {
+        // The trail is sampled as the pointer moves, so a quick drag lays down
+        // far-apart points and a slow one lays down close ones. Dashing each
+        // sampled segment separately restarted the pattern at every sample,
+        // which made the dashes stretch when the drag was quick and collapse
+        // into a solid line when it was slow — the pattern tracked the speed
+        // of the hand rather than the shape of the path.
+        let coarse = vec![pos2(0.0, 0.0), pos2(120.0, 0.0)];
+        let fine: Vec<egui::Pos2> = (0..=60).map(|i| pos2(i as f32 * 2.0, 0.0)).collect();
+
+        let a = trail_dashes(&coarse, TRAIL_DASH, TRAIL_GAP);
+        let b = trail_dashes(&fine, TRAIL_DASH, TRAIL_GAP);
+        assert!(
+            (inked(&a) - inked(&b)).abs() < 0.5,
+            "the same 120pt line dashed {} inked coarsely and {} finely",
+            inked(&a),
+            inked(&b)
+        );
+
+        // And it really is dashed, not one solid run: a 120pt line at 5 on,
+        // 4 off should ink a little over half its length.
+        let solid = 120.0;
+        assert!(
+            inked(&a) < solid * 0.75 && inked(&a) > solid * 0.35,
+            "expected roughly half of {solid}pt inked, got {}",
+            inked(&a)
+        );
+    }
+
+    #[test]
+    fn dashes_carry_their_position_along_the_stroke() {
+        // The fade reads from this, so the tail must come back near 0 and the
+        // live end near 1 regardless of sampling.
+        let trail: Vec<egui::Pos2> = (0..=40).map(|i| pos2(i as f32 * 3.0, 0.0)).collect();
+        let pieces = trail_dashes(&trail, TRAIL_DASH, TRAIL_GAP);
+        assert!(pieces.len() > 4, "expected several dashes");
+        let first = pieces.first().expect("non-empty").2;
+        let last = pieces.last().expect("non-empty").2;
+        assert!(first < 0.05, "the tail should start faint, life {first}");
+        assert!(last > 0.9, "the live end should be full, life {last}");
+    }
+
+    #[test]
+    fn a_degenerate_trail_produces_nothing_and_does_not_hang() {
+        assert!(trail_dashes(&[], TRAIL_DASH, TRAIL_GAP).is_empty());
+        assert!(trail_dashes(&[pos2(1.0, 1.0)], TRAIL_DASH, TRAIL_GAP).is_empty());
+        // Every point identical: zero length, and the walk must not spin.
+        let stack = vec![pos2(2.0, 2.0); 8];
+        assert!(trail_dashes(&stack, TRAIL_DASH, TRAIL_GAP).is_empty());
+        // A nonsense period must not divide by zero or loop forever.
+        assert!(trail_dashes(&[pos2(0.0, 0.0), pos2(10.0, 0.0)], 0.0, 0.0).is_empty());
     }
 }
 
