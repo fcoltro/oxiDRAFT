@@ -113,6 +113,9 @@ fn initialized_id() -> egui::Id {
 }
 
 const NOTO_SANS: &[u8] = include_bytes!("../assets/NotoSans-Regular.ttf");
+/// The UI's body weight. Regular stays bundled behind it as the fallback for
+/// anything Light does not cover.
+const NOTO_SANS_LIGHT: &[u8] = include_bytes!("../assets/NotoSans-Light.ttf");
 const NOTO_SANS_SEMIBOLD: &[u8] = include_bytes!("../assets/NotoSans-SemiBold.ttf");
 /// The UI icon set, as a font rather than a folder of bitmaps: one glyph per
 /// icon in the private-use area, so icons scale crisply at any DPI and inherit
@@ -179,8 +182,16 @@ pub fn ensure_fonts(ctx: &Context, needed: &BTreeSet<String>) {
         "Noto Sans".to_owned(),
         std::sync::Arc::new(egui::FontData::from_static(NOTO_SANS)),
     );
+    fonts.font_data.insert(
+        "Noto Sans Light".to_owned(),
+        std::sync::Arc::new(egui::FontData::from_static(NOTO_SANS_LIGHT)),
+    );
     if let Some(prop) = fonts.families.get_mut(&FontFamily::Proportional) {
+        // Light in front, Regular immediately behind it. A missing glyph then
+        // falls back a weight rather than all the way out of the family, which
+        // is much less obvious than tofu but far less ugly.
         prop.insert(0, "Noto Sans".to_owned());
+        prop.insert(0, "Noto Sans Light".to_owned());
     }
     fonts.font_data.insert(
         STRONG_FAMILY.to_owned(),
@@ -373,4 +384,56 @@ pub fn outline_text(
             Curve::Poly(Box::new(PolyCurve::new(segs)))
         })
         .collect()
+}
+
+#[cfg(test)]
+mod bundled_weight_tests {
+    use super::{NOTO_SANS, NOTO_SANS_LIGHT, NOTO_SANS_SEMIBOLD};
+
+    /// The three bundled faces, with the weight each is bundled *for*.
+    ///
+    /// These are three files that differ only in a number most people cannot
+    /// see by opening them. Swapping one for another weight — easy to do when
+    /// re-downloading from a font site — would change the whole interface with
+    /// nothing to say so, so the weight is asserted rather than assumed.
+    const BUNDLED: &[(&str, &[u8], ttf_parser::Weight)] = &[
+        ("NotoSans-Light", NOTO_SANS_LIGHT, ttf_parser::Weight::Light),
+        ("NotoSans-Regular", NOTO_SANS, ttf_parser::Weight::Normal),
+        (
+            "NotoSans-SemiBold",
+            NOTO_SANS_SEMIBOLD,
+            ttf_parser::Weight::SemiBold,
+        ),
+    ];
+
+    #[test]
+    fn each_bundled_face_is_the_weight_it_claims() {
+        for (name, bytes, want) in BUNDLED {
+            let face = ttf_parser::Face::parse(bytes, 0)
+                .unwrap_or_else(|e| panic!("{name} should parse: {e}"));
+            assert_eq!(
+                face.weight(),
+                *want,
+                "{name} is not the weight it is bundled for"
+            );
+            assert!(
+                face.tables().glyf.is_some() || face.tables().cff.is_some(),
+                "{name} carries no outlines, so every character would be blank"
+            );
+        }
+    }
+
+    #[test]
+    fn the_body_weight_covers_the_text_the_ui_draws() {
+        // Light leads the proportional chain, so a gap in it falls back a
+        // weight and shows up as a visibly heavier character mid-word. The
+        // degree and diameter signs come from dimension labels.
+        let face = ttf_parser::Face::parse(NOTO_SANS_LIGHT, 0).expect("parses");
+        for ch in "AZaz09 .,:;-—/()[]%°Ø±×".chars() {
+            assert!(
+                face.glyph_index(ch).is_some(),
+                "the body weight has no glyph for {ch:?}"
+            );
+        }
+    }
 }
