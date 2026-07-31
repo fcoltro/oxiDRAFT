@@ -1950,27 +1950,33 @@ fn canvas(root_ui: &mut egui::Ui, app: &mut AppState, ui_state: &mut UiState, pa
                 let active = *choice % opts.len();
                 for (i, opt) in opts.iter().enumerate() {
                     let on = i == active;
+                    // The active chip is filled with the accent, so its label
+                    // sits on it in the canvas colour rather than a second
+                    // near-black; the rest use ordinary panel text.
                     let ink = if on {
-                        Color32::from_rgb(12, 18, 28)
+                        crate::theme::CANVAS_BG
                     } else {
-                        Color32::from_rgb(196, 210, 228)
+                        crate::theme::TEXT
                     };
                     let galley = painter.layout_no_wrap(
                         opt.label().to_owned(),
-                        egui::FontId::proportional(11.0),
+                        egui::FontId::proportional(12.0),
                         ink,
                     );
-                    let pad = vec2(6.0, 3.0);
+                    let pad = vec2(7.0, 4.0);
                     let size = galley.size() + pad * 2.0;
                     let chip = egui::Rect::from_min_size(pos2(x.round(), y.round()), size);
+                    // Same radius and padding as the snap chip up-left of the
+                    // crosshair: two chips beside one cursor should not be two
+                    // different shapes.
                     if on {
-                        painter.rect_filled(chip, 3.0, Color32::from_rgb(0, 128, 255));
+                        painter.rect_filled(chip, 4.0, crate::theme::ACCENT);
                     } else {
                         painter.rect(
                             chip,
-                            3.0,
-                            Color32::from_rgba_unmultiplied(20, 26, 36, 225),
-                            Stroke::new(1.0, Color32::from_rgb(60, 74, 92)),
+                            4.0,
+                            crate::theme::PANEL_GLASS,
+                            Stroke::new(1.0, crate::theme::OUTLINE),
                             egui::StrokeKind::Inside,
                         );
                     }
@@ -1978,15 +1984,16 @@ fn canvas(root_ui: &mut egui::Ui, app: &mut AppState, ui_state: &mut UiState, pa
                     x += size.x + 4.0;
                 }
                 // Only worth saying once there is a second reading to reach.
+                // Monospace at the keycap size the tooltips already use.
                 let hint = painter.layout_no_wrap(
                     "Tab".to_owned(),
-                    egui::FontId::monospace(10.0),
-                    Color32::from_rgb(120, 136, 156),
+                    egui::FontId::monospace(11.0),
+                    crate::theme::TEXT_DIM,
                 );
                 painter.galley(
-                    pos2(x.round() + 2.0, (y + 3.0).round()),
+                    pos2(x.round() + 4.0, (y + 4.0).round()),
                     hint,
-                    Color32::WHITE,
+                    crate::theme::TEXT_DIM,
                 );
             }
         }

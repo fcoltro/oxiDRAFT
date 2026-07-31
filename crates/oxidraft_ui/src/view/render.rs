@@ -232,7 +232,7 @@ pub(super) fn tool_prompt(tool: &Tool) -> String {
                 "Click the side to offset towards".into()
             }
         }
-        Tool::Trim => "Click the segment piece to cut away".into(),
+        Tool::Trim => "Click a piece to cut it, or drag across several".into(),
         Tool::Extend => "Click the end to lengthen".into(),
         Tool::Hatch => "Click inside an area to hatch it".into(),
         Tool::Fillet { first, .. } => {

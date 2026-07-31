@@ -1866,7 +1866,7 @@ pub(super) fn modify_entries() -> Vec<(crate::icons::Icon, &'static str, Act)> {
         ),
         (
             Icon::Trim,
-            "Trim  (Shift+T) — click the piece to cut",
+            "Trim  (Shift+T) — click a piece to cut it, or drag across several",
             Act::Tool(Tool::Trim),
         ),
         (

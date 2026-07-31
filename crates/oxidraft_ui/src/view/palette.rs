@@ -159,7 +159,7 @@ const ENTRIES: &[Entry] = &[
     Entry {
         name: "Trim",
         hint: "Shift T",
-        keywords: "modify cut",
+        keywords: "modify cut sweep drag across",
         group: "Modify",
         icon: Icon::Trim,
         action: Action::Cmd("TRIM"),
