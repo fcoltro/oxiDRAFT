@@ -532,7 +532,7 @@ pub(crate) fn rich_tooltip(ui: &mut Ui, text: &str) {
         if let Some(k) = keys.filter(|k| !k.is_empty()) {
             let galley = ui.painter().layout_no_wrap(
                 k.clone(),
-                egui::FontId::monospace(11.0),
+                egui::FontId::monospace(crate::theme::tok::T_CAPTION),
                 crate::theme::TEXT,
             );
             let pad = Vec2::new(5.0, 2.0);

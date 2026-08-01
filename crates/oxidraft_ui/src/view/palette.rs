@@ -514,7 +514,7 @@ fn run_entry(app: &mut AppState, e: &Entry) {
 fn keycap(ui: &mut egui::Ui, text: &str) {
     let galley = ui.painter().layout_no_wrap(
         text.to_string(),
-        egui::FontId::monospace(11.0),
+        egui::FontId::monospace(crate::theme::tok::T_CAPTION),
         theme::TEXT_DIM,
     );
     let w = galley.size().x + 12.0;
@@ -530,7 +530,7 @@ fn keycap(ui: &mut egui::Ui, text: &str) {
         rect.center(),
         egui::Align2::CENTER_CENTER,
         text,
-        egui::FontId::monospace(11.0),
+        egui::FontId::monospace(crate::theme::tok::T_CAPTION),
         theme::TEXT_DIM,
     );
 }
@@ -573,7 +573,7 @@ fn command_row(ui: &mut egui::Ui, e: &Entry, selected: bool) -> egui::Response {
         for k in keys {
             let galley = ui.painter().layout_no_wrap(
                 k.to_string(),
-                egui::FontId::monospace(11.0),
+                egui::FontId::monospace(crate::theme::tok::T_CAPTION),
                 theme::TEXT_DIM,
             );
             let w = galley.size().x + 12.0;
@@ -592,7 +592,7 @@ fn command_row(ui: &mut egui::Ui, e: &Entry, selected: bool) -> egui::Response {
                 kr.center(),
                 egui::Align2::CENTER_CENTER,
                 k,
-                egui::FontId::monospace(11.0),
+                egui::FontId::monospace(crate::theme::tok::T_CAPTION),
                 theme::TEXT_DIM,
             );
             x -= w + 5.0;
@@ -774,7 +774,7 @@ pub(super) fn command_bar(
                                     for (i, e) in visible.iter().enumerate() {
                                         if q.is_empty() && e.group != last_group {
                                             last_group = e.group;
-                                            ui.add_space(4.0);
+                                            ui.add_space(crate::theme::tok::SP_2);
                                             ui.label(
                                                 egui::RichText::new(e.group.to_uppercase())
                                                     .font(crate::fonts::strong_font_id(
@@ -783,7 +783,7 @@ pub(super) fn command_bar(
                                                     ))
                                                     .color(theme::TEXT_DIM),
                                             );
-                                            ui.add_space(2.0);
+                                            ui.add_space(crate::theme::tok::SP_1);
                                         }
                                         let selected = nav && i == index;
                                         let r = command_row(ui, e, selected);
@@ -808,7 +808,7 @@ pub(super) fn command_bar(
                                         .size(12.0)
                                         .color(theme::TEXT_DIM),
                                 );
-                                ui.add_space(8.0);
+                                ui.add_space(crate::theme::tok::SP_4);
                                 keycap(ui, "↵");
                                 ui.label(
                                     egui::RichText::new("select")

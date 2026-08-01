@@ -5,20 +5,70 @@ use egui::{Color32, Context, CornerRadius, FontFamily, FontId, Stroke, TextStyle
 
 /// Spacing, corner-radius, and font-size tokens shared across the UI so
 /// panels and widgets stay visually consistent.
+///
+/// These were not chosen and then applied — the interface was built first and
+/// the numbers read back off it afterwards, which is why the steps are uneven
+/// where the app is uneven. A token exists here only if the value is genuinely
+/// load-bearing somewhere; the point is to describe what the app does, so that
+/// changing it is one edit instead of a hunt.
 pub mod tok {
-    pub const SP_2: f32 = 6.0;
-    pub const SP_3: f32 = 8.0;
+
+    // ---- Spacing ----------------------------------------------------------
+    // A 4-point rhythm, which is what the app already reaches for: 4 is by far
+    // the most common gap, with 2 for tight pairs and 8 between groups.
+    /// Hairline gap — between a glyph and its label, or two parts of one control.
+    pub const SP_1: f32 = 2.0;
+    /// The default gap between neighbouring controls.
+    pub const SP_2: f32 = 4.0;
+    /// Between related controls that are not quite neighbours.
+    pub const SP_3: f32 = 6.0;
+    /// Between groups inside one panel.
+    pub const SP_4: f32 = 8.0;
+    /// Between sections.
+    pub const SP_5: f32 = 12.0;
+    /// Panel inset, and the gap between panels.
+    pub const SP_6: f32 = 16.0;
+
+    // ---- Corner radii -----------------------------------------------------
+    /// Chips and badges — anything small enough that a larger radius would eat
+    /// the shape.
+    pub const R_XS: u8 = 4;
+    /// Buttons and small cards.
     pub const R_SM: u8 = 8;
+    /// Panels.
     pub const R_MD: u8 = 11;
+    /// Floating glass surfaces — toolbars, the palette, HUDs.
     pub const R_LG: u8 = 16;
-    pub const T_XS: f32 = 11.0;
+
+    // ---- Type -------------------------------------------------------------
+    // Named for the job, not the size, because the job is what a call site
+    // knows: it wants a caption, and does not care that a caption is 11px.
+    //
     // Whole pixel values only: egui/ab_glyph rasterizes each font size into
     // its own texture-atlas entry, and a fractional size (e.g. the old 12.5)
     // forces every glyph edge through extra sub-pixel antialiasing at 100%
     // display scaling — the single biggest source of "slightly blurry" text.
-    pub const T_SM: f32 = 13.0;
-    pub const T_LG: f32 = 15.0;
+    /// Keycaps, units, and the smallest annotations.
+    pub const T_CAPTION: f32 = 11.0;
+    /// Body text, and the default for anything unremarkable. The most-used
+    /// size in the app by some distance.
+    pub const T_BODY: f32 = 12.0;
+    /// Labels that need to sit a step above body — panel rows, menu items.
+    pub const T_LABEL: f32 = 13.0;
+    /// Headings.
+    pub const T_HEADING: f32 = 15.0;
+
+    // Superseded names, kept so the tree keeps building while call sites move
+    // over. `T_SM` was the old name for what is now a label, which is exactly
+    // the confusion semantic names avoid.
+    /// Deprecated: use [`T_CAPTION`].
+    pub const T_XS: f32 = T_CAPTION;
+    /// Deprecated: use [`T_LABEL`].
+    pub const T_SM: f32 = T_LABEL;
+    /// Deprecated: use [`T_HEADING`].
+    pub const T_LG: f32 = T_HEADING;
 }
+
 /// The canvas's background color, behind all drawn geometry.
 pub const CANVAS_BG: Color32 = Color32::from_rgb(10, 12, 16);
 /// Opaque panel background (menus, dialogs).

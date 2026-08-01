@@ -76,7 +76,7 @@ pub(super) fn top_bar(ctx: &Context, app: &mut AppState, canvas_rect: egui::Rect
                     ui.set_width(width - 20.0);
                     ui.set_height(34.0);
                     ui.horizontal_centered(|ui| {
-                        ui.add_space(4.0);
+                        ui.add_space(crate::theme::tok::SP_2);
                         ui.label(
                             egui::RichText::new(app.document_label())
                                 .size(13.0)
@@ -95,13 +95,13 @@ pub(super) fn top_bar(ctx: &Context, app: &mut AppState, canvas_rect: egui::Rect
                             ui.painter().circle_filled(rect.center(), 3.0, dot_color);
                             resp.on_hover_text(status);
                         }
-                        ui.add_space(6.0);
+                        ui.add_space(crate::theme::tok::SP_3);
                         ui.scope(|ui| {
                             ui.style_mut().visuals.override_text_color =
                                 Some(Color32::from_rgb(203, 212, 226));
                             menu_items(ui, app);
                         });
-                        ui.add_space(2.0);
+                        ui.add_space(crate::theme::tok::SP_1);
                         ui.scope(|ui| {
                             ui.spacing_mut().item_spacing.x = 2.0;
                             ui.add_enabled_ui(app.history.can_undo(), |ui| {
@@ -132,7 +132,7 @@ pub(super) fn top_bar(ctx: &Context, app: &mut AppState, canvas_rect: egui::Rect
                             });
                         });
                         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                            ui.add_space(2.0);
+                            ui.add_space(crate::theme::tok::SP_1);
                             if ui
                                 .add(export_button())
                                 .on_hover_text("Export DXF / SVG")
@@ -142,7 +142,7 @@ pub(super) fn top_bar(ctx: &Context, app: &mut AppState, canvas_rect: egui::Rect
                                     d.insert_temp(egui::Id::new("open_export"), true)
                                 });
                             }
-                            ui.add_space(8.0);
+                            ui.add_space(crate::theme::tok::SP_4);
                             if ui.add(search_button()).clicked() {
                                 ui.ctx().data_mut(|d| {
                                     d.insert_temp(egui::Id::new("open_palette"), true)
@@ -189,7 +189,7 @@ fn search_button() -> impl egui::Widget {
             egui::pos2(rect.left() + 28.0, rect.center().y),
             egui::Align2::LEFT_CENTER,
             "Search or run a command",
-            egui::FontId::proportional(13.0),
+            egui::FontId::proportional(crate::theme::tok::T_LABEL),
             crate::theme::TEXT_DIM,
         );
         let cap = |p: &egui::Painter, right: f32, text: &str| -> f32 {
@@ -243,7 +243,7 @@ fn export_button() -> impl egui::Widget {
         const GAP: f32 = 6.0;
         let galley = p.layout_no_wrap(
             "Export".to_owned(),
-            egui::FontId::proportional(13.0),
+            egui::FontId::proportional(crate::theme::tok::T_LABEL),
             Color32::WHITE,
         );
         let total = GLYPH + GAP + galley.size().x;
@@ -262,7 +262,7 @@ fn export_button() -> impl egui::Widget {
             egui::pos2(left + GLYPH + GAP, rect.center().y),
             egui::Align2::LEFT_CENTER,
             "Export",
-            egui::FontId::proportional(13.0),
+            egui::FontId::proportional(crate::theme::tok::T_LABEL),
             Color32::WHITE,
         );
         resp
@@ -364,7 +364,7 @@ pub(super) fn plot_dialog(ctx: &Context, app: &mut AppState) {
                     .size(12.0)
                     .color(crate::theme::TEXT_DIM),
             );
-            ui.add_space(8.0);
+            ui.add_space(crate::theme::tok::SP_4);
             setting_row(ui, "Plot area", |ui| {
                 ui.selectable_value(&mut window_mode, false, "Extents");
                 ui.selectable_value(&mut window_mode, true, "Window");
@@ -992,7 +992,7 @@ pub(super) fn about_window(ctx: &Context, ui_state: &mut UiState) {
                         .size(12.0)
                         .color(crate::theme::TEXT_DIM),
                 );
-                ui.add_space(2.0);
+                ui.add_space(crate::theme::tok::SP_1);
                 ui.label(
                     egui::RichText::new("Exact, robust 2D CAD")
                         .size(11.0)
@@ -1002,7 +1002,7 @@ pub(super) fn about_window(ctx: &Context, ui_state: &mut UiState) {
                 if ui.button("Close").clicked() {
                     close = true;
                 }
-                ui.add_space(6.0);
+                ui.add_space(crate::theme::tok::SP_3);
             });
         });
     if close || ctx.input(|i| i.key_pressed(egui::Key::Escape)) {
@@ -1108,13 +1108,13 @@ pub(super) fn line_props_dialog(ctx: &Context, app: &mut AppState, ui_state: &mu
                     });
                 });
             }
-            ui.add_space(12.0);
+            ui.add_space(crate::theme::tok::SP_5);
             ui.vertical_centered(|ui| {
                 if ui.button("Close").clicked() {
                     close = true;
                 }
             });
-            ui.add_space(6.0);
+            ui.add_space(crate::theme::tok::SP_3);
         });
     if close || ctx.input(|i| i.key_pressed(egui::Key::Escape)) {
         ui_state.line_props_open = false;
@@ -1157,7 +1157,7 @@ pub(super) fn settings_dialog(ctx: &Context, app: &mut AppState, ui_state: &mut 
             ctx,
             |ui| {
                 ui.set_width(416.0);
-                ui.add_space(4.0);
+                ui.add_space(crate::theme::tok::SP_2);
                 ui.label(
                     egui::RichText::new("Settings")
                         .font(crate::fonts::strong_font_id(ui.ctx(), 16.0))
@@ -1170,7 +1170,7 @@ pub(super) fn settings_dialog(ctx: &Context, app: &mut AppState, ui_state: &mut 
                         .size(12.0)
                         .color(crate::theme::TEXT_DIM),
                 );
-                ui.add_space(8.0);
+                ui.add_space(crate::theme::tok::SP_4);
                 settings_rule(ui);
                 let footer_h = 60.0;
                 let scroll_h = (ui.available_height() - footer_h).max(120.0);
@@ -1335,7 +1335,7 @@ pub(super) fn settings_dialog(ctx: &Context, app: &mut AppState, ui_state: &mut 
                                 "DISPLAY",
                                 |ui| {
                                     ui.checkbox(&mut app.prefs.show_lineweights, "Show line weights");
-                                    ui.add_space(2.0);
+                                    ui.add_space(crate::theme::tok::SP_1);
                                     setting_row(
                                         ui,
                                         "Line weight scale",
@@ -1355,7 +1355,7 @@ pub(super) fn settings_dialog(ctx: &Context, app: &mut AppState, ui_state: &mut 
                                 "GRID",
                                 |ui| {
                                     ui.checkbox(&mut app.prefs.grid_dots, "Dotted grid (vs. lines)");
-                                    ui.add_space(2.0);
+                                    ui.add_space(crate::theme::tok::SP_1);
                                     setting_row(
                                         ui,
                                         "Major line every",
@@ -1532,7 +1532,7 @@ pub(super) fn settings_dialog(ctx: &Context, app: &mut AppState, ui_state: &mut 
                                 "CURVATURE COMB",
                                 |ui| {
                                     ui.checkbox(&mut app.prefs.comb_on, "Show on selected curves");
-                                    ui.add_space(4.0);
+                                    ui.add_space(crate::theme::tok::SP_2);
                                     ui.add_enabled(
                                         app.prefs.comb_on,
                                         egui::Slider::new(&mut app.prefs.comb_scale, 1.0..=20.0)
@@ -1540,11 +1540,11 @@ pub(super) fn settings_dialog(ctx: &Context, app: &mut AppState, ui_state: &mut 
                                     );
                                 },
                             );
-                            ui.add_space(8.0);
+                            ui.add_space(crate::theme::tok::SP_4);
                         },
                     );
                 settings_rule(ui);
-                ui.add_space(8.0);
+                ui.add_space(crate::theme::tok::SP_4);
                 ui.horizontal(|ui| {
                     if ui.button("Reset aids").clicked() {
                         app.apply_prefs(&crate::state::UiPrefs::default());
@@ -1568,7 +1568,7 @@ pub(super) fn settings_dialog(ctx: &Context, app: &mut AppState, ui_state: &mut 
                         },
                     );
                 });
-                ui.add_space(4.0);
+                ui.add_space(crate::theme::tok::SP_2);
             },
         );
     if close || ctx.input(|i| i.key_pressed(egui::Key::Escape)) {
@@ -1612,7 +1612,7 @@ fn setting_row(ui: &mut egui::Ui, label: &str, add: impl FnOnce(&mut egui::Ui)) 
             egui::pos2(rect.left(), rect.center().y),
             egui::Align2::LEFT_CENTER,
             label,
-            egui::FontId::proportional(13.0),
+            egui::FontId::proportional(crate::theme::tok::T_LABEL),
             crate::theme::TEXT,
         );
         add(ui);
@@ -2166,7 +2166,7 @@ pub(super) fn status_pill(ctx: &Context, app: &mut AppState, canvas_rect: egui::
                                     egui::pos2(rect.left(), rect.center().y),
                                     egui::Align2::LEFT_CENTER,
                                     text,
-                                    egui::FontId::monospace(13.0),
+                                    egui::FontId::monospace(crate::theme::tok::T_LABEL),
                                     crate::theme::ACCENT_BRIGHT,
                                 );
                             };
@@ -2175,17 +2175,17 @@ pub(super) fn status_pill(ctx: &Context, app: &mut AppState, canvas_rect: egui::
                                     .size(11.0)
                                     .color(crate::theme::TEXT_DIM),
                             );
-                            ui.add_space(8.0);
+                            ui.add_space(crate::theme::tok::SP_4);
                             cell(ui, format!("{cx:.2}"));
-                            ui.add_space(6.0);
+                            ui.add_space(crate::theme::tok::SP_3);
                             ui.label(
                                 egui::RichText::new("Y")
                                     .size(11.0)
                                     .color(crate::theme::TEXT_DIM),
                             );
-                            ui.add_space(8.0);
+                            ui.add_space(crate::theme::tok::SP_4);
                             cell(ui, format!("{cy:.2}"));
-                            ui.add_space(6.0);
+                            ui.add_space(crate::theme::tok::SP_3);
                             ui.label(
                                 egui::RichText::new(app.units_label())
                                     .size(11.0)
@@ -2194,7 +2194,7 @@ pub(super) fn status_pill(ctx: &Context, app: &mut AppState, canvas_rect: egui::
                         });
                         pill_sep(ui);
                         snap_master(ui, app);
-                        ui.add_space(6.0);
+                        ui.add_space(crate::theme::tok::SP_3);
                         snap_chip(ui, &mut app.prefs.grid_on, "Grid");
                         snap_chip(ui, &mut app.prefs.grid_snap_on, "GSnap");
                         snap_chip(ui, &mut app.prefs.polar_on, "Guides");
@@ -2215,7 +2215,7 @@ pub(super) fn status_pill(ctx: &Context, app: &mut AppState, canvas_rect: egui::
                         if round_btn(ui, "+", "Zoom in") {
                             app.view.zoom_at(wx, wy, 1.25);
                         }
-                        ui.add_space(2.0);
+                        ui.add_space(crate::theme::tok::SP_1);
                         if crate::icons::icon_button_sized(
                             ui,
                             crate::icons::Icon::ZoomFit,
@@ -2253,7 +2253,7 @@ fn unit_dropdown(ui: &mut egui::Ui, app: &mut AppState) {
     let label = app.units_label();
     let galley = ui.painter().layout_no_wrap(
         label.to_string(),
-        egui::FontId::proportional(12.0),
+        egui::FontId::proportional(crate::theme::tok::T_BODY),
         crate::theme::TEXT,
     );
     let w = galley.size().x + 28.0;
@@ -2275,7 +2275,7 @@ fn unit_dropdown(ui: &mut egui::Ui, app: &mut AppState) {
         egui::pos2(rect.left() + 9.0, rect.center().y),
         egui::Align2::LEFT_CENTER,
         label,
-        egui::FontId::proportional(12.0),
+        egui::FontId::proportional(crate::theme::tok::T_BODY),
         crate::theme::TEXT,
     );
     let cc = egui::pos2(rect.right() - 11.0, rect.center().y);
@@ -2382,7 +2382,7 @@ fn snap_master(ui: &mut egui::Ui, app: &mut AppState) {
         srect.center(),
         egui::Align2::CENTER_CENTER,
         "SNAP",
-        egui::FontId::proportional(11.0),
+        egui::FontId::proportional(crate::theme::tok::T_CAPTION),
         if on {
             crate::theme::ACCENT_BRIGHT
         } else {
@@ -2435,7 +2435,7 @@ fn snap_master(ui: &mut egui::Ui, app: &mut AppState) {
                                 .font(crate::fonts::strong_font_id(ui.ctx(), 10.0))
                                 .color(crate::theme::TEXT_DIM),
                         );
-                        ui.add_space(4.0);
+                        ui.add_space(crate::theme::tok::SP_2);
                         for (kind, label) in kinds {
                             let mut enabled = app.snap.enabled.contains(&kind);
                             if ui.checkbox(&mut enabled, label).changed() {
@@ -2471,7 +2471,7 @@ fn pill_sep(ui: &mut egui::Ui) {
 fn snap_chip(ui: &mut egui::Ui, on: &mut bool, label: &str) -> bool {
     let galley = ui.painter().layout_no_wrap(
         label.to_string(),
-        egui::FontId::proportional(12.0),
+        egui::FontId::proportional(crate::theme::tok::T_BODY),
         crate::theme::TEXT,
     );
     let w = galley.size().x + 18.0;
@@ -2501,7 +2501,7 @@ fn snap_chip(ui: &mut egui::Ui, on: &mut bool, label: &str) -> bool {
         rect.center(),
         egui::Align2::CENTER_CENTER,
         label,
-        egui::FontId::proportional(12.0),
+        egui::FontId::proportional(crate::theme::tok::T_BODY),
         fg,
     );
     if resp.clicked() {
@@ -2553,7 +2553,7 @@ pub(super) fn inspector(ctx: &Context, app: &mut AppState, canvas_rect: egui::Re
                                 .show(ui, |ui| {
                                     ui.set_width(WIDTH - 34.0);
                                     selection_properties(ui, app);
-                                    ui.add_space(12.0);
+                                    ui.add_space(crate::theme::tok::SP_5);
                                     layers_section(ui, app);
                                 });
                         });
@@ -2859,7 +2859,7 @@ fn con_glyph_button(ui: &mut egui::Ui, tooltip: &str, icon: crate::icons::Icon) 
 }
 
 fn bar_divider(ui: &mut egui::Ui) {
-    ui.add_space(2.0);
+    ui.add_space(crate::theme::tok::SP_1);
     let (rect, _) =
         ui.allocate_exact_size(egui::vec2(ui.available_width(), 1.0), egui::Sense::hover());
     ui.painter().hline(
@@ -2867,7 +2867,7 @@ fn bar_divider(ui: &mut egui::Ui) {
         rect.center().y,
         egui::Stroke::new(1.0, crate::theme::OUTLINE),
     );
-    ui.add_space(2.0);
+    ui.add_space(crate::theme::tok::SP_1);
 }
 
 fn inspector_header(ui: &mut egui::Ui, app: &AppState) {
@@ -2886,7 +2886,7 @@ fn inspector_header(ui: &mut egui::Ui, app: &AppState) {
             };
             let galley = ui.painter().layout_no_wrap(
                 txt.clone(),
-                egui::FontId::monospace(11.0),
+                egui::FontId::monospace(crate::theme::tok::T_CAPTION),
                 crate::theme::ACCENT_BRIGHT,
             );
             let (rect, _) = ui.allocate_exact_size(
@@ -2904,7 +2904,7 @@ fn inspector_header(ui: &mut egui::Ui, app: &AppState) {
                 rect.center(),
                 egui::Align2::CENTER_CENTER,
                 txt,
-                egui::FontId::monospace(11.0),
+                egui::FontId::monospace(crate::theme::tok::T_CAPTION),
                 crate::theme::ACCENT_BRIGHT,
             );
         });
@@ -2944,7 +2944,7 @@ fn layers_section(ui: &mut egui::Ui, app: &mut AppState) {
             }
         });
     });
-    ui.add_space(4.0);
+    ui.add_space(crate::theme::tok::SP_2);
     let current = app.document.layers.current;
     let n_layers = app.document.layers.layers.len();
     let mut counts = vec![0usize; n_layers];
@@ -3025,7 +3025,7 @@ fn layers_section(ui: &mut egui::Ui, app: &mut AppState) {
                         l.on = !on;
                     }
                 }
-                ui.add_space(6.0);
+                ui.add_space(crate::theme::tok::SP_3);
                 layer_appearance_menus(ui, app, i);
                 ui.add_space(10.0);
                 ui.label(
@@ -3034,7 +3034,7 @@ fn layers_section(ui: &mut egui::Ui, app: &mut AppState) {
                         .size(11.0)
                         .color(crate::theme::TEXT_DIM),
                 );
-                ui.add_space(4.0);
+                ui.add_space(crate::theme::tok::SP_2);
                 let mut buf = name.clone();
                 let name_col = if is_cur {
                     crate::theme::TEXT
@@ -3167,9 +3167,9 @@ pub(super) fn tool_hint_panel(ctx: &Context, app: &AppState, canvas_rect: egui::
     let title_col = crate::theme::ACCENT_BRIGHT.gamma_multiply(0.5);
     let key_col = crate::theme::TEXT.gamma_multiply(0.5);
     let desc_col = crate::theme::TEXT_DIM.gamma_multiply(0.5);
-    let title_font = egui::FontId::proportional(12.0);
-    let key_font = egui::FontId::monospace(11.0);
-    let desc_font = egui::FontId::proportional(12.0);
+    let title_font = egui::FontId::proportional(crate::theme::tok::T_BODY);
+    let key_font = egui::FontId::monospace(crate::theme::tok::T_CAPTION);
+    let desc_font = egui::FontId::proportional(crate::theme::tok::T_BODY);
     let row_gap = 6.0;
     let line_gap = 5.0;
     let cell_min = 46.0;
@@ -3519,7 +3519,7 @@ fn style_value_box(ui: &mut egui::Ui) {
 fn num_field(ui: &mut egui::Ui, caption: &str, v: &mut f64, speed: f64) -> bool {
     ui.scope(|ui| {
         prop_caption(ui, caption);
-        ui.add_space(4.0);
+        ui.add_space(crate::theme::tok::SP_2);
         style_value_box(ui);
         ui.add_sized(
             [ui.available_width(), 30.0],
@@ -3542,7 +3542,7 @@ fn xy_fields(ui: &mut egui::Ui, ca: &str, a: &mut f64, cb: &str, b: &mut f64, sp
 fn metric_field(ui: &mut egui::Ui, caption: &str, value: f64) {
     ui.scope(|ui| {
         prop_caption(ui, caption);
-        ui.add_space(4.0);
+        ui.add_space(crate::theme::tok::SP_2);
         style_value_box(ui);
         let mut v = value;
         ui.add_enabled_ui(false, |ui| {
@@ -3626,9 +3626,9 @@ fn object_header(ui: &mut egui::Ui, name: &str, subtitle: &str, icon: crate::ico
             rect.shrink(10.0),
             crate::theme::ACCENT_BRIGHT,
         );
-        ui.add_space(4.0);
+        ui.add_space(crate::theme::tok::SP_2);
         ui.vertical(|ui| {
-            ui.add_space(2.0);
+            ui.add_space(crate::theme::tok::SP_1);
             ui.label(
                 egui::RichText::new(name)
                     .font(crate::fonts::strong_font_id(ui.ctx(), 14.0))
@@ -3793,7 +3793,7 @@ fn appearance_row(
                         ],
                         egui::Stroke::new(1.3, crate::theme::TEXT_DIM),
                     ));
-                    ui.add_space(2.0);
+                    ui.add_space(crate::theme::tok::SP_1);
                     ui.label(
                         egui::RichText::new(value)
                             .size(13.0)
@@ -3828,7 +3828,7 @@ fn appearance_row(
         ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
     }
     egui::Popup::menu(&resp).show(add_options);
-    ui.add_space(8.0);
+    ui.add_space(crate::theme::tok::SP_4);
 }
 
 fn lw_options() -> [(&'static str, oxidraft_document::LineWeight); 7] {
@@ -4079,7 +4079,7 @@ fn constraints_section(ui: &mut egui::Ui, app: &mut AppState, sel: &[oxidraft_do
         app.history.snapshot(&app.document);
         app.document.constraints.retain(|c| *c != rc);
     }
-    ui.add_space(4.0);
+    ui.add_space(crate::theme::tok::SP_2);
 }
 
 fn edit_entity_geometry(ui: &mut egui::Ui, app: &mut AppState, id: oxidraft_document::EntityId) {
@@ -4098,10 +4098,10 @@ fn edit_entity_geometry(ui: &mut egui::Ui, app: &mut AppState, id: oxidraft_docu
             let mut endpoints_changed = false;
             prop_caption(ui, "Start");
             endpoints_changed |= xy_fields(ui, "X", &mut p0x, "Y", &mut p0y, 0.01);
-            ui.add_space(4.0);
+            ui.add_space(crate::theme::tok::SP_2);
             prop_caption(ui, "End");
             endpoints_changed |= xy_fields(ui, "X", &mut p1x, "Y", &mut p1y, 0.01);
-            ui.add_space(4.0);
+            ui.add_space(crate::theme::tok::SP_2);
             let length_changed = num_field(ui, "Length", &mut length, 0.01);
             if endpoints_changed || (length_changed && length > 1e-6) {
                 app.history.snapshot(&app.document);
@@ -4160,10 +4160,10 @@ fn edit_entity_geometry(ui: &mut egui::Ui, app: &mut AppState, id: oxidraft_docu
             let mut changed = false;
             prop_caption(ui, "Centre");
             changed |= xy_fields(ui, "X", &mut cx, "Y", &mut cy, 0.01);
-            ui.add_space(4.0);
+            ui.add_space(crate::theme::tok::SP_2);
             changed |= num_field(ui, "Radius", &mut r, 0.01);
             if !is_circle {
-                ui.add_space(4.0);
+                ui.add_space(crate::theme::tok::SP_2);
                 ui.columns(2, |c| {
                     changed |= num_field(&mut c[0], "Start °", &mut sa, 0.5);
                     changed |= num_field(&mut c[1], "End °", &mut ea, 0.5);
@@ -4217,15 +4217,15 @@ fn edit_entity_geometry(ui: &mut egui::Ui, app: &mut AppState, id: oxidraft_docu
             let mut changed = false;
             prop_caption(ui, "Font");
             changed |= font_combo(ui, "prop_font", &mut chosen_font);
-            ui.add_space(4.0);
+            ui.add_space(crate::theme::tok::SP_2);
             prop_caption(ui, "Anchor");
             changed |= xy_fields(ui, "X", &mut ax, "Y", &mut ay, 0.01);
-            ui.add_space(4.0);
+            ui.add_space(crate::theme::tok::SP_2);
             ui.columns(2, |c| {
                 changed |= num_field(&mut c[0], "Height", &mut h, 0.01);
                 changed |= num_field(&mut c[1], "Rotation °", &mut rot, 0.5);
             });
-            ui.add_space(4.0);
+            ui.add_space(crate::theme::tok::SP_2);
             prop_caption(ui, "Content");
             changed |= ui
                 .add_sized(
@@ -4282,15 +4282,15 @@ fn edit_entity_geometry(ui: &mut egui::Ui, app: &mut AppState, id: oxidraft_docu
             let mut changed = false;
             prop_caption(ui, "Centre");
             changed |= xy_fields(ui, "X", &mut cx, "Y", &mut cy, 0.01);
-            ui.add_space(4.0);
+            ui.add_space(crate::theme::tok::SP_2);
             ui.columns(2, |c| {
                 changed |= num_field(&mut c[0], "Semi-major", &mut major, 0.01);
                 changed |= num_field(&mut c[1], "Semi-minor", &mut minor, 0.01);
             });
-            ui.add_space(4.0);
+            ui.add_space(crate::theme::tok::SP_2);
             changed |= num_field(ui, "Rotation °", &mut rot, 0.5);
             if !is_full {
-                ui.add_space(4.0);
+                ui.add_space(crate::theme::tok::SP_2);
                 ui.columns(2, |c| {
                     changed |= num_field(&mut c[0], "Start °", &mut sa, 0.5);
                     changed |= num_field(&mut c[1], "End °", &mut ea, 0.5);
@@ -4346,7 +4346,7 @@ fn edit_entity_geometry(ui: &mut egui::Ui, app: &mut AppState, id: oxidraft_docu
                         for (k, v) in verts.iter_mut().enumerate() {
                             prop_caption(ui, &format!("Vertex {}", k + 1));
                             changed |= xy_fields(ui, "X", &mut v.0, "Y", &mut v.1, 0.01);
-                            ui.add_space(2.0);
+                            ui.add_space(crate::theme::tok::SP_1);
                         }
                     });
                 if changed {
@@ -4448,7 +4448,7 @@ fn hatch_pattern_editor(ui: &mut egui::Ui, pattern: &mut oxidraft_document::Hatc
         });
     match pattern {
         HP::Lines { angle_deg, spacing } | HP::Cross { angle_deg, spacing } => {
-            ui.add_space(4.0);
+            ui.add_space(crate::theme::tok::SP_2);
             ui.columns(2, |c| {
                 changed |= num_field(&mut c[0], "Angle °", &mut *angle_deg, 1.0);
                 changed |= num_field(&mut c[1], "Spacing", &mut *spacing, 0.05);
@@ -4456,7 +4456,7 @@ fn hatch_pattern_editor(ui: &mut egui::Ui, pattern: &mut oxidraft_document::Hatc
             *spacing = spacing.max(0.05);
         }
         HP::Dots { spacing } => {
-            ui.add_space(4.0);
+            ui.add_space(crate::theme::tok::SP_2);
             changed |= num_field(ui, "Spacing", &mut *spacing, 0.05);
             *spacing = spacing.max(0.05);
         }

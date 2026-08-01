@@ -620,7 +620,7 @@ fn draw_dim_badge(
         tr.center(),
         egui::Align2::CENTER_CENTER,
         &dim.label,
-        egui::FontId::proportional(11.0),
+        egui::FontId::proportional(crate::theme::tok::T_CAPTION),
         col,
     );
 }
@@ -913,7 +913,7 @@ pub(super) fn constraint_badges(
             p + vec2(0.0, -12.0),
             egui::Align2::CENTER_BOTTOM,
             verb,
-            egui::FontId::proportional(11.0),
+            egui::FontId::proportional(crate::theme::tok::T_CAPTION),
             Color32::from_rgb(255, 200, 120),
         );
     }
@@ -2009,7 +2009,7 @@ pub(super) fn dyn_text_hud(
                                 .desired_width(180.0)
                                 .hint_text("type text, Enter to place"),
                         );
-                        ui.add_space(4.0);
+                        ui.add_space(crate::theme::tok::SP_2);
                         super::chrome::font_combo(ui, "dyn_text_font", &mut app.prefs.text_font);
                         height_glyph(ui);
                         let mut size = if let Tool::Text { height, .. } = &app.tool {

@@ -216,7 +216,7 @@ pub fn draw_ui(ui: &mut egui::Ui, app: &mut AppState, ui_state: &mut UiState) {
                     "oxiDRAFT found an autosaved drawing from a session \
                      that didn't close normally.",
                 );
-                ui.add_space(8.0);
+                ui.add_space(crate::theme::tok::SP_4);
                 ui.horizontal(|ui| {
                     if ui.button("Restore").clicked() {
                         if app.restore_recovery(&path) {
@@ -1264,7 +1264,7 @@ fn canvas(root_ui: &mut egui::Ui, app: &mut AppState, ui_state: &mut UiState, pa
                 ((c[0].to_vec2() + c[2].to_vec2()) * 0.5).to_pos2(),
                 egui::Align2::CENTER_CENTER,
                 "PLOT",
-                egui::FontId::proportional(11.0),
+                egui::FontId::proportional(crate::theme::tok::T_CAPTION),
                 Color32::from_rgba_unmultiplied(255, 200, 120, 140),
             );
         }
@@ -1335,7 +1335,7 @@ fn canvas(root_ui: &mut egui::Ui, app: &mut AppState, ui_state: &mut UiState, pa
                         p + vec2(0.0, -12.0),
                         egui::Align2::CENTER_BOTTOM,
                         "click to remove tangency",
-                        egui::FontId::proportional(11.0),
+                        egui::FontId::proportional(crate::theme::tok::T_CAPTION),
                         Color32::from_rgb(255, 200, 120),
                     );
                 }
@@ -1351,8 +1351,11 @@ fn canvas(root_ui: &mut egui::Ui, app: &mut AppState, ui_state: &mut UiState, pa
             let txt = format!("{label}: {shown}");
             let cp = to_screen(app.cursor_world.0, app.cursor_world.1);
             let tp = pos2(cp.x + 14.0, cp.y - 28.0);
-            let galley =
-                painter.layout_no_wrap(txt, egui::FontId::proportional(13.0), Color32::WHITE);
+            let galley = painter.layout_no_wrap(
+                txt,
+                egui::FontId::proportional(crate::theme::tok::T_LABEL),
+                Color32::WHITE,
+            );
             let bg = egui::Rect::from_min_size(tp, galley.size()).expand(5.0);
             painter.rect_filled(bg, 5.0, Color32::from_rgba_unmultiplied(26, 32, 42, 235));
             painter.rect_stroke(
@@ -1527,7 +1530,7 @@ fn canvas(root_ui: &mut egui::Ui, app: &mut AppState, ui_state: &mut UiState, pa
                     };
                     let galley = painter.layout_no_wrap(
                         txt.to_string(),
-                        egui::FontId::proportional(12.0),
+                        egui::FontId::proportional(crate::theme::tok::T_BODY),
                         Color32::WHITE,
                     );
                     let isz = 14.0;
@@ -1642,7 +1645,7 @@ fn canvas(root_ui: &mut egui::Ui, app: &mut AppState, ui_state: &mut UiState, pa
                 cc + vec2(15.0, -15.0),
                 egui::Align2::LEFT_BOTTOM,
                 labels.join(" + "),
-                egui::FontId::proportional(11.0),
+                egui::FontId::proportional(crate::theme::tok::T_CAPTION),
                 crate::theme::SNAP,
             );
         }
@@ -1900,8 +1903,11 @@ fn canvas(root_ui: &mut egui::Ui, app: &mut AppState, ui_state: &mut UiState, pa
                 oxidraft_cad::SnapKind::Insertion => "Insertion",
             };
             let ink = Color32::from_rgb(20, 20, 20);
-            let galley =
-                painter.layout_no_wrap(label.to_owned(), egui::FontId::proportional(12.0), ink);
+            let galley = painter.layout_no_wrap(
+                label.to_owned(),
+                egui::FontId::proportional(crate::theme::tok::T_BODY),
+                ink,
+            );
             let pad = vec2(7.0, 4.0);
             let size = galley.size() + pad * 2.0;
             let mut chip_min = pos2(c.x - R - 8.0 - size.x, c.y - R - 8.0 - size.y);
@@ -1960,7 +1966,7 @@ fn canvas(root_ui: &mut egui::Ui, app: &mut AppState, ui_state: &mut UiState, pa
                     };
                     let galley = painter.layout_no_wrap(
                         opt.label().to_owned(),
-                        egui::FontId::proportional(12.0),
+                        egui::FontId::proportional(crate::theme::tok::T_BODY),
                         ink,
                     );
                     let pad = vec2(7.0, 4.0);
@@ -1987,7 +1993,7 @@ fn canvas(root_ui: &mut egui::Ui, app: &mut AppState, ui_state: &mut UiState, pa
                 // Monospace at the keycap size the tooltips already use.
                 let hint = painter.layout_no_wrap(
                     "Tab".to_owned(),
-                    egui::FontId::monospace(11.0),
+                    egui::FontId::monospace(crate::theme::tok::T_CAPTION),
                     crate::theme::TEXT_DIM,
                 );
                 painter.galley(
@@ -2002,7 +2008,7 @@ fn canvas(root_ui: &mut egui::Ui, app: &mut AppState, ui_state: &mut UiState, pa
         let is_drawing = !matches!(app.tool, Tool::Select);
         let has_input = is_drawing || !ui_state.command_input.is_empty() || has_dims;
         if app.prefs.dyn_on && (has_dims || has_input) {
-            let font_id = egui::FontId::monospace(11.0);
+            let font_id = egui::FontId::monospace(crate::theme::tok::T_CAPTION);
             let text_color = Color32::from_rgb(230, 240, 255);
             let bg_color = crate::theme::CHIP_BG;
             let dim_border = Stroke::new(1.0, Color32::from_rgb(80, 95, 115));

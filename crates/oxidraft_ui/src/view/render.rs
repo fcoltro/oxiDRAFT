@@ -277,7 +277,7 @@ pub(super) fn tool_prompt(tool: &Tool) -> String {
 pub(super) fn draw_prompt_chip(painter: &egui::Painter, rect: egui::Rect, text: &str) {
     let galley = painter.layout_no_wrap(
         text.to_string(),
-        egui::FontId::proportional(13.0),
+        egui::FontId::proportional(crate::theme::tok::T_LABEL),
         crate::theme::TEXT,
     );
     let pad = vec2(14.0, 7.0);
@@ -431,7 +431,7 @@ pub(super) fn draw_scale_bar(painter: &egui::Painter, app: &AppState, rect: egui
     let tx = (x0 + x1) / 2.0;
     let galley = painter.layout_no_wrap(
         label.clone(),
-        egui::FontId::monospace(12.0),
+        egui::FontId::monospace(crate::theme::tok::T_BODY),
         crate::theme::TEXT,
     );
     let pad = vec2(8.0, 3.0);
@@ -450,7 +450,7 @@ pub(super) fn draw_scale_bar(painter: &egui::Painter, app: &AppState, rect: egui
         chip.center(),
         egui::Align2::CENTER_CENTER,
         &label,
-        egui::FontId::monospace(12.0),
+        egui::FontId::monospace(crate::theme::tok::T_BODY),
         crate::theme::ACCENT_BRIGHT,
     );
 }
@@ -1552,7 +1552,7 @@ pub(super) fn draw_corner_preview(
         pos2(cur.x + 9.0, cur.y - 9.0),
         egui::Align2::LEFT_BOTTOM,
         label,
-        egui::FontId::monospace(12.0),
+        egui::FontId::monospace(crate::theme::tok::T_BODY),
         accent,
     );
 }
