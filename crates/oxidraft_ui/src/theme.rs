@@ -57,16 +57,6 @@ pub mod tok {
     pub const T_LABEL: f32 = 13.0;
     /// Headings.
     pub const T_HEADING: f32 = 15.0;
-
-    // Superseded names, kept so the tree keeps building while call sites move
-    // over. `T_SM` was the old name for what is now a label, which is exactly
-    // the confusion semantic names avoid.
-    /// Deprecated: use [`T_CAPTION`].
-    pub const T_XS: f32 = T_CAPTION;
-    /// Deprecated: use [`T_LABEL`].
-    pub const T_SM: f32 = T_LABEL;
-    /// Deprecated: use [`T_HEADING`].
-    pub const T_LG: f32 = T_HEADING;
 }
 
 /// The canvas's background color, behind all drawn geometry.
@@ -198,30 +188,33 @@ pub fn apply(ctx: &Context) {
     v.widgets.open.bg_stroke = Stroke::new(1.0, ACCENT_DIM);
     v.widgets.open.corner_radius = r;
     ctx.set_visuals(v);
-    let heading_font = crate::fonts::strong_font_id(ctx, tok::T_LG);
+    let heading_font = crate::fonts::strong_font_id(ctx, tok::T_HEADING);
     ctx.global_style_mut(|s| {
-        s.spacing.item_spacing = egui::vec2(tok::SP_2, 5.0);
+        s.spacing.item_spacing = egui::vec2(tok::SP_3, 5.0);
         s.spacing.button_padding = egui::vec2(7.0, 4.0);
-        s.spacing.menu_margin = egui::Margin::same(tok::SP_3 as i8);
+        s.spacing.menu_margin = egui::Margin::same(tok::SP_4 as i8);
         s.interaction.tooltip_delay = 0.45;
         s.interaction.tooltip_grace_time = 0.25;
         s.text_styles = [
             (
                 TextStyle::Small,
-                FontId::new(tok::T_XS, FontFamily::Proportional),
+                FontId::new(tok::T_CAPTION, FontFamily::Proportional),
             ),
             (
                 TextStyle::Body,
-                FontId::new(tok::T_SM, FontFamily::Proportional),
+                // egui's "Body" is the default for widget text, which in this
+                // app is a control label rather than annotation — so it is
+                // T_LABEL, not T_BODY. Same 13px it has always been.
+                FontId::new(tok::T_LABEL, FontFamily::Proportional),
             ),
             (
                 TextStyle::Button,
-                FontId::new(tok::T_SM, FontFamily::Proportional),
+                FontId::new(tok::T_LABEL, FontFamily::Proportional),
             ),
             (TextStyle::Heading, heading_font),
             (
                 TextStyle::Monospace,
-                FontId::new(tok::T_SM, FontFamily::Monospace),
+                FontId::new(tok::T_LABEL, FontFamily::Monospace),
             ),
         ]
         .into();
@@ -231,6 +224,41 @@ pub fn apply(ctx: &Context) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_global_spacing_tokens_hold_their_values() {
+        // `apply` feeds these two into egui globals — every `ui.horizontal()`
+        // gutter, and every menu's padding — so the tokens they name are not
+        // free to change meaning. Renaming the scale once moved SP_2 from 6 to
+        // 4 and SP_3 from 8 to 6 while these kept pointing at them: the whole
+        // app lost 2px of gutter and menus lost 2px of padding, silently.
+        //
+        // Written as raw numbers deliberately. In tokens it would move with
+        // the mistake instead of catching it.
+        //
+        // This guards the values, not the wiring — reading the effective style
+        // back would need a context that has run a frame, and egui 0.35 has no
+        // headless way to do that. Repointing `apply` at a different token
+        // would still slip through.
+        assert_eq!(tok::SP_3, 6.0, "the global item spacing");
+        assert_eq!(tok::SP_4, 8.0, "the menu margin");
+    }
+
+    #[test]
+    fn the_type_scale_has_no_duplicate_steps() {
+        // Four steps a pixel apart is already tight; two tokens landing on the
+        // same size would mean one of them is not a step at all.
+        let steps = [tok::T_CAPTION, tok::T_BODY, tok::T_LABEL, tok::T_HEADING];
+        for (i, a) in steps.iter().enumerate() {
+            for b in &steps[i + 1..] {
+                assert_ne!(a, b, "two type tokens resolve to the same size");
+            }
+        }
+        assert!(
+            steps.iter().all(|s| s.fract() == 0.0),
+            "fractional sizes get their own atlas entry and render soft"
+        );
+    }
 
     #[test]
     fn chip_bg_is_the_colour_it_replaced() {

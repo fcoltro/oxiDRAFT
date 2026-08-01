@@ -1645,7 +1645,14 @@ impl AppState {
                 let idx = self.document.layers.add(Layer::new(name));
                 self.document.layers.current = idx;
             }
-            Command::Unknown(_) => {}
+            Command::Unknown(what) => {
+                // The raw text was logged before dispatch, so on its own an
+                // unrecognised command shows a toast of exactly what was typed
+                // and then does nothing — which reads as confirmation. Say it
+                // was not understood, and where to look.
+                self.command_log
+                    .push(format!("{what} isn't a command — press Ctrl+F to search"));
+            }
         }
     }
 
@@ -4784,6 +4791,35 @@ mod tests {
                 "nothing is up there to cut"
             );
         }
+    }
+
+    #[test]
+    fn an_unrecognised_command_says_so() {
+        // The raw text is logged before dispatch, so without this the toast
+        // shows exactly what was typed and nothing happens — which reads as
+        // confirmation. Typing FILLETT looked like a fillet had been applied.
+        let mut a = app();
+        a.run_command("FILLETT");
+        let last = a.command_log.last().expect("something was logged");
+        assert!(
+            last.contains("isn't a command"),
+            "an unknown command must say so, got {last:?}"
+        );
+        assert!(
+            last.contains("FILLETT"),
+            "and it should quote what was typed, got {last:?}"
+        );
+    }
+
+    #[test]
+    fn a_real_command_does_not_get_the_unknown_message() {
+        let mut a = app();
+        a.run_command("LINE");
+        let last = a.command_log.last().expect("something was logged");
+        assert!(
+            !last.contains("isn't a command"),
+            "LINE is a command, got {last:?}"
+        );
     }
 
     #[test]

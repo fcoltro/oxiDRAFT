@@ -525,7 +525,7 @@ pub(crate) fn rich_tooltip(ui: &mut Ui, text: &str) {
             egui::RichText::new(head)
                 .font(crate::fonts::strong_font_id(
                     ui.ctx(),
-                    crate::theme::tok::T_SM,
+                    crate::theme::tok::T_LABEL,
                 ))
                 .color(crate::theme::TEXT),
         );

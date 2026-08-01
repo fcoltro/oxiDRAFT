@@ -232,7 +232,7 @@ fn draw_sector(
             pos,
             egui::Align2::CENTER_CENTER,
             short_label(text),
-            egui::FontId::proportional(theme::tok::T_SM),
+            egui::FontId::proportional(theme::tok::T_LABEL),
             tint,
         );
     }
@@ -247,7 +247,7 @@ fn draw_hub(painter: &egui::Painter, center: Pos2, label: Option<&str>) {
         Some(text) => {
             let galley = painter.layout(
                 text.to_string(),
-                egui::FontId::proportional(theme::tok::T_LG),
+                egui::FontId::proportional(theme::tok::T_HEADING),
                 theme::TEXT,
                 HUB_RADIUS * 1.5,
             );
@@ -258,7 +258,7 @@ fn draw_hub(painter: &egui::Painter, center: Pos2, label: Option<&str>) {
                 center,
                 egui::Align2::CENTER_CENTER,
                 "Radial",
-                egui::FontId::proportional(theme::tok::T_XS),
+                egui::FontId::proportional(theme::tok::T_CAPTION),
                 theme::TEXT_DIM,
             );
         }

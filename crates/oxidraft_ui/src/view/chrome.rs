@@ -2687,7 +2687,7 @@ pub(super) fn constraint_bar(ctx: &Context, app: &mut AppState, canvas_rect: egu
                     // point-on-line, and a circle for point-on-circle.
                     geo(
                         ui,
-                        "Point on (PON) — hold a picked point on a line, on its                          midpoint, or on a circle/arc",
+                        "Point on  (PON) — hold a picked point on a line, on its midpoint, or on a circle or arc",
                         K::PointOnLine,
                     );
                     geo(
