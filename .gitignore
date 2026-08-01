@@ -16,3 +16,8 @@ Thumbs.db
 # apps/oxidraft_app/assets/PACKAGING.md; the real .pfx lives outside the repo)
 *.pfx
 *.p12
+
+# Illustrator scratch and recovery files. Tilde-prefixed, PDF-based, and they
+# land beside the .ai they came from at nearly the same size — which makes them
+# easy to sweep up with a broad `git add`, and they are not source.
+~*.tmp
