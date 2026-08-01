@@ -1064,7 +1064,7 @@ pub(super) fn draw_entity(
         } => {
             use oxidraft_document::HatchPattern;
             let fill_col = if selected {
-                Color32::from_rgba_unmultiplied(64, 120, 255, 130)
+                HATCH_SELECT.gamma_multiply(130.0 / 255.0)
             } else {
                 Color32::from_rgb(fill.0, fill.1, fill.2)
             };

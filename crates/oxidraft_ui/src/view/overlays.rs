@@ -649,7 +649,7 @@ pub(super) fn smart_dim_preview(painter: &egui::Painter, app: &AppState, origin:
         origin,
         &dim,
         crate::theme::PREVIEW,
-        Color32::from_rgba_unmultiplied(20, 26, 36, 225),
+        crate::theme::CHIP_BG,
         crate::theme::OUTLINE,
     );
 }
@@ -807,7 +807,7 @@ pub(super) fn constraint_badges(
     }
     let model = badge_model(&app.document);
     let clip = painter.clip_rect().expand(48.0);
-    let bg = Color32::from_rgba_unmultiplied(20, 26, 36, 225);
+    let bg = crate::theme::CHIP_BG;
     let col = crate::theme::ACCENT_BRIGHT;
     // The hint carries its own verb: glyph chips and weld dots delete on
     // click, driving dimensions open an editor.

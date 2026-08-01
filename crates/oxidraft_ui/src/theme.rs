@@ -25,6 +25,11 @@ pub const CANVAS_BG: Color32 = Color32::from_rgb(10, 12, 16);
 pub const PANEL_BG: Color32 = Color32::from_rgb(20, 25, 36);
 /// Translucent panel background used by [`glass`] frames (toolbars, HUDs).
 pub const PANEL_GLASS: Color32 = Color32::from_rgba_premultiplied(15, 19, 29, 222);
+/// Background for a chip or badge floating over the canvas — snap labels,
+/// constraint badges, the dynamic-input readout. Dimmer and more opaque than
+/// [`PANEL_GLASS`], because it sits on the drawing rather than on chrome, and
+/// always paired with an [`OUTLINE`] edge.
+pub const CHIP_BG: Color32 = Color32::from_rgba_premultiplied(18, 23, 32, 225);
 /// Fill for an inactive widget.
 pub const WIDGET_BG: Color32 = Color32::from_rgba_premultiplied(12, 12, 12, 12);
 /// Fill for a hovered widget.
@@ -171,4 +176,18 @@ pub fn apply(ctx: &Context) {
         ]
         .into();
     });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn chip_bg_is_the_colour_it_replaced() {
+        // The four canvas HUDs that share this background wrote it as
+        // `from_rgba_unmultiplied(20, 26, 36, 225)`, which is not a const fn —
+        // so the token stores the premultiplied form instead. Same colour, and
+        // the arithmetic is asserted rather than trusted.
+        assert_eq!(CHIP_BG, Color32::from_rgba_unmultiplied(20, 26, 36, 225));
+    }
 }

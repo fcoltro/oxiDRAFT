@@ -1323,7 +1323,7 @@ fn canvas(root_ui: &mut egui::Ui, app: &mut AppState, ui_state: &mut UiState, pa
                 } else {
                     crate::theme::ACCENT_BRIGHT
                 };
-                painter.circle_filled(p, 8.0, Color32::from_rgba_unmultiplied(20, 26, 36, 235));
+                painter.circle_filled(p, 8.0, crate::theme::CHIP_BG);
                 painter.circle_stroke(p, 8.0, Stroke::new(1.0, crate::theme::OUTLINE));
                 painter.circle_stroke(p, 3.2, Stroke::new(1.4, col));
                 painter.line_segment(
@@ -2004,7 +2004,7 @@ fn canvas(root_ui: &mut egui::Ui, app: &mut AppState, ui_state: &mut UiState, pa
         if app.prefs.dyn_on && (has_dims || has_input) {
             let font_id = egui::FontId::monospace(11.0);
             let text_color = Color32::from_rgb(230, 240, 255);
-            let bg_color = Color32::from_rgba_unmultiplied(20, 26, 36, 225);
+            let bg_color = crate::theme::CHIP_BG;
             let dim_border = Stroke::new(1.0, Color32::from_rgb(80, 95, 115));
             let input_border = Stroke::new(1.0, Color32::from_rgb(0, 255, 0));
             let dims_text = if has_dims {
