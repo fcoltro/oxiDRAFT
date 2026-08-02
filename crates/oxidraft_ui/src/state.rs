@@ -1738,7 +1738,8 @@ impl AppState {
             self.selection = ids;
             self.history.discard_last();
             self.problem(
-                "Nothing in that selection has parts to break apart — Disjoint                  only affects polylines, polygons, and rectangles."
+                "Nothing in that selection has parts to break apart — Disjoint \
+                 only affects polylines, polygons, and rectangles."
                     .into(),
             );
             return;
@@ -2273,7 +2274,8 @@ impl AppState {
             self.selection = ids;
             self.history.discard_last();
             self.problem(
-                "Nothing in that selection touches end to end — Join needs curves                  that share an endpoint."
+                "Nothing in that selection touches end to end — Join needs curves \
+                 that share an endpoint."
                     .into(),
             );
             return;
@@ -2495,7 +2497,8 @@ impl AppState {
         } else {
             self.history.discard_last();
             self.problem(
-                "That text has no outlines to create — its font may have no glyphs                  for the characters used."
+                "That text has no outlines to create — its font may have no glyphs \
+                 for the characters used."
                     .into(),
             );
         }

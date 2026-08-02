@@ -33,7 +33,8 @@ impl AppState {
                     if edit::trim(&mut self.document, id, &cutters, px, py) == vec![id] {
                         self.history.discard_last();
                         self.problem(
-                            "Nothing crosses there to trim against — the piece you click                              has to be bounded by something."
+                            "Nothing crosses there to trim against — the piece you click \
+                             has to be bounded by something."
                                 .into(),
                         );
                     }
@@ -57,7 +58,8 @@ impl AppState {
                     if !edit::extend(&mut self.document, id, &boundaries, px, py) {
                         self.history.discard_last();
                         self.problem(
-                            "Nothing to extend to in that direction — there has to be an                              edge ahead of the end you pick."
+                            "Nothing to extend to in that direction — there has to be an \
+                             edge ahead of the end you pick."
                                 .into(),
                         );
                     }
@@ -315,7 +317,8 @@ impl AppState {
                                 } else {
                                     self.history.discard_last();
                                     self.problem(format!(
-                                        "No fillet fits there at radius {radius} — try a                                          smaller one, or pick two edges that meet."
+                                        "No fillet fits there at radius {radius} — try a \
+                                         smaller one, or pick two edges that meet."
                                     ));
                                 }
                             }
@@ -347,7 +350,8 @@ impl AppState {
                                 } else {
                                     self.history.discard_last();
                                     self.problem(format!(
-                                        "No chamfer fits there at distance {dist} — try a                                          smaller one, or pick two edges that meet."
+                                        "No chamfer fits there at distance {dist} — try a \
+                                         smaller one, or pick two edges that meet."
                                     ));
                                 }
                             }
@@ -554,7 +558,8 @@ impl AppState {
                 }
             }
             None => self.problem(format!(
-                "No circle of radius {radius} is tangent to both — try a                  different radius, or pick nearer where you want it."
+                "No circle of radius {radius} is tangent to both — try a \
+                 different radius, or pick nearer where you want it."
             )),
         }
     }
@@ -579,7 +584,8 @@ impl AppState {
                 }
             }
             None => self.problem(
-                "No circle is tangent to all three — pick nearer where you want                  it, or a different set of edges."
+                "No circle is tangent to all three — pick nearer where you want \
+                 it, or a different set of edges."
                     .into(),
             ),
         }
