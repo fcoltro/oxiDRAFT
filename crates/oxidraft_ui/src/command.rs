@@ -110,7 +110,7 @@ pub fn parse_command(input: &str) -> Command {
     let rest: Vec<&str> = parts.collect();
 
     match verb.as_str() {
-        "LINE" | "L" => Command::Activate(Tool::Line { last: None }),
+        "LINE" | "L" => Command::Activate(Tool::Line { first: None }),
         "CIRCLE" | "C" => Command::Activate(Tool::circle()),
         "ARC" | "A" => Command::Activate(Tool::Arc3 { pts: vec![] }),
         "ARCSCE" | "ASCE" => Command::Activate(Tool::ArcStartCenterEnd {
@@ -135,7 +135,10 @@ pub fn parse_command(input: &str) -> Command {
             })
         }
         "TTT" | "CIRCLETTT" => Command::Activate(Tool::CircleTtt { picks: vec![] }),
-        "TANGENT" | "TAN" => Command::Activate(Tool::TangentLine { first: None }),
+        // The line tool now infers tangency from what the second pick lands
+        // on (see `Tool::Line`), so this is the same tool as LINE — kept as
+        // an alias for anyone who still types it out of habit.
+        "TANGENT" | "TAN" => Command::Activate(Tool::Line { first: None }),
         "DIMENSION" | "DIM" | "DIMLINEAR" | "DIMALIGNED" | "DIMHORIZONTAL" | "DIMHOR"
         | "DIMVERTICAL" | "DIMVER" => Command::Activate(Tool::Dimension { p1: None, p2: None }),
         "DIMANGULAR" | "DIMANG" | "DIMANGLE" | "DIMANGLINES" | "DIMANG2" | "DIMANGL" => {
@@ -566,11 +569,8 @@ mod tests {
             Command::Constrain(ConstraintKind::Tangent)
         ));
         assert!(
-            matches!(
-                parse_command("TAN"),
-                Command::Activate(Tool::TangentLine { .. })
-            ),
-            "TAN stays the tangent-line drawing tool"
+            matches!(parse_command("TAN"), Command::Activate(Tool::Line { .. })),
+            "TAN activates the line tool, which infers tangency from the pick"
         );
         assert!(matches!(parse_command("UNCON"), Command::Unconstrain));
         assert!(matches!(parse_command("ALL"), Command::SelectAll));

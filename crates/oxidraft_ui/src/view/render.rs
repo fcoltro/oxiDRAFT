@@ -17,13 +17,10 @@ pub(super) const HATCH_SELECT: Color32 = Color32::from_rgb(64, 120, 255);
 
 pub(super) fn tool_prompt(tool: &Tool) -> String {
     match tool {
-        Tool::Line { last } => {
-            if last.is_none() {
-                "Specify start point".into()
-            } else {
-                "Specify next point or length".into()
-            }
-        }
+        Tool::Line { first } => match first {
+            None => "Specify start point, or pick a circle/arc to start tangent to".into(),
+            Some(_) => "Specify next point or length, or pick a circle/arc for a tangent".into(),
+        },
         Tool::Circle { parts, .. } => {
             let left = crate::tools::CIRCLE_DOF.saturating_sub(crate::tools::used_dof(parts));
             match (parts.is_empty(), left) {
@@ -84,10 +81,6 @@ pub(super) fn tool_prompt(tool: &Tool) -> String {
             0 => "Pick the first object to touch".into(),
             1 => "Pick the second object to touch".into(),
             _ => "Pick the third object to touch".into(),
-        },
-        Tool::TangentLine { first } => match first {
-            None => "Pick a start point or a circle/arc".into(),
-            Some(_) => "Pick the circle/arc to be tangent to (or an end point)".into(),
         },
         Tool::Dimension { p1, p2 } => match (p1, p2) {
             (None, _) => "Specify first dimension point".into(),

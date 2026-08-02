@@ -1055,7 +1055,9 @@ impl AppState {
                     )));
                 }
                 if attached_end == 0
-                    && let Tool::Line { last: Some(lp) } = &mut self.tool
+                    && let Tool::Line {
+                        first: Some(crate::tools::TanAnchor::Point(lp)),
+                    } = &mut self.tool
                 {
                     *lp = Point2d::from_f64(new_far.0, new_far.1);
                 }
@@ -1189,7 +1191,10 @@ impl AppState {
                     Point2d::from_f64(new_p1.0, new_p1.1),
                 )));
             }
-            if let Tool::Line { last: Some(lp) } = &mut self.tool {
+            if let Tool::Line {
+                first: Some(crate::tools::TanAnchor::Point(lp)),
+            } = &mut self.tool
+            {
                 *lp = Point2d::from_f64(new_p1.0, new_p1.1);
             }
         }
@@ -1926,7 +1931,9 @@ impl AppState {
         // Only the Line and Polyline tools infer as they go, and only once
         // a first point has been placed.
         let last = match &self.tool {
-            Tool::Line { last: Some(p) } => *p,
+            Tool::Line {
+                first: Some(crate::tools::TanAnchor::Point(p)),
+            } => *p,
             Tool::Polyline { pts } => *pts.last()?,
             _ => return None,
         };
@@ -4192,7 +4199,9 @@ mod tests {
             "horizontal constraint recorded"
         );
         match &a.tool {
-            Tool::Line { last: Some(p) } => {
+            Tool::Line {
+                first: Some(crate::tools::TanAnchor::Point(p)),
+            } => {
                 assert!((p.to_f64().1 - l.p1.y).abs() < 1e-12, "chain follows level")
             }
             other => panic!("line tool still active, got {other:?}"),
@@ -4336,7 +4345,9 @@ mod tests {
             "weld to the arc endpoint recorded"
         );
         match &a.tool {
-            Tool::Line { last: Some(p) } => {
+            Tool::Line {
+                first: Some(crate::tools::TanAnchor::Point(p)),
+            } => {
                 assert!(
                     (p.x - l.p1.x).abs() < 1e-12 && (p.y - l.p1.y).abs() < 1e-12,
                     "chain follows the rotated end"

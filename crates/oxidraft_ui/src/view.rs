@@ -2016,7 +2016,13 @@ fn canvas(root_ui: &mut egui::Ui, app: &mut AppState, ui_state: &mut UiState, pa
             let dims_text = if has_dims {
                 let cursor = Point2d::from_f64(app.cursor_world.0, app.cursor_world.1);
                 match &app.tool {
-                    Tool::Line { last: Some(p0) } if !app.prefs.dyn_on => {
+                    Tool::Line {
+                        first: Some(anchor),
+                    } if !app.prefs.dyn_on => {
+                        let p0 = match anchor {
+                            crate::tools::TanAnchor::Point(p) => *p,
+                            crate::tools::TanAnchor::Circle(_, click, ..) => *click,
+                        };
                         let d = p0.dist_f64(&cursor);
                         let (x0, y0) = p0.to_f64();
                         let (x1, y1) = cursor.to_f64();

@@ -1305,10 +1305,14 @@ pub(super) fn dyn_line_hud(
     ui_state: &mut UiState,
     origin: egui::Pos2,
 ) {
-    let line_ref = if let Tool::Line { last: Some(p0) } = &app.tool {
-        Some(p0.to_f64())
-    } else {
-        None
+    let line_ref = match &app.tool {
+        Tool::Line {
+            first: Some(crate::tools::TanAnchor::Point(p0)),
+        } => Some(p0.to_f64()),
+        Tool::Line {
+            first: Some(crate::tools::TanAnchor::Circle(_, click, ..)),
+        } => Some(click.to_f64()),
+        _ => None,
     };
     if let (true, Some((rx, ry))) = (app.prefs.dyn_on, line_ref) {
         let (cx, cy) = app.cursor_world;

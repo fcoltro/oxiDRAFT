@@ -430,10 +430,6 @@ impl AppState {
                 }
                 true
             }
-            Tool::TangentLine { first } => {
-                self.handle_tangent_line_click(first, p);
-                true
-            }
             Tool::Stretch { c1, c2, base, ids } => {
                 match (c1, c2, base) {
                     (None, _, _) => {
@@ -608,89 +604,6 @@ impl AppState {
         ));
         self.apply_new_entity_defaults(id);
         Some(id)
-    }
-
-    fn create_line(&mut self, a: Point2d, b: Point2d) {
-        if a.dist_f64(&b) < 1e-9 {
-            return;
-        }
-        self.apply_tool_event(crate::tools::ToolEvent::Create(vec![
-            oxidraft_document::EntityKind::Curve(oxidraft_geometry::Curve::Line(
-                oxidraft_geometry::LineSeg::from_endpoints(a, b),
-            )),
-        ]));
-    }
-
-    fn circle_of(&self, id: EntityId) -> Option<(Point2d, f64)> {
-        match self.document.get(id).and_then(|e| e.as_curve()) {
-            Some(oxidraft_geometry::Curve::Arc(a)) => Some((a.center, a.radius)),
-            _ => None,
-        }
-    }
-
-    fn handle_tangent_line_click(&mut self, first: Option<crate::tools::TanAnchor>, p: &Point2d) {
-        use crate::tools::{TanAnchor, Tool};
-        let tol = self.view.pixel_world_size() * 6.0;
-        let picked = pick_at(&self.document, p.x, p.y, tol).filter(|&id| id != self.origin_id);
-        let picked_circle = picked.and_then(|id| self.circle_of(id).map(|c| (id, c)));
-
-        let nearest = |pts: &[Point2d], target: Point2d| -> Option<Point2d> {
-            pts.iter().copied().min_by(|a, b| {
-                a.dist_sq(&target)
-                    .partial_cmp(&b.dist_sq(&target))
-                    .unwrap_or(std::cmp::Ordering::Equal)
-            })
-        };
-
-        match first {
-            None => {
-                let anchor = match picked_circle {
-                    Some((id, _)) => TanAnchor::Circle(id, *p),
-                    None => TanAnchor::Point(*p),
-                };
-                self.tool = Tool::TangentLine {
-                    first: Some(anchor),
-                };
-            }
-            Some(TanAnchor::Point(pt)) => {
-                if let Some((_, (o, r))) = picked_circle {
-                    let touches = oxidraft_geometry::tangent_points_from_point(o, r, pt);
-                    if let Some(t) = nearest(&touches, *p) {
-                        self.create_line(pt, t);
-                    }
-                    self.tool = Tool::TangentLine { first: None };
-                }
-            }
-            Some(TanAnchor::Circle(aid, aclick)) => {
-                let Some((o1, r1)) = self.circle_of(aid) else {
-                    self.tool = Tool::TangentLine { first: None };
-                    return;
-                };
-                match picked_circle {
-                    Some((bid, (o2, r2))) if bid != aid => {
-                        let segs = oxidraft_geometry::common_tangent_segments(o1, r1, o2, r2);
-                        let best = segs.into_iter().min_by(|x, y| {
-                            let cost =
-                                |s: &(Point2d, Point2d)| s.0.dist_sq(&aclick) + s.1.dist_sq(p);
-                            cost(x)
-                                .partial_cmp(&cost(y))
-                                .unwrap_or(std::cmp::Ordering::Equal)
-                        });
-                        if let Some((t1, t2)) = best {
-                            self.create_line(t1, t2);
-                        }
-                        self.tool = Tool::TangentLine { first: None };
-                    }
-                    _ => {
-                        let touches = oxidraft_geometry::tangent_points_from_point(o1, r1, *p);
-                        if let Some(t) = nearest(&touches, aclick) {
-                            self.create_line(*p, t);
-                        }
-                        self.tool = Tool::TangentLine { first: None };
-                    }
-                }
-            }
-        }
     }
 
     /// The live preview for the Trim/Extend tool's entity under the cursor:

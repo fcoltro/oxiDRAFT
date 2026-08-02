@@ -652,8 +652,10 @@ fn menu_items(ui: &mut egui::Ui, app: &mut AppState) {
     ui.menu_button("Draw", |ui| {
         tool_menu_item(ui, app, "Select", Tool::Select);
         ui.separator();
-        tool_menu_item(ui, app, "Line", Tool::Line { last: None });
-        tool_menu_item(ui, app, "Tangent Line", Tool::TangentLine { first: None });
+        // One Line entry, not a separate "Tangent Line" — the tool now
+        // infers tangency from what the second pick lands on, the same
+        // collapse `Tool::circle()` already went through below.
+        tool_menu_item(ui, app, "Line", Tool::Line { first: None });
         tool_menu_item(ui, app, "Circle", Tool::circle());
         ui.menu_button("Circle", |ui| {
             tool_menu_item(ui, app, "Center, Radius", Tool::circle());
@@ -1697,7 +1699,6 @@ fn tool_hotkey(tool: &Tool) -> &'static str {
         | Tool::CircleThreePoint { .. }
         | Tool::CircleTtr { .. }
         | Tool::CircleTtt { .. }
-        | Tool::TangentLine { .. }
         | Tool::Dimension { .. }
         | Tool::DimAngularLines { .. }
         | Tool::DimRadial { .. }
@@ -1741,7 +1742,7 @@ pub(super) fn draw_entries() -> Vec<(crate::icons::Icon, &'static str, Act)> {
         (
             Icon::Line,
             "Line  (L)",
-            Act::Tool(Tool::Line { last: None }),
+            Act::Tool(Tool::Line { first: None }),
         ),
         (
             Icon::Polyline,
@@ -1932,14 +1933,14 @@ pub(super) fn act_needs_selection(act: &Act) -> bool {
 
 pub(super) fn group_id(act: &Act) -> Option<u8> {
     match act {
-        Act::Tool(Tool::Line { .. }) => Some(0),
-        // No entry for Circle. It had a group — five constructions to
-        // pre-select from — until Circle became one tool that reads the
-        // construction off the picks themselves (see `Contribution` in
-        // tools.rs). Forcing that choice in the radial menu's own gesture
-        // would have been the exact thing the redesign removed, reintroduced
-        // one menu away from where it was taken out. Clicking the wedge now
-        // does what clicking any other leaf wedge does: activate the tool.
+        // No entry for Line or Circle. Both had groups — Line's two
+        // constructions, Circle's five — to pre-select from, until each
+        // became one tool that reads the construction off the picks
+        // themselves (see `read_line_anchor`/`Contribution` in tools.rs).
+        // Forcing that choice in the radial menu's own gesture would have
+        // been the exact thing the redesign removed, reintroduced one menu
+        // away from where it was taken out. Clicking the wedge now does what
+        // clicking any other leaf wedge does: activate the tool.
         Act::Tool(Tool::Arc3 { .. }) => Some(2),
         Act::Tool(Tool::Dimension { .. }) => Some(3),
         _ => None,
@@ -1949,20 +1950,10 @@ pub(super) fn group_id(act: &Act) -> Option<u8> {
 pub(super) fn group_entries(id: u8) -> Vec<(crate::icons::Icon, &'static str, Act)> {
     use crate::icons::Icon;
     match id {
-        0 => {
-            vec![
-                (Icon::Line, "Line", Act::Tool(Tool::Line { last: None })),
-                (
-                    Icon::Line,
-                    "Tangent line",
-                    Act::Tool(Tool::TangentLine { first: None }),
-                ),
-            ]
-        }
-        // id 1 was the Circle group; retired along with its entry in
-        // `group_id` above. Not reused, so a stray call with id 1 falls
-        // through to the `_` arm below rather than silently meaning
-        // something else.
+        // id 0 was the Line group and id 1 was the Circle group; both
+        // retired along with their entries in `group_id` above. Neither is
+        // reused, so a stray call with either id falls through to the `_`
+        // arm below rather than silently meaning something else.
         2 => {
             vec![
                 (Icon::Arc, "3 points", Act::Tool(Tool::Arc3 { pts: vec![] })),
@@ -4566,6 +4557,34 @@ mod radial_group_tests {
     }
 
     #[test]
+    fn line_has_no_radial_group() {
+        // Line used to expand into "Line" and "Tangent line" to pre-select
+        // from — gone the same way Circle's five did, since the tool now
+        // reads tangency off what the second pick lands on
+        // (`read_line_anchor` in tools.rs).
+        let line_act = Act::Tool(Tool::Line { first: None });
+        assert_eq!(
+            group_id(&line_act),
+            None,
+            "Line must not have a radial sub-menu"
+        );
+    }
+
+    #[test]
+    fn the_draw_ring_still_offers_one_line_entry() {
+        let entries = draw_entries();
+        let line_entries: Vec<_> = entries
+            .iter()
+            .filter(|(_, _, act)| matches!(act, Act::Tool(Tool::Line { .. })))
+            .collect();
+        assert_eq!(
+            line_entries.len(),
+            1,
+            "expected exactly one Line wedge in the draw ring, got {line_entries:?}"
+        );
+    }
+
+    #[test]
     fn every_group_id_the_ring_can_produce_has_entries() {
         // A wedge whose `group_id` returns `Some(n)` but whose `group_entries(n)`
         // comes back empty would open an empty sub-ring on hover — this is the
@@ -4591,6 +4610,19 @@ mod radial_group_tests {
                 group_id(act),
                 Some(1),
                 "id 1 was retired with the Circle group; {act:?} should not reuse it"
+            );
+        }
+    }
+
+    #[test]
+    fn no_tool_variant_still_carries_the_retired_line_group_id() {
+        // id 0 was Line's group before this test suite existed to say
+        // otherwise.
+        for (_, _, act) in draw_entries().iter().chain(modify_entries().iter()) {
+            assert_ne!(
+                group_id(act),
+                Some(0),
+                "id 0 was retired with the Line group; {act:?} should not reuse it"
             );
         }
     }

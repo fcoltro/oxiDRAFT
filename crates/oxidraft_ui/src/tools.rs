@@ -6,7 +6,7 @@
 use oxidraft_document::{ConstraintKind, EntityId, EntityKind};
 use oxidraft_geometry::{
     CircularArc, Continuity, Curve, EllipticalArc, LineSeg, NurbsCurve, Point2d, Transform2d,
-    cv_spline_segments,
+    common_tangent_segments, cv_spline_segments, tangent_points_from_point,
 };
 /// What a pick step of a `ConPick` tool expects: a point anchor (endpoint,
 /// midpoint, center, or point entity) or a whole curve entity of a kind.
@@ -70,8 +70,13 @@ pub fn point_on_kind(target: &Curve, click: Point2d, tol: f64) -> Option<Constra
 pub enum Tool {
     Select,
     Point,
+    /// One line tool for a plain segment or a tangent to a circle/arc: the
+    /// first pick anchors as a point or, if it lands on a circle, as that
+    /// circle; the second pick decides whether the result is a straight
+    /// segment or a tangent line, the same way `SnapKind::Tangent` decides a
+    /// pick's meaning for [`Tool::Circle`]. See [`read_line_anchor`].
     Line {
-        last: Option<Point2d>,
+        first: Option<TanAnchor>,
     },
     /// One circle tool for every construction: picks accumulate as
     /// [`Contribution`]s until the three degrees of freedom are gone, then it
@@ -106,9 +111,6 @@ pub enum Tool {
     },
     CircleTtt {
         picks: Vec<EntityId>,
-    },
-    TangentLine {
-        first: Option<TanAnchor>,
     },
     Dimension {
         p1: Option<Point2d>,
@@ -233,12 +235,18 @@ pub enum Tool {
     Hatch,
 }
 
-/// What the tangent-line tool's first pick anchored to: a bare point, or a
-/// circle/arc (whose tangent point is solved for at commit time).
+/// What one end of a line anchored to: a bare point, or a circle/arc whose
+/// tangent point is solved for at commit time.
+///
+/// `Circle` carries the centre and radius alongside the entity id and the
+/// click position, not just the id — `preview`/`on_pick` have no document to
+/// look them up from later, the same reason [`Contribution::TangentTo`]
+/// carries a boxed curve instead of just an id.
 #[derive(Clone, Debug)]
 pub enum TanAnchor {
     Point(Point2d),
-    Circle(EntityId, Point2d),
+    /// Entity id, where it was clicked, its centre, its radius.
+    Circle(EntityId, Point2d, Point2d, f64),
 }
 
 /// What a completed tool interaction asks the app to do to the document.
@@ -617,6 +625,87 @@ pub fn solve_circle(parts: &[Contribution], near: Point2d) -> Option<CircularArc
     None
 }
 
+/// Reads a line pick the same way [`pick_readings`] reads a circle pick:
+/// the snap kind decides what it means. `Tangent`/`Nearest`/`Perpendicular`
+/// on a circle/arc is aiming at the body of it, so the pick anchors as that
+/// circle; anything else — an exact point such as a quadrant or centre, or
+/// no snap at all — anchors as that point. A line tool has no separate
+/// "concentric" or "through point" reading, so unlike a circle pick this
+/// never offers alternatives for Tab to cycle.
+fn read_line_anchor(pick: &Pick) -> TanAnchor {
+    use oxidraft_cad::SnapKind as K;
+    if let Some(sp) = &pick.snap
+        && matches!(sp.kind, K::Tangent | K::Nearest | K::Perpendicular)
+        && let Some(Curve::Arc(a)) = &pick.curve
+    {
+        return TanAnchor::Circle(sp.entity, pick.pos, a.center, a.radius);
+    }
+    TanAnchor::Point(pick.pos)
+}
+
+/// The touch point among `touches` closest to `near`, same tie-break every
+/// tangent construction in this file uses: the pick nearest to where the
+/// user was actually aiming.
+fn nearest_touch(touches: &[Point2d], near: Point2d) -> Option<Point2d> {
+    touches.iter().copied().min_by(|a, b| {
+        a.dist_sq(&near)
+            .partial_cmp(&b.dist_sq(&near))
+            .unwrap_or(std::cmp::Ordering::Equal)
+    })
+}
+
+/// Banks one pick against the line being built, committing on the second.
+/// Takes the field rather than the `Tool` so both `on_point` (a bare pick)
+/// and `on_pick` (snap-aware) share one implementation, the same split as
+/// [`circle_pick`].
+fn line_pick(first: &mut Option<TanAnchor>, pick: Pick) -> ToolEvent {
+    let anchor = read_line_anchor(&pick);
+    let Some(prev) = first.take() else {
+        *first = Some(anchor);
+        return ToolEvent::Pending;
+    };
+    let seg = match (&prev, &anchor) {
+        (TanAnchor::Point(a), TanAnchor::Point(b)) => Some((*a, *b)),
+        (TanAnchor::Point(pt), TanAnchor::Circle(_, _, c, r)) => {
+            nearest_touch(&tangent_points_from_point(*c, *r, *pt), pick.pos).map(|t| (*pt, t))
+        }
+        (TanAnchor::Circle(_, aclick, c, r), TanAnchor::Point(_)) => {
+            nearest_touch(&tangent_points_from_point(*c, *r, pick.pos), *aclick)
+                .map(|t| (pick.pos, t))
+        }
+        (TanAnchor::Circle(aid, aclick, c1, r1), TanAnchor::Circle(bid, bclick, c2, r2)) => {
+            if aid == bid {
+                // The same circle picked twice — not a common tangent, just
+                // a tangent line from this new click's position.
+                nearest_touch(&tangent_points_from_point(*c1, *r1, *bclick), *aclick)
+                    .map(|t| (*bclick, t))
+            } else {
+                let segs = common_tangent_segments(*c1, *r1, *c2, *r2);
+                segs.into_iter().min_by(|x, y| {
+                    let cost = |s: &(Point2d, Point2d)| s.0.dist_sq(aclick) + s.1.dist_sq(bclick);
+                    cost(x)
+                        .partial_cmp(&cost(y))
+                        .unwrap_or(std::cmp::Ordering::Equal)
+                })
+            }
+        }
+    };
+    match seg {
+        Some((a, b)) if a.dist_f64(&b) > 1e-9 => {
+            // Chains immediately, the same continuity a plain line already
+            // had: the segment just placed hands its live end to the next
+            // one as a plain point, whether or not it got there via a
+            // tangent solve — `Tool::is_continuous` depends on `first`
+            // staying armed here.
+            *first = Some(TanAnchor::Point(b));
+            ToolEvent::Create(vec![EntityKind::Curve(Curve::Line(
+                LineSeg::from_endpoints(a, b),
+            ))])
+        }
+        _ => ToolEvent::Pending,
+    }
+}
+
 impl Tool {
     /// A fresh circle tool with nothing banked.
     pub fn circle() -> Tool {
@@ -641,7 +730,6 @@ impl Tool {
             Tool::CircleThreePoint { .. } => "CIRCLE 3P",
             Tool::CircleTtr { .. } => "CIRCLE TTR",
             Tool::CircleTtt { .. } => "CIRCLE TTT",
-            Tool::TangentLine { .. } => "TANGENT",
             Tool::Dimension { .. } => "DIMENSION",
             Tool::DimAngularLines { .. } => "DIM ANGULAR (2 lines)",
             Tool::DimRadial { diameter: true, .. } => "DIM DIAMETER",
@@ -691,7 +779,6 @@ impl Tool {
                 | Tool::Blend { .. }
                 | Tool::CircleTtr { .. }
                 | Tool::CircleTtt { .. }
-                | Tool::TangentLine { .. }
                 | Tool::DimRadial { center: None, .. }
                 | Tool::DimAngularLines { geom: None, .. }
                 | Tool::DimConstraint { .. }
@@ -734,6 +821,9 @@ impl Tool {
     pub fn on_pick(&mut self, pick: Pick) -> ToolEvent {
         if let Tool::Circle { parts, choice } = self {
             return circle_pick(parts, choice, pick);
+        }
+        if let Tool::Line { first } = self {
+            return line_pick(first, pick);
         }
         self.on_point(pick.pos)
     }
@@ -820,19 +910,11 @@ impl Tool {
 
             Tool::Point => ToolEvent::Create(vec![EntityKind::Point(p)]),
 
-            Tool::Line { last } => {
-                let ev = match last.take() {
-                    Some(prev) => ToolEvent::Create(vec![EntityKind::Curve(Curve::Line(
-                        LineSeg::from_endpoints(prev, p),
-                    ))]),
-                    None => ToolEvent::Pending,
-                };
-                *last = Some(p);
-                ev
-            }
-
             // A bare coordinate carries no snap, so it can only ever read as a
-            // freely chosen point. `on_pick` is the path that sees more.
+            // freely chosen point — never a tangent anchor. `on_pick` is the
+            // path that sees more.
+            Tool::Line { first } => line_pick(first, Pick::bare(p)),
+
             Tool::Circle { parts, choice } => circle_pick(parts, choice, Pick::bare(p)),
 
             Tool::Arc3 { pts } => {
@@ -1208,8 +1290,7 @@ impl Tool {
             | Tool::CircleTtt { .. }
             | Tool::DimConstraint { .. }
             | Tool::Weld { .. }
-            | Tool::ConPick { .. }
-            | Tool::TangentLine { .. } => ToolEvent::Pending,
+            | Tool::ConPick { .. } => ToolEvent::Pending,
         }
     }
 
@@ -1217,7 +1298,7 @@ impl Tool {
     /// initial state without changing which tool is active.
     pub fn reset(&mut self) {
         match self {
-            Tool::Line { last } => *last = None,
+            Tool::Line { first } => *first = None,
             Tool::Circle { parts, choice } => {
                 parts.clear();
                 *choice = 0;
@@ -1235,7 +1316,6 @@ impl Tool {
             Tool::CircleThreePoint { pts } => pts.clear(),
             Tool::CircleTtr { first, .. } => *first = None,
             Tool::CircleTtt { picks } => picks.clear(),
-            Tool::TangentLine { first } => *first = None,
             Tool::Dimension { p1, p2 } => {
                 *p1 = None;
                 *p2 = None;
@@ -1299,7 +1379,7 @@ impl Tool {
     /// should reset it rather than deactivate it).
     pub fn has_pending_input(&self) -> bool {
         match self {
-            Tool::Line { last } => last.is_some(),
+            Tool::Line { first } => first.is_some(),
             Tool::Circle { parts, .. } => !parts.is_empty(),
             Tool::Arc3 { pts } => !pts.is_empty(),
             Tool::ArcStartCenterEnd { start, .. } => start.is_some(),
@@ -1308,7 +1388,6 @@ impl Tool {
             Tool::CircleThreePoint { pts } => !pts.is_empty(),
             Tool::CircleTtr { first, .. } => first.is_some(),
             Tool::CircleTtt { picks } => !picks.is_empty(),
-            Tool::TangentLine { first } => first.is_some(),
             Tool::Dimension { p1, .. } => p1.is_some(),
             Tool::DimAngularLines { a, geom } => a.is_some() || geom.is_some(),
             Tool::DimRadial { center, .. } => center.is_some(),
@@ -1338,7 +1417,19 @@ impl Tool {
     /// rubber-banding to `cursor`.
     pub fn preview(&self, cursor: &Point2d) -> Vec<Curve> {
         match self {
-            Tool::Line { last: Some(p) } => vec![Curve::Line(LineSeg::from_endpoints(*p, *cursor))],
+            Tool::Line {
+                first: Some(TanAnchor::Point(p)),
+            } => vec![Curve::Line(LineSeg::from_endpoints(*p, *cursor))],
+            // Same simplification `Tool::Circle`'s preview makes: treat the
+            // live cursor as a plain point rather than re-resolving its snap,
+            // so the rubber band tracks *a* tangent even where the exact
+            // touch point the final pick would read differs at the pixel level.
+            Tool::Line {
+                first: Some(TanAnchor::Circle(_, aclick, c, r)),
+            } => match nearest_touch(&tangent_points_from_point(*c, *r, *cursor), *aclick) {
+                Some(t) => vec![Curve::Line(LineSeg::from_endpoints(*cursor, t))],
+                None => vec![],
+            },
             // Preview the circle that would commit if the cursor were the
             // next pick, whatever combination has been banked so far.
             Tool::Circle { parts, .. } if !parts.is_empty() => {
@@ -1475,7 +1566,11 @@ impl Tool {
     /// for relative/polar coordinate entry (`@dx,dy`) at the command line.
     pub fn reference_point(&self) -> Option<Point2d> {
         match self {
-            Tool::Line { last } => *last,
+            Tool::Line { first } => match first {
+                Some(TanAnchor::Point(p)) => Some(*p),
+                Some(TanAnchor::Circle(_, click, ..)) => Some(*click),
+                None => None,
+            },
             Tool::Circle { parts, .. } => parts
                 .iter()
                 .find_map(Contribution::center)
@@ -1509,10 +1604,6 @@ impl Tool {
             | Tool::DimConstraint { .. } => None,
             Tool::Weld { first } => first.map(|(_, _, p)| p),
             Tool::ConPick { picks, .. } => picks.last().map(|(_, _, p)| *p),
-            Tool::TangentLine { first } => match first {
-                Some(TanAnchor::Point(p)) => Some(*p),
-                _ => None,
-            },
             Tool::Dimension { p1, p2 } => (*p2).or(*p1),
             Tool::DimAngularLines { geom, .. } => geom.map(|(v, _, _)| v),
             Tool::DimRadial { center, .. } => *center,
@@ -1526,7 +1617,12 @@ impl Tool {
         match self {
             Tool::Polyline { pts } | Tool::Spline { pts } => pts.clone(),
             Tool::Arc3 { pts } | Tool::CircleThreePoint { pts } => pts.clone(),
-            Tool::Line { last: Some(p) } => vec![*p],
+            Tool::Line {
+                first: Some(TanAnchor::Point(p)),
+            } => vec![*p],
+            Tool::Line {
+                first: Some(TanAnchor::Circle(_, click, ..)),
+            } => vec![*click],
             Tool::Rectangle { first: Some(p) } | Tool::PlotWindow { first: Some(p) } => vec![*p],
             Tool::Polygon {
                 center: Some(c), ..
@@ -1717,7 +1813,7 @@ mod tests {
 
     #[test]
     fn line_tool_chains_segments() {
-        let mut t = Tool::Line { last: None };
+        let mut t = Tool::Line { first: None };
         assert!(matches!(t.on_point(pt(0, 0)), ToolEvent::Pending));
         match t.on_point(pt(5, 0)) {
             ToolEvent::Create(es) => assert_eq!(es.len(), 1),
@@ -1725,6 +1821,129 @@ mod tests {
         }
         assert!(matches!(t.on_point(pt(5, 5)), ToolEvent::Create(_)));
         assert!(t.is_continuous());
+    }
+
+    #[test]
+    fn line_tool_reads_a_tangent_pick_on_a_circle() {
+        let mut t = Tool::Line { first: None };
+        assert!(matches!(t.on_point(pt(-20, 0)), ToolEvent::Pending));
+        let circle = Curve::Arc(CircularArc::new(pt(0, 0), 5.0, 0.0, std::f64::consts::TAU));
+        let pick = snapped_on(oxidraft_cad::SnapKind::Tangent, 9, pt(5, 5), circle);
+        match t.on_pick(pick) {
+            ToolEvent::Create(es) => match &es[0] {
+                EntityKind::Curve(Curve::Line(l)) => {
+                    let d = l.p1.dist_f64(&pt(0, 0));
+                    assert!(
+                        (d - 5.0).abs() < 1e-6,
+                        "endpoint should sit on the circle, got dist {d}"
+                    );
+                }
+                o => panic!("expected a line, got {o:?}"),
+            },
+            o => panic!("expected a commit, got {o:?}"),
+        }
+    }
+
+    #[test]
+    fn line_tool_treats_a_quadrant_snap_as_a_plain_point_not_a_tangent() {
+        // Unlike the old whole-entity `pick_at` that treated any click on a
+        // circle as "build a tangent," reading the snap kind lets an exact
+        // point on the circle (its quadrant, its centre, ...) be used as a
+        // plain endpoint instead — the same choice `Tool::Circle` already
+        // makes between a rim pick and a tangent pick.
+        let mut t = Tool::Line { first: None };
+        assert!(matches!(t.on_point(pt(-20, 0)), ToolEvent::Pending));
+        let circle = Curve::Arc(CircularArc::new(pt(0, 0), 5.0, 0.0, std::f64::consts::TAU));
+        let pick = snapped_on(oxidraft_cad::SnapKind::Quadrant, 9, pt(5, 0), circle);
+        match t.on_pick(pick) {
+            ToolEvent::Create(es) => match &es[0] {
+                EntityKind::Curve(Curve::Line(l)) => {
+                    assert!(
+                        l.p1.dist_f64(&pt(5, 0)) < 1e-9,
+                        "should land exactly on the quadrant point, got {:?}",
+                        l.p1
+                    );
+                }
+                o => panic!("expected a line, got {o:?}"),
+            },
+            o => panic!("expected a commit, got {o:?}"),
+        }
+    }
+
+    #[test]
+    fn line_tool_builds_a_common_tangent_between_two_circles() {
+        // The click positions are deliberately off the circles (distance 8
+        // from centres of radius 5) rather than sitting exactly on them —
+        // otherwise a plain straight line between the two raw clicks would
+        // land on the assertion by coincidence, without any tangent solving
+        // having actually happened.
+        let mut t = Tool::Line { first: None };
+        let c1 = Curve::Arc(CircularArc::new(
+            pt(-20, 0),
+            5.0,
+            0.0,
+            std::f64::consts::TAU,
+        ));
+        let c2 = Curve::Arc(CircularArc::new(pt(20, 0), 5.0, 0.0, std::f64::consts::TAU));
+        assert!(matches!(
+            t.on_pick(snapped_on(
+                oxidraft_cad::SnapKind::Tangent,
+                1,
+                pt(-20, 8),
+                c1
+            )),
+            ToolEvent::Pending
+        ));
+        match t.on_pick(snapped_on(
+            oxidraft_cad::SnapKind::Tangent,
+            2,
+            pt(20, 8),
+            c2,
+        )) {
+            ToolEvent::Create(es) => match &es[0] {
+                EntityKind::Curve(Curve::Line(l)) => {
+                    let d0 = (l.p0.dist_f64(&pt(-20, 0)) - 5.0).abs();
+                    let d1 = (l.p1.dist_f64(&pt(20, 0)) - 5.0).abs();
+                    assert!(
+                        d0 < 1e-6 && d1 < 1e-6,
+                        "both ends should sit on their circle: {l:?}"
+                    );
+                }
+                o => panic!("expected a line, got {o:?}"),
+            },
+            o => panic!("expected a commit, got {o:?}"),
+        }
+    }
+
+    #[test]
+    fn line_tool_chains_a_plain_segment_after_a_tangent_one() {
+        let mut t = Tool::Line { first: None };
+        assert!(matches!(t.on_point(pt(-20, 0)), ToolEvent::Pending));
+        let circle = Curve::Arc(CircularArc::new(pt(0, 0), 5.0, 0.0, std::f64::consts::TAU));
+        let touch = match t.on_pick(snapped_on(
+            oxidraft_cad::SnapKind::Tangent,
+            9,
+            pt(5, 5),
+            circle,
+        )) {
+            ToolEvent::Create(es) => match &es[0] {
+                EntityKind::Curve(Curve::Line(l)) => l.p1,
+                o => panic!("expected a line, got {o:?}"),
+            },
+            o => panic!("expected a commit, got {o:?}"),
+        };
+        match t.on_point(pt(30, 30)) {
+            ToolEvent::Create(es) => match &es[0] {
+                EntityKind::Curve(Curve::Line(l)) => {
+                    assert!(
+                        l.p0.dist_f64(&touch) < 1e-9,
+                        "chained segment should start at the tangent touch point"
+                    );
+                }
+                o => panic!("expected a line, got {o:?}"),
+            },
+            o => panic!("expected a commit, got {o:?}"),
+        }
     }
 
     #[test]
@@ -2333,7 +2552,7 @@ mod tests {
 
     #[test]
     fn reset_clears_partial() {
-        let mut t = Tool::Line { last: None };
+        let mut t = Tool::Line { first: None };
         t.on_point(pt(0, 0));
         assert!(t.has_pending_input());
         t.reset();
