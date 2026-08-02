@@ -112,15 +112,10 @@ pub fn parse_command(input: &str) -> Command {
     match verb.as_str() {
         "LINE" | "L" => Command::Activate(Tool::Line { first: None }),
         "CIRCLE" | "C" => Command::Activate(Tool::circle()),
-        "ARC" | "A" => Command::Activate(Tool::Arc3 { pts: vec![] }),
-        "ARCSCE" | "ASCE" => Command::Activate(Tool::ArcStartCenterEnd {
-            start: None,
-            center: None,
-        }),
-        "ARCCSE" | "ACSE" => Command::Activate(Tool::ArcCenterStartEnd {
-            center: None,
-            start: None,
-        }),
+        // The arc tool now infers centre-vs-rim from each pick's role, not
+        // from which command started it (see `Tool::Arc`), so ARCSCE/ARCCSE
+        // are aliases for the same tool ARC activates.
+        "ARC" | "A" | "ARCSCE" | "ASCE" | "ARCCSE" | "ACSE" => Command::Activate(Tool::arc()),
         "CIRCLE2P" | "C2P" => Command::Activate(Tool::CircleTwoPoint { first: None }),
         "CIRCLE3P" | "C3P" => Command::Activate(Tool::CircleThreePoint { pts: vec![] }),
         "TTR" | "CIRCLETTR" => {

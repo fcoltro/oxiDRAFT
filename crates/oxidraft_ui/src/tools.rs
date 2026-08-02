@@ -88,16 +88,17 @@ pub enum Tool {
         /// [`pick_readings`]. Tab advances it; it resets on every commit.
         choice: usize,
     },
-    Arc3 {
-        pts: Vec<Point2d>,
-    },
-    ArcStartCenterEnd {
-        start: Option<Point2d>,
-        center: Option<Point2d>,
-    },
-    ArcCenterStartEnd {
-        center: Option<Point2d>,
-        start: Option<Point2d>,
+    /// One arc tool for every construction: picks accumulate as
+    /// [`ArcPart`]s, each tagged by role rather than by which slot it fills,
+    /// until three are banked. Three rim picks is the old `Arc3`; one centre
+    /// and two rim picks is `ArcStartCenterEnd`/`ArcCenterStartEnd` at
+    /// once — those two only ever differed in *when* the centre was picked,
+    /// and [`solve_arc`] does not care. See [`arc_pick_readings`].
+    Arc {
+        parts: Vec<ArcPart>,
+        /// Same meaning as [`Tool::Circle`]'s `choice`: which reading of the
+        /// *next* pick is active. Tab advances it; it resets on every commit.
+        choice: usize,
     },
     CircleTwoPoint {
         first: Option<Point2d>,
@@ -706,10 +707,161 @@ fn line_pick(first: &mut Option<TanAnchor>, pick: Pick) -> ToolEvent {
     }
 }
 
+/// One pick's role in the arc being built: a point the rim passes through,
+/// or the centre. Unlike a circle an arc has no tangent or typed-radius
+/// contribution — every pick removes exactly one of the three degrees of
+/// freedom, so there is nothing to weigh besides which role it plays.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum ArcPart {
+    OnArc(Point2d),
+    CenterAt(Point2d),
+    /// Centre shared with another entity's centre, read off a `Center` snap
+    /// the same way [`Contribution::Concentric`] is for a circle.
+    Concentric(EntityId, Point2d),
+}
+
+impl ArcPart {
+    pub fn point(&self) -> Point2d {
+        match self {
+            ArcPart::OnArc(p) | ArcPart::CenterAt(p) | ArcPart::Concentric(_, p) => *p,
+        }
+    }
+
+    fn is_centre(&self) -> bool {
+        matches!(self, ArcPart::CenterAt(_) | ArcPart::Concentric(..))
+    }
+
+    /// A short word for the chooser chip, the same idiom as
+    /// [`Contribution::label`].
+    pub fn label(&self) -> &'static str {
+        match self {
+            ArcPart::OnArc(_) => "On arc",
+            ArcPart::CenterAt(_) => "Center",
+            ArcPart::Concentric(..) => "Concentric",
+        }
+    }
+}
+
+/// The ways this pick could be read, best first — [`pick_readings`]'s idea
+/// for a circle, simplified: an arc pick is either a point the rim passes
+/// through or the centre, nothing else.
+///
+/// A `Center` snap on an existing entity reads as `Concentric` automatically,
+/// the same way it reads as `Contribution::Concentric` for a circle.
+/// Anything else defaults to `OnArc`, with `CenterAt` offered as the
+/// alternative Tab reaches for — unless a centre is already banked, since
+/// only one makes sense.
+pub fn arc_pick_readings(pick: &Pick, parts: &[ArcPart]) -> Vec<ArcPart> {
+    use oxidraft_cad::SnapKind as K;
+    if parts.len() >= 3 {
+        return Vec::new();
+    }
+    let has_centre = parts.iter().any(ArcPart::is_centre);
+    match pick.snap.as_ref() {
+        Some(sp) if sp.kind == K::Center && !has_centre => {
+            let p = Point2d::from_f64(sp.pos.0, sp.pos.1);
+            vec![ArcPart::Concentric(sp.entity, p), ArcPart::OnArc(p)]
+        }
+        _ => {
+            let mut out = vec![ArcPart::OnArc(pick.pos)];
+            if !has_centre {
+                out.push(ArcPart::CenterAt(pick.pos));
+            }
+            out
+        }
+    }
+}
+
+/// The arc three parts determine — one centre and two rim points via
+/// [`arc_start_center_end`] regardless of which pick order they arrived in
+/// (which is what makes the old `ArcStartCenterEnd`/`ArcCenterStartEnd` the
+/// same construction), or three rim points via
+/// [`CircularArc::from_three_points`]. `None` for a degenerate arrangement,
+/// such as three collinear points — the caller's cue to hold the pick
+/// rather than commit something invalid.
+pub fn solve_arc(parts: &[ArcPart]) -> Option<CircularArc> {
+    if parts.len() != 3 {
+        return None;
+    }
+    let centre = parts.iter().find(|p| p.is_centre()).map(ArcPart::point);
+    let rim: Vec<Point2d> = parts
+        .iter()
+        .filter(|p| !p.is_centre())
+        .map(ArcPart::point)
+        .collect();
+    match (centre, rim.as_slice()) {
+        (Some(c), [start, end]) => arc_start_center_end(start, &c, end),
+        (None, [a, b, c]) => CircularArc::from_three_points(a, b, c),
+        _ => None,
+    }
+}
+
+/// The relation worth keeping from a finished set of parts — only
+/// `Concentric` names another entity, the same reasoning as
+/// [`pending_relations`] for a circle.
+fn arc_pending_relation(parts: &[ArcPart]) -> Option<PendingRelation> {
+    parts.iter().find_map(|p| match p {
+        ArcPart::Concentric(other, _) => Some(PendingRelation {
+            kind: ConstraintKind::Concentric,
+            other: *other,
+        }),
+        _ => None,
+    })
+}
+
+/// Banks one pick against the arc being built, committing when three parts
+/// are banked. Takes the fields rather than the `Tool` so `on_point` and
+/// `on_pick` share one implementation, the same split as [`circle_pick`].
+fn arc_pick(parts: &mut Vec<ArcPart>, choice: &mut usize, pick: Pick) -> ToolEvent {
+    let opts = arc_pick_readings(&pick, parts);
+    let Some(part) = opts.get(*choice % opts.len().max(1)).copied() else {
+        return ToolEvent::Pending;
+    };
+    // A repeated pick — most often a double click on the same spot — adds
+    // nothing, so it must not spend a degree of freedom.
+    if parts.contains(&part) {
+        return ToolEvent::Pending;
+    }
+    let mut next = parts.clone();
+    next.push(part);
+    if next.len() < 3 {
+        *parts = next;
+        *choice = 0;
+        return ToolEvent::Pending;
+    }
+    match solve_arc(&next) {
+        Some(arc) => {
+            let relation = arc_pending_relation(&next);
+            parts.clear();
+            *choice = 0;
+            let entities = vec![EntityKind::Curve(Curve::Arc(arc))];
+            match relation {
+                Some(r) => ToolEvent::CreateConstrained {
+                    entities,
+                    relations: vec![r],
+                },
+                None => ToolEvent::Create(entities),
+            }
+        }
+        // Determined but degenerate (three collinear points, say) — held
+        // rather than committed. `parts` is left at its pre-pick state, the
+        // same as `circle_pick`, so the deciding pick can just be retried.
+        None => ToolEvent::Pending,
+    }
+}
+
 impl Tool {
     /// A fresh circle tool with nothing banked.
     pub fn circle() -> Tool {
         Tool::Circle {
+            parts: Vec::new(),
+            choice: 0,
+        }
+    }
+
+    /// A fresh arc tool with nothing banked.
+    pub fn arc() -> Tool {
+        Tool::Arc {
             parts: Vec::new(),
             choice: 0,
         }
@@ -723,9 +875,7 @@ impl Tool {
             Tool::Point => "POINT",
             Tool::Line { .. } => "LINE",
             Tool::Circle { .. } => "CIRCLE",
-            Tool::Arc3 { .. } => "ARC",
-            Tool::ArcStartCenterEnd { .. } => "ARC SCE",
-            Tool::ArcCenterStartEnd { .. } => "ARC CSE",
+            Tool::Arc { .. } => "ARC",
             Tool::CircleTwoPoint { .. } => "CIRCLE 2P",
             Tool::CircleThreePoint { .. } => "CIRCLE 3P",
             Tool::CircleTtr { .. } => "CIRCLE TTR",
@@ -825,6 +975,9 @@ impl Tool {
         if let Tool::Line { first } = self {
             return line_pick(first, pick);
         }
+        if let Tool::Arc { parts, choice } = self {
+            return arc_pick(parts, choice, pick);
+        }
         self.on_point(pick.pos)
     }
 
@@ -885,8 +1038,11 @@ impl Tool {
     /// Advances which reading of the next pick is active — the Tab cycle.
     /// Does nothing for tools that have no alternatives to offer.
     pub fn cycle_reading(&mut self) {
-        if let Tool::Circle { choice, .. } = self {
-            *choice = choice.wrapping_add(1);
+        match self {
+            Tool::Circle { choice, .. } | Tool::Arc { choice, .. } => {
+                *choice = choice.wrapping_add(1);
+            }
+            _ => {}
         }
     }
 
@@ -895,6 +1051,10 @@ impl Tool {
     pub fn drop_last_part(&mut self) -> bool {
         match self {
             Tool::Circle { parts, choice } => {
+                *choice = 0;
+                parts.pop().is_some()
+            }
+            Tool::Arc { parts, choice } => {
                 *choice = 0;
                 parts.pop().is_some()
             }
@@ -917,61 +1077,10 @@ impl Tool {
 
             Tool::Circle { parts, choice } => circle_pick(parts, choice, Pick::bare(p)),
 
-            Tool::Arc3 { pts } => {
-                pts.push(p);
-                if pts.len() == 3 {
-                    let arc = CircularArc::from_three_points(&pts[0], &pts[1], &pts[2]);
-                    *self = Tool::Arc3 { pts: vec![] };
-                    match arc {
-                        Some(a) => ToolEvent::Create(vec![EntityKind::Curve(Curve::Arc(a))]),
-                        None => ToolEvent::Pending,
-                    }
-                } else {
-                    ToolEvent::Pending
-                }
-            }
-
-            Tool::ArcStartCenterEnd { start, center } => match (*start, *center) {
-                (None, _) => {
-                    *start = Some(p);
-                    ToolEvent::Pending
-                }
-                (Some(_), None) => {
-                    *center = Some(p);
-                    ToolEvent::Pending
-                }
-                (Some(s), Some(c)) => match arc_start_center_end(&s, &c, &p) {
-                    Some(a) => {
-                        *self = Tool::ArcStartCenterEnd {
-                            start: None,
-                            center: None,
-                        };
-                        ToolEvent::Create(vec![EntityKind::Curve(Curve::Arc(a))])
-                    }
-                    None => ToolEvent::Pending,
-                },
-            },
-
-            Tool::ArcCenterStartEnd { center, start } => match (*center, *start) {
-                (None, _) => {
-                    *center = Some(p);
-                    ToolEvent::Pending
-                }
-                (Some(_), None) => {
-                    *start = Some(p);
-                    ToolEvent::Pending
-                }
-                (Some(c), Some(s)) => match arc_start_center_end(&s, &c, &p) {
-                    Some(a) => {
-                        *self = Tool::ArcCenterStartEnd {
-                            center: None,
-                            start: None,
-                        };
-                        ToolEvent::Create(vec![EntityKind::Curve(Curve::Arc(a))])
-                    }
-                    None => ToolEvent::Pending,
-                },
-            },
+            // Same reasoning as `Tool::Line`: a bare coordinate carries no
+            // snap, so it can only ever read as a plain rim point, never a
+            // `Center` snap's automatic `Concentric`.
+            Tool::Arc { parts, choice } => arc_pick(parts, choice, Pick::bare(p)),
 
             Tool::CircleTwoPoint { first } => match first.take() {
                 None => {
@@ -1303,14 +1412,9 @@ impl Tool {
                 parts.clear();
                 *choice = 0;
             }
-            Tool::Arc3 { pts } => pts.clear(),
-            Tool::ArcStartCenterEnd { start, center } => {
-                *start = None;
-                *center = None;
-            }
-            Tool::ArcCenterStartEnd { center, start } => {
-                *center = None;
-                *start = None;
+            Tool::Arc { parts, choice } => {
+                parts.clear();
+                *choice = 0;
             }
             Tool::CircleTwoPoint { first } => *first = None,
             Tool::CircleThreePoint { pts } => pts.clear(),
@@ -1381,9 +1485,7 @@ impl Tool {
         match self {
             Tool::Line { first } => first.is_some(),
             Tool::Circle { parts, .. } => !parts.is_empty(),
-            Tool::Arc3 { pts } => !pts.is_empty(),
-            Tool::ArcStartCenterEnd { start, .. } => start.is_some(),
-            Tool::ArcCenterStartEnd { center, .. } => center.is_some(),
+            Tool::Arc { parts, .. } => !parts.is_empty(),
             Tool::CircleTwoPoint { first } => first.is_some(),
             Tool::CircleThreePoint { pts } => !pts.is_empty(),
             Tool::CircleTtr { first, .. } => first.is_some(),
@@ -1454,37 +1556,28 @@ impl Tool {
                 Some(e) => vec![Curve::Ellipse(e)],
                 None => vec![Curve::Line(LineSeg::from_endpoints(*c, *a))],
             },
-            Tool::Arc3 { pts } if pts.len() == 1 => {
-                vec![Curve::Line(LineSeg::from_endpoints(pts[0], *cursor))]
+            // Same simplification `Tool::Circle`'s preview makes: assume the
+            // cursor would read as a plain rim point (`ArcPart::OnArc`)
+            // regardless of what the chooser is currently offering, and show
+            // the arc that would commit. One part has nothing to solve yet,
+            // so it just rubber-bands a line from it.
+            Tool::Arc { parts, .. } if parts.len() == 1 => {
+                vec![Curve::Line(LineSeg::from_endpoints(
+                    parts[0].point(),
+                    *cursor,
+                ))]
             }
-            Tool::Arc3 { pts } if pts.len() == 2 => {
-                match CircularArc::from_three_points(&pts[0], &pts[1], cursor) {
+            Tool::Arc { parts, .. } if parts.len() == 2 => {
+                let mut trial = parts.clone();
+                trial.push(ArcPart::OnArc(*cursor));
+                match solve_arc(&trial) {
                     Some(a) => vec![Curve::Arc(a)],
-                    None => vec![Curve::Line(LineSeg::from_endpoints(pts[1], *cursor))],
+                    None => vec![Curve::Line(LineSeg::from_endpoints(
+                        parts[1].point(),
+                        *cursor,
+                    ))],
                 }
             }
-            Tool::ArcStartCenterEnd {
-                start: Some(s),
-                center: None,
-            } => vec![Curve::Line(LineSeg::from_endpoints(*s, *cursor))],
-            Tool::ArcStartCenterEnd {
-                start: Some(s),
-                center: Some(c),
-            } => match arc_start_center_end(s, c, cursor) {
-                Some(a) => vec![Curve::Arc(a)],
-                None => vec![Curve::Line(LineSeg::from_endpoints(*c, *cursor))],
-            },
-            Tool::ArcCenterStartEnd {
-                center: Some(c),
-                start: None,
-            } => vec![Curve::Line(LineSeg::from_endpoints(*c, *cursor))],
-            Tool::ArcCenterStartEnd {
-                center: Some(c),
-                start: Some(s),
-            } => match arc_start_center_end(s, c, cursor) {
-                Some(a) => vec![Curve::Arc(a)],
-                None => vec![Curve::Line(LineSeg::from_endpoints(*s, *cursor))],
-            },
             Tool::Dimension {
                 p1: Some(a),
                 p2: None,
@@ -1576,9 +1669,7 @@ impl Tool {
                 .find_map(Contribution::center)
                 .or_else(|| parts.iter().rev().find_map(Contribution::rim_point)),
             Tool::Rectangle { first } | Tool::PlotWindow { first } => *first,
-            Tool::Arc3 { pts } => pts.last().cloned(),
-            Tool::ArcStartCenterEnd { start, center } => (*center).or(*start),
-            Tool::ArcCenterStartEnd { center, start } => (*start).or(*center),
+            Tool::Arc { parts, .. } => parts.last().map(ArcPart::point),
             Tool::CircleTwoPoint { first } => *first,
             Tool::CircleThreePoint { pts } => pts.last().cloned(),
             Tool::Ellipse { center, axis_end } => (*axis_end).or(*center),
@@ -1616,7 +1707,8 @@ impl Tool {
     pub fn in_progress_points(&self) -> Vec<Point2d> {
         match self {
             Tool::Polyline { pts } | Tool::Spline { pts } => pts.clone(),
-            Tool::Arc3 { pts } | Tool::CircleThreePoint { pts } => pts.clone(),
+            Tool::CircleThreePoint { pts } => pts.clone(),
+            Tool::Arc { parts, .. } => parts.iter().map(ArcPart::point).collect(),
             Tool::Line {
                 first: Some(TanAnchor::Point(p)),
             } => vec![*p],
@@ -2506,21 +2598,22 @@ mod tests {
     }
 
     #[test]
-    fn arc3_needs_three_points() {
-        let mut t = Tool::Arc3 { pts: vec![] };
+    fn arc_tool_needs_three_points() {
+        let mut t = Tool::arc();
         assert!(matches!(t.on_point(pt(1, 0)), ToolEvent::Pending));
         assert!(matches!(t.on_point(pt(0, 1)), ToolEvent::Pending));
         assert!(matches!(t.on_point(pt(-1, 0)), ToolEvent::Create(_)));
     }
 
     #[test]
-    fn arc3_preview_matches_commit() {
+    fn arc_tool_preview_matches_commit() {
         let start = pt(1, 0);
         let mid = pt(0, 1);
         let end = pt(-1, 0);
 
-        let prev = Tool::Arc3 {
-            pts: vec![start, mid],
+        let prev = Tool::Arc {
+            parts: vec![ArcPart::OnArc(start), ArcPart::OnArc(mid)],
+            choice: 0,
         };
         let preview = prev.preview(&end);
         let pa = match preview.as_slice() {
@@ -2528,7 +2621,7 @@ mod tests {
             other => panic!("expected one arc in preview, got {:?}", other),
         };
 
-        let mut t = Tool::Arc3 { pts: vec![] };
+        let mut t = Tool::arc();
         t.on_point(start);
         t.on_point(mid);
         let committed = match t.on_point(end) {
@@ -2547,6 +2640,125 @@ mod tests {
             (pa.included_angle() - std::f64::consts::PI).abs() < 1e-6,
             "expected a 180° arc, got {}",
             pa.included_angle()
+        );
+    }
+
+    #[test]
+    fn arc_tool_collapses_start_center_end_and_center_start_end() {
+        // The old ArcStartCenterEnd and ArcCenterStartEnd only ever differed
+        // in *when* the centre was picked; `solve_arc` reads role, not pick
+        // order, so both orders must produce the identical arc.
+        let start = pt(1, 0);
+        let center = pt(0, 0);
+        let end = pt(0, 1);
+
+        let mut start_first = Tool::arc();
+        start_first.on_point(start);
+        assert!(matches!(
+            start_first.on_pick(snapped(oxidraft_cad::SnapKind::Center, 1, center)),
+            ToolEvent::Pending
+        ));
+        let a = match start_first.on_point(end) {
+            ToolEvent::CreateConstrained { entities, .. } => match entities.as_slice() {
+                [EntityKind::Curve(Curve::Arc(a))] => *a,
+                o => panic!("expected an arc, got {o:?}"),
+            },
+            o => panic!("expected a commit, got {o:?}"),
+        };
+
+        let mut center_first = Tool::arc();
+        assert!(matches!(
+            center_first.on_pick(snapped(oxidraft_cad::SnapKind::Center, 1, center)),
+            ToolEvent::Pending
+        ));
+        center_first.on_point(start);
+        let b = match center_first.on_point(end) {
+            ToolEvent::CreateConstrained { entities, .. } => match entities.as_slice() {
+                [EntityKind::Curve(Curve::Arc(a))] => *a,
+                o => panic!("expected an arc, got {o:?}"),
+            },
+            o => panic!("expected a commit, got {o:?}"),
+        };
+
+        assert!((a.center.to_f64().0 - b.center.to_f64().0).abs() < 1e-9);
+        assert!((a.center.to_f64().1 - b.center.to_f64().1).abs() < 1e-9);
+        assert!((a.radius - b.radius).abs() < 1e-9);
+        assert!((a.start_angle - b.start_angle).abs() < 1e-9);
+        assert!((a.end_angle - b.end_angle).abs() < 1e-9);
+    }
+
+    #[test]
+    fn arc_tool_radius_comes_from_the_first_rim_pick() {
+        // `arc_start_center_end`'s radius is the distance from the centre to
+        // its `start` argument, so `solve_arc` must feed it the
+        // chronologically-first `OnArc` pick as start and the second as end
+        // — not the other way around. Distinct distances from the centre
+        // make a start/end swap change the answer; equal ones (as in the
+        // collapse test above) would hide it.
+        let first_rim = pt(3, 0);
+        let center = pt(0, 0);
+        let second_rim = pt(0, 5);
+        let parts = [
+            ArcPart::OnArc(first_rim),
+            ArcPart::CenterAt(center),
+            ArcPart::OnArc(second_rim),
+        ];
+        let arc = solve_arc(&parts).expect("center + two rim points should solve");
+        assert!(
+            (arc.radius - 3.0).abs() < 1e-9,
+            "radius should come from the first rim pick, got {}",
+            arc.radius
+        );
+    }
+
+    #[test]
+    fn arc_tool_reads_a_center_snap_as_concentric() {
+        let mut t = Tool::arc();
+        t.on_point(pt(1, 0));
+        match t.on_pick(snapped(oxidraft_cad::SnapKind::Center, 7, pt(0, 0))) {
+            ToolEvent::Pending => {}
+            o => panic!("expected pending after two of three picks, got {o:?}"),
+        }
+        match t.on_point(pt(0, 1)) {
+            ToolEvent::CreateConstrained { relations, .. } => {
+                assert_eq!(relations.len(), 1);
+                assert_eq!(relations[0].kind, ConstraintKind::Concentric);
+                assert_eq!(relations[0].other, EntityId(7));
+            }
+            o => panic!("expected a constrained commit, got {o:?}"),
+        }
+    }
+
+    #[test]
+    fn arc_tool_tab_cycles_a_bare_pick_to_center() {
+        // An unsnapped pick defaults to a rim point (matching Circle's own
+        // "empty space is a freely chosen point" default), with the centre
+        // as the Tab alternative.
+        let bare = Pick::bare(pt(3, 4));
+        let opts = arc_pick_readings(&bare, &[]);
+        assert_eq!(
+            opts,
+            vec![ArcPart::OnArc(pt(3, 4)), ArcPart::CenterAt(pt(3, 4))]
+        );
+    }
+
+    #[test]
+    fn arc_tool_holds_three_collinear_points_rather_than_committing() {
+        let mut t = Tool::arc();
+        t.on_point(pt(0, 0));
+        t.on_point(pt(5, 0));
+        let ev = t.on_point(pt(10, 0));
+        assert!(
+            matches!(ev, ToolEvent::Pending),
+            "collinear points should be held, got {ev:?}"
+        );
+        let Tool::Arc { parts, .. } = &t else {
+            panic!("expected the arc tool")
+        };
+        assert_eq!(
+            parts.len(),
+            2,
+            "the degenerate third pick must not be banked"
         );
     }
 

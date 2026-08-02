@@ -43,20 +43,10 @@ pub(super) fn tool_prompt(tool: &Tool) -> String {
                 "Specify opposite corner of plot window".into()
             }
         }
-        Tool::Arc3 { pts } => match pts.len() {
-            0 => "Specify start point".into(),
-            1 => "Specify second point".into(),
+        Tool::Arc { parts, .. } => match parts.len() {
+            0 => "Specify start point, or pick a circle/arc's center".into(),
+            1 => "Specify next point, or pick a center".into(),
             _ => "Specify end point".into(),
-        },
-        Tool::ArcStartCenterEnd { start, center } => match (start, center) {
-            (None, _) => "Specify start point of arc".into(),
-            (Some(_), None) => "Specify center of arc".into(),
-            (Some(_), Some(_)) => "Specify end point of arc".into(),
-        },
-        Tool::ArcCenterStartEnd { center, start } => match (center, start) {
-            (None, _) => "Specify center of arc".into(),
-            (Some(_), None) => "Specify start point of arc".into(),
-            (Some(_), Some(_)) => "Specify end point of arc".into(),
         },
         Tool::CircleTwoPoint { first } => {
             if first.is_none() {

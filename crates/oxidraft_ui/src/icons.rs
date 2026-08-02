@@ -21,8 +21,6 @@ pub enum Icon {
     CircleTtt,
     Ellipse,
     Arc,
-    ArcStartCenterEnd,
-    ArcCenterStartEnd,
     Rectangle,
     Polygon,
     Spline,
@@ -105,8 +103,6 @@ impl Icon {
         Icon::CircleTtt,
         Icon::Ellipse,
         Icon::Arc,
-        Icon::ArcStartCenterEnd,
-        Icon::ArcCenterStartEnd,
         Icon::Rectangle,
         Icon::Polygon,
         Icon::Spline,
@@ -232,9 +228,8 @@ impl Icon {
             Icon::Circle | Icon::Circle2P | Icon::Circle3P | Icon::CircleTtr | Icon::CircleTtt => {
                 '\u{f02c}'
             } // tool_circle
-            Icon::Ellipse => '\u{f02a}', // tool_elipse
-            // ...and likewise for the arc constructions.
-            Icon::Arc | Icon::ArcStartCenterEnd | Icon::ArcCenterStartEnd => '\u{f02e}', // tool_arc
+            Icon::Ellipse => '\u{f02a}',   // tool_elipse
+            Icon::Arc => '\u{f02e}',       // tool_arc
             Icon::Rectangle => '\u{f025}', // tool_rectangle
             Icon::Polygon => '\u{f026}',   // tool_polygon
             Icon::Spline => '\u{f024}',    // tool_spline
@@ -599,8 +594,6 @@ mod tests {
             Icon::CircleTtt => "tool_circle",
             Icon::Ellipse => "tool_elipse",
             Icon::Arc => "tool_arc",
-            Icon::ArcStartCenterEnd => "tool_arc",
-            Icon::ArcCenterStartEnd => "tool_arc",
             Icon::Rectangle => "tool_rectangle",
             Icon::Polygon => "tool_polygon",
             Icon::Spline => "tool_spline",

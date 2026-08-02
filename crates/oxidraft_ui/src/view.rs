@@ -775,11 +775,15 @@ fn canvas(root_ui: &mut egui::Ui, app: &mut AppState, ui_state: &mut UiState, pa
                 || f == Some(egui::Id::new("dyn_tf_factor"))
                 || f == Some(egui::Id::new("palette_input"))
         };
-        // Tab re-reads the pick under the cursor; Backspace un-picks. Scoped to
-        // the circle tool, so the ellipse tool's Tab — which moves focus
-        // between its axis fields over in `overlays.rs` — is left alone, and
-        // `consume_key` stops egui treating it as focus navigation.
-        if !palette_open && !in_text_field && matches!(app.tool, Tool::Circle { .. }) {
+        // Tab re-reads the pick under the cursor; Backspace un-picks. Scoped
+        // to the circle and arc tools, so the ellipse tool's Tab — which
+        // moves focus between its axis fields over in `overlays.rs` — is
+        // left alone, and `consume_key` stops egui treating it as focus
+        // navigation.
+        if !palette_open
+            && !in_text_field
+            && matches!(app.tool, Tool::Circle { .. } | Tool::Arc { .. })
+        {
             if ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Tab)) {
                 app.tool.cycle_reading();
             }
@@ -1936,72 +1940,98 @@ fn canvas(root_ui: &mut egui::Ui, app: &mut AppState, ui_state: &mut UiState, pa
         // already owns up-left. Nothing is drawn when the pick reads only one
         // way, which is most of the time — the strip is for the moments the
         // software would otherwise be guessing on the user's behalf.
-        if let Tool::Circle { parts, choice } = &app.tool {
-            let pick = crate::tools::Pick {
-                pos: Point2d::from_f64(app.cursor_world.0, app.cursor_world.1),
-                snap: app.active_snap.clone(),
-                curve: app
-                    .active_snap
-                    .as_ref()
-                    .and_then(|s| app.document.get(s.entity))
-                    .and_then(|e| e.as_curve().cloned()),
-            };
-            let opts = crate::tools::pick_readings(&pick, parts);
-            if opts.len() > 1 {
-                let cur = app
-                    .view
-                    .world_to_screen(app.cursor_world.0, app.cursor_world.1);
-                let mut x = cur.0 as f32 + 14.0;
-                let y = cur.1 as f32 + 14.0;
-                let active = *choice % opts.len();
-                for (i, opt) in opts.iter().enumerate() {
-                    let on = i == active;
-                    // The active chip is filled with the accent, so its label
-                    // sits on it in the canvas colour rather than a second
-                    // near-black; the rest use ordinary panel text.
-                    let ink = if on {
-                        crate::theme::CANVAS_BG
-                    } else {
-                        crate::theme::TEXT
-                    };
-                    let galley = painter.layout_no_wrap(
-                        opt.label().to_owned(),
-                        egui::FontId::proportional(crate::theme::tok::T_BODY),
-                        ink,
-                    );
-                    let pad = vec2(7.0, 4.0);
-                    let size = galley.size() + pad * 2.0;
-                    let chip = egui::Rect::from_min_size(pos2(x.round(), y.round()), size);
-                    // Same radius and padding as the snap chip up-left of the
-                    // crosshair: two chips beside one cursor should not be two
-                    // different shapes.
-                    if on {
-                        painter.rect_filled(chip, 4.0, crate::theme::ACCENT);
-                    } else {
-                        painter.rect(
-                            chip,
-                            4.0,
-                            crate::theme::PANEL_GLASS,
-                            Stroke::new(1.0, crate::theme::OUTLINE),
-                            egui::StrokeKind::Inside,
-                        );
-                    }
-                    painter.galley((chip.min + pad).round(), galley, ink);
-                    x += size.x + 4.0;
-                }
-                // Only worth saying once there is a second reading to reach.
-                // Monospace at the keycap size the tooltips already use.
-                let hint = painter.layout_no_wrap(
-                    "Tab".to_owned(),
-                    egui::FontId::monospace(crate::theme::tok::T_CAPTION),
-                    crate::theme::TEXT_DIM,
-                );
-                painter.galley(
-                    pos2(x.round() + 4.0, (y + 4.0).round()),
-                    hint,
-                    crate::theme::TEXT_DIM,
-                );
+        //
+        // Circle and Arc each read a pick their own way (`pick_readings` vs.
+        // `arc_pick_readings`), but both just need a label per alternative
+        // and which one is active, so that is all this block asks either for.
+        let chooser_labels: Option<(Vec<&'static str>, usize)> = match &app.tool {
+            Tool::Circle { parts, choice } => {
+                let pick = crate::tools::Pick {
+                    pos: Point2d::from_f64(app.cursor_world.0, app.cursor_world.1),
+                    snap: app.active_snap.clone(),
+                    curve: app
+                        .active_snap
+                        .as_ref()
+                        .and_then(|s| app.document.get(s.entity))
+                        .and_then(|e| e.as_curve().cloned()),
+                };
+                let opts = crate::tools::pick_readings(&pick, parts);
+                (opts.len() > 1).then(|| {
+                    let active = *choice % opts.len();
+                    (opts.iter().map(|o| o.label()).collect(), active)
+                })
             }
+            Tool::Arc { parts, choice } => {
+                let pick = crate::tools::Pick {
+                    pos: Point2d::from_f64(app.cursor_world.0, app.cursor_world.1),
+                    snap: app.active_snap.clone(),
+                    curve: app
+                        .active_snap
+                        .as_ref()
+                        .and_then(|s| app.document.get(s.entity))
+                        .and_then(|e| e.as_curve().cloned()),
+                };
+                let opts = crate::tools::arc_pick_readings(&pick, parts);
+                (opts.len() > 1).then(|| {
+                    let active = *choice % opts.len();
+                    (opts.iter().map(|o| o.label()).collect(), active)
+                })
+            }
+            _ => None,
+        };
+        if let Some((labels, active)) = chooser_labels {
+            let cur = app
+                .view
+                .world_to_screen(app.cursor_world.0, app.cursor_world.1);
+            let mut x = cur.0 as f32 + 14.0;
+            let y = cur.1 as f32 + 14.0;
+            for (i, label) in labels.iter().enumerate() {
+                let on = i == active;
+                // The active chip is filled with the accent, so its label
+                // sits on it in the canvas colour rather than a second
+                // near-black; the rest use ordinary panel text.
+                let ink = if on {
+                    crate::theme::CANVAS_BG
+                } else {
+                    crate::theme::TEXT
+                };
+                let galley = painter.layout_no_wrap(
+                    (*label).to_owned(),
+                    egui::FontId::proportional(crate::theme::tok::T_BODY),
+                    ink,
+                );
+                let pad = vec2(7.0, 4.0);
+                let size = galley.size() + pad * 2.0;
+                let chip = egui::Rect::from_min_size(pos2(x.round(), y.round()), size);
+                // Same radius and padding as the snap chip up-left of the
+                // crosshair: two chips beside one cursor should not be two
+                // different shapes.
+                if on {
+                    painter.rect_filled(chip, 4.0, crate::theme::ACCENT);
+                } else {
+                    painter.rect(
+                        chip,
+                        4.0,
+                        crate::theme::PANEL_GLASS,
+                        Stroke::new(1.0, crate::theme::OUTLINE),
+                        egui::StrokeKind::Inside,
+                    );
+                }
+                painter.galley((chip.min + pad).round(), galley, ink);
+                x += size.x + 4.0;
+            }
+            // Only worth saying once there is a second reading to reach.
+            // Monospace at the keycap size the tooltips already use.
+            let hint = painter.layout_no_wrap(
+                "Tab".to_owned(),
+                egui::FontId::monospace(crate::theme::tok::T_CAPTION),
+                crate::theme::TEXT_DIM,
+            );
+            painter.galley(
+                pos2(x.round() + 4.0, (y + 4.0).round()),
+                hint,
+                crate::theme::TEXT_DIM,
+            );
         }
 
         let has_dims = app.tool.has_pending_input();
@@ -2042,18 +2072,15 @@ fn canvas(root_ui: &mut egui::Ui, app: &mut AppState, ui_state: &mut UiState, pa
                         let h = (y1 - y0).abs();
                         Some(format!("W: {:.4}\nH: {:.4}", w, h))
                     }
-                    Tool::Arc3 { pts } => {
-                        if pts.len() == 1 {
-                            let d = pts[0].dist_f64(&cursor);
+                    Tool::Arc { parts, .. } => {
+                        if parts.len() == 1 {
+                            let d = parts[0].point().dist_f64(&cursor);
                             Some(format!("Dist: {:.4}", d))
-                        } else if pts.len() == 2 {
-                            match oxidraft_geometry::CircularArc::from_three_points(
-                                &pts[0], &pts[1], &cursor,
-                            ) {
-                                Some(arc) => {
-                                    let r = arc.radius;
-                                    Some(format!("R: {:.4}", r))
-                                }
+                        } else if parts.len() == 2 {
+                            let mut trial = parts.clone();
+                            trial.push(crate::tools::ArcPart::OnArc(cursor));
+                            match crate::tools::solve_arc(&trial) {
+                                Some(arc) => Some(format!("R: {:.4}", arc.radius)),
                                 None => Some("Collinear".to_string()),
                             }
                         } else {

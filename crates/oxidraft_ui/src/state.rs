@@ -725,10 +725,7 @@ impl AppState {
             return;
         }
         let was_line = matches!(self.tool, Tool::Line { .. });
-        let was_arc = matches!(
-            self.tool,
-            Tool::Arc3 { .. } | Tool::ArcStartCenterEnd { .. } | Tool::ArcCenterStartEnd { .. }
-        );
+        let was_arc = matches!(self.tool, Tool::Arc { .. });
         let snap_now = self.active_snap.clone();
         // The pointer path is the one place a pick carries a snap, so it is the
         // only caller that hands the tool anything beyond a coordinate.
@@ -743,7 +740,10 @@ impl AppState {
             snap: snap_now.clone(),
             curve: snapped_curve,
         });
-        let created = matches!(ev, ToolEvent::Create(_));
+        let created = matches!(
+            ev,
+            ToolEvent::Create(_) | ToolEvent::CreateConstrained { .. }
+        );
         self.apply_tool_event(ev);
         if was_line {
             self.after_line_point(created, snap_now.as_ref(), snap_now.is_some());
@@ -773,14 +773,14 @@ impl AppState {
             return;
         }
         let was_line = matches!(self.tool, Tool::Line { .. });
-        let was_arc = matches!(
-            self.tool,
-            Tool::Arc3 { .. } | Tool::ArcStartCenterEnd { .. } | Tool::ArcCenterStartEnd { .. }
-        );
+        let was_arc = matches!(self.tool, Tool::Arc { .. });
         // This path documents itself as bypassing snapping, and already
         // tells `after_line_point` there was none.
         let ev = self.tool.on_pick(crate::tools::Pick::bare(p));
-        let created = matches!(ev, ToolEvent::Create(_));
+        let created = matches!(
+            ev,
+            ToolEvent::Create(_) | ToolEvent::CreateConstrained { .. }
+        );
         self.apply_tool_event(ev);
         if was_line {
             self.after_line_point(created, None, true);

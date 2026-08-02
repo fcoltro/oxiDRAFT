@@ -686,28 +686,12 @@ fn menu_items(ui: &mut egui::Ui, app: &mut AppState) {
                 axis_end: None,
             },
         );
-        tool_menu_item(ui, app, "Arc", Tool::Arc3 { pts: vec![] });
-        ui.menu_button("Arc", |ui| {
-            tool_menu_item(ui, app, "3 Points", Tool::Arc3 { pts: vec![] });
-            tool_menu_item(
-                ui,
-                app,
-                "Start, Center, End",
-                Tool::ArcStartCenterEnd {
-                    start: None,
-                    center: None,
-                },
-            );
-            tool_menu_item(
-                ui,
-                app,
-                "Center, Start, End",
-                Tool::ArcCenterStartEnd {
-                    center: None,
-                    start: None,
-                },
-            );
-        });
+        // One Arc entry, not a 3-way submenu — the tool now reads centre vs.
+        // rim off each pick's role rather than the order it names, so
+        // "3 points"/"start, center, end"/"center, start, end" are all the
+        // same tool now (see `Tool::Arc`), the same collapse Circle went
+        // through above.
+        tool_menu_item(ui, app, "Arc", Tool::arc());
         tool_menu_item(ui, app, "Rectangle", Tool::Rectangle { first: None });
         tool_menu_item(
             ui,
@@ -1675,7 +1659,7 @@ fn tool_hotkey(tool: &Tool) -> &'static str {
         Tool::Polyline { .. } => "P",
         Tool::Circle { .. } => "C",
         Tool::Ellipse { .. } => "E",
-        Tool::Arc3 { .. } => "A",
+        Tool::Arc { .. } => "A",
         Tool::Rectangle { .. } => "R",
         Tool::Polygon { .. } => "G",
         Tool::Spline { .. } => "S",
@@ -1693,9 +1677,7 @@ fn tool_hotkey(tool: &Tool) -> &'static str {
         Tool::Blend { .. } => "Shift+B",
         Tool::Stretch { .. } => "Shift+S",
         Tool::Hatch => "H",
-        Tool::ArcStartCenterEnd { .. }
-        | Tool::ArcCenterStartEnd { .. }
-        | Tool::CircleTwoPoint { .. }
+        Tool::CircleTwoPoint { .. }
         | Tool::CircleThreePoint { .. }
         | Tool::CircleTtr { .. }
         | Tool::CircleTtt { .. }
@@ -1758,11 +1740,7 @@ pub(super) fn draw_entries() -> Vec<(crate::icons::Icon, &'static str, Act)> {
                 axis_end: None,
             }),
         ),
-        (
-            Icon::Arc,
-            "Arc — 3 points  (A)",
-            Act::Tool(Tool::Arc3 { pts: vec![] }),
-        ),
+        (Icon::Arc, "Arc  (A)", Act::Tool(Tool::arc())),
         (
             Icon::Rectangle,
             "Rectangle  (R)",
@@ -1933,84 +1911,60 @@ pub(super) fn act_needs_selection(act: &Act) -> bool {
 
 pub(super) fn group_id(act: &Act) -> Option<u8> {
     match act {
-        // No entry for Line or Circle. Both had groups — Line's two
-        // constructions, Circle's five — to pre-select from, until each
-        // became one tool that reads the construction off the picks
-        // themselves (see `read_line_anchor`/`Contribution` in tools.rs).
-        // Forcing that choice in the radial menu's own gesture would have
-        // been the exact thing the redesign removed, reintroduced one menu
-        // away from where it was taken out. Clicking the wedge now does what
-        // clicking any other leaf wedge does: activate the tool.
-        Act::Tool(Tool::Arc3 { .. }) => Some(2),
+        // No entry for Line, Circle, or Arc. Each had a group — Line's two
+        // constructions, Circle's five, Arc's three — to pre-select from,
+        // until each became one tool that reads the construction off the
+        // picks themselves (see `read_line_anchor`/`Contribution`/
+        // `arc_pick_readings` in tools.rs). Forcing that choice in the
+        // radial menu's own gesture would have been the exact thing the
+        // redesign removed, reintroduced one menu away from where it was
+        // taken out. Clicking the wedge now does what clicking any other
+        // leaf wedge does: activate the tool.
         Act::Tool(Tool::Dimension { .. }) => Some(3),
         _ => None,
     }
 }
 
-pub(super) fn group_entries(id: u8) -> Vec<(crate::icons::Icon, &'static str, Act)> {
+// id 0 was Line's group, id 1 was Circle's, id 2 was Arc's; all three
+// retired along with their entries in `group_id` above. Dimension (id 3) is
+// the only one `group_id` can still produce, so `id` itself has nothing left
+// to switch on — kept as a parameter because the caller still passes what
+// `group_id` returned, not because this reads it.
+pub(super) fn group_entries(_id: u8) -> Vec<(crate::icons::Icon, &'static str, Act)> {
     use crate::icons::Icon;
-    match id {
-        // id 0 was the Line group and id 1 was the Circle group; both
-        // retired along with their entries in `group_id` above. Neither is
-        // reused, so a stray call with either id falls through to the `_`
-        // arm below rather than silently meaning something else.
-        2 => {
-            vec![
-                (Icon::Arc, "3 points", Act::Tool(Tool::Arc3 { pts: vec![] })),
-                (
-                    Icon::ArcStartCenterEnd,
-                    "Start, center, end",
-                    Act::Tool(Tool::ArcStartCenterEnd {
-                        start: None,
-                        center: None,
-                    }),
-                ),
-                (
-                    Icon::ArcCenterStartEnd,
-                    "Center, start, end",
-                    Act::Tool(Tool::ArcCenterStartEnd {
-                        center: None,
-                        start: None,
-                    }),
-                ),
-            ]
-        }
-        _ => {
-            vec![
-                (
-                    Icon::Dimension,
-                    "Linear (aligned)",
-                    Act::Tool(Tool::Dimension { p1: None, p2: None }),
-                ),
-                (
-                    Icon::DimAngle,
-                    "Angular (2 lines)",
-                    Act::Tool(Tool::DimAngularLines {
-                        a: None,
-                        geom: None,
-                    }),
-                ),
-                (
-                    Icon::DimRadius,
-                    "Radius",
-                    Act::Tool(Tool::DimRadial {
-                        diameter: false,
-                        center: None,
-                        radius: 0.0,
-                    }),
-                ),
-                (
-                    Icon::DimDiameter,
-                    "Diameter",
-                    Act::Tool(Tool::DimRadial {
-                        diameter: true,
-                        center: None,
-                        radius: 0.0,
-                    }),
-                ),
-            ]
-        }
-    }
+    vec![
+        (
+            Icon::Dimension,
+            "Linear (aligned)",
+            Act::Tool(Tool::Dimension { p1: None, p2: None }),
+        ),
+        (
+            Icon::DimAngle,
+            "Angular (2 lines)",
+            Act::Tool(Tool::DimAngularLines {
+                a: None,
+                geom: None,
+            }),
+        ),
+        (
+            Icon::DimRadius,
+            "Radius",
+            Act::Tool(Tool::DimRadial {
+                diameter: false,
+                center: None,
+                radius: 0.0,
+            }),
+        ),
+        (
+            Icon::DimDiameter,
+            "Diameter",
+            Act::Tool(Tool::DimRadial {
+                diameter: true,
+                center: None,
+                radius: 0.0,
+            }),
+        ),
+    ]
 }
 
 pub(super) fn command_toast(ctx: &Context, app: &AppState, canvas_rect: egui::Rect) {
@@ -3285,9 +3239,7 @@ fn hints_for_tool(tool: &Tool) -> (&'static str, Vec<(&'static str, &'static str
             "Circle",
             vec![("Click", "center, then radius"), ("type", "radius")],
         ),
-        Arc3 { .. } | ArcStartCenterEnd { .. } | ArcCenterStartEnd { .. } => {
-            ("Arc", vec![("Click", "three points"), ("Esc", "cancel")])
-        }
+        Arc { .. } => ("Arc", vec![("Click", "three points"), ("Esc", "cancel")]),
         Ellipse { .. } => (
             "Ellipse",
             vec![
@@ -4585,6 +4537,34 @@ mod radial_group_tests {
     }
 
     #[test]
+    fn arc_has_no_radial_group() {
+        // Arc used to expand into "3 points"/"start, center, end"/"center,
+        // start, end" — gone the same way Line's and Circle's did, since the
+        // tool now reads centre vs. rim off each pick's role
+        // (`arc_pick_readings` in tools.rs).
+        let arc_act = Act::Tool(Tool::arc());
+        assert_eq!(
+            group_id(&arc_act),
+            None,
+            "Arc must not have a radial sub-menu"
+        );
+    }
+
+    #[test]
+    fn the_draw_ring_still_offers_one_arc_entry() {
+        let entries = draw_entries();
+        let arc_entries: Vec<_> = entries
+            .iter()
+            .filter(|(_, _, act)| matches!(act, Act::Tool(Tool::Arc { .. })))
+            .collect();
+        assert_eq!(
+            arc_entries.len(),
+            1,
+            "expected exactly one Arc wedge in the draw ring, got {arc_entries:?}"
+        );
+    }
+
+    #[test]
     fn every_group_id_the_ring_can_produce_has_entries() {
         // A wedge whose `group_id` returns `Some(n)` but whose `group_entries(n)`
         // comes back empty would open an empty sub-ring on hover — this is the
@@ -4623,6 +4603,19 @@ mod radial_group_tests {
                 group_id(act),
                 Some(0),
                 "id 0 was retired with the Line group; {act:?} should not reuse it"
+            );
+        }
+    }
+
+    #[test]
+    fn no_tool_variant_still_carries_the_retired_arc_group_id() {
+        // id 2 was Arc's group before this test suite existed to say
+        // otherwise.
+        for (_, _, act) in draw_entries().iter().chain(modify_entries().iter()) {
+            assert_ne!(
+                group_id(act),
+                Some(2),
+                "id 2 was retired with the Arc group; {act:?} should not reuse it"
             );
         }
     }
