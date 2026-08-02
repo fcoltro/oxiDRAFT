@@ -168,7 +168,7 @@ fn search_button() -> impl egui::Widget {
         let p = ui.painter();
         p.rect(
             rect,
-            9.0,
+            crate::theme::tok::R_SM as f32,
             fill,
             egui::Stroke::new(1.0, crate::theme::OUTLINE),
             egui::StrokeKind::Inside,
@@ -236,7 +236,7 @@ fn export_button() -> impl egui::Widget {
             crate::theme::ACCENT
         };
         let p = ui.painter();
-        p.rect_filled(rect, 9.0, fill);
+        p.rect_filled(rect, crate::theme::tok::R_SM as f32, fill);
         // Mark and label as one unit: measure the text, then centre the pair so
         // the button stays balanced rather than the glyph hanging off one edge.
         const GLYPH: f32 = 16.0;
@@ -2504,7 +2504,13 @@ fn snap_chip(ui: &mut egui::Ui, on: &mut bool, label: &str) -> bool {
         )
     };
     let p = ui.painter();
-    p.rect(rect, 9.0, fill, stroke, egui::StrokeKind::Inside);
+    p.rect(
+        rect,
+        crate::theme::tok::R_SM as f32,
+        fill,
+        stroke,
+        egui::StrokeKind::Inside,
+    );
     p.text(
         rect.center(),
         egui::Align2::CENTER_CENTER,
@@ -2851,13 +2857,16 @@ fn con_glyph_button(ui: &mut egui::Ui, tooltip: &str, icon: crate::icons::Icon) 
         );
     }
     let area = egui::Rect::from_center_size(rect.center(), egui::Vec2::splat(20.0));
-    // Amber, so a relation reads as a different class of thing from the tools
-    // and chrome around it. Dimmed when disabled, matching the app's other
-    // enabled/disabled icon buttons.
+    // White, dimmed when disabled — the same tint every other icon button in
+    // the app uses (`icon_button_sized`, the contextual toolbar). This used
+    // to be permanently amber so a relation would read as its own class of
+    // control, but amber is also the app's one warning colour: fourteen
+    // buttons that are always amber drown the two-digit "N unconstrained"
+    // label that is the actual warning. Amber now means only that.
     let tint = if enabled {
-        crate::theme::STATUS_AMBER
+        Color32::WHITE
     } else {
-        crate::theme::STATUS_AMBER.gamma_multiply(0.35)
+        Color32::WHITE.gamma_multiply(0.4)
     };
     crate::icons::paint_icon(&painter, ui.ctx(), icon, area, tint);
     if hovered {
