@@ -29,14 +29,14 @@ fn command_toast_widens_back_out_for_a_long_message_after_a_short_one() {
     let mut ui_state = UiState::default();
     let toast_id = egui::Id::new("command_toast");
 
-    app.command_log.push("Hi".to_string());
+    app.note("Hi".to_string());
     frame(&ctx, &mut app, &mut ui_state);
     frame(&ctx, &mut app, &mut ui_state);
     let narrow_rect = ctx
         .memory(|m| m.area_rect(toast_id))
         .expect("toast should be visible after a short message");
 
-    app.command_log.push(
+    app.problem(
         "Could not make the lines perpendicular against their existing constraints; \
          conflicts with its existing coincident constraint"
             .to_string(),
@@ -70,7 +70,7 @@ fn command_toast_sits_left_of_the_status_pill() {
     let mut app = AppState::new(1200.0, 800.0);
     let mut ui_state = UiState::default();
 
-    app.command_log.push("Saved drawing".to_string());
+    app.note("Saved drawing".to_string());
     frame(&ctx, &mut app, &mut ui_state);
     frame(&ctx, &mut app, &mut ui_state);
 

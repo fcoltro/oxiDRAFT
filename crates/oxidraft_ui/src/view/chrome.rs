@@ -288,7 +288,7 @@ fn export_menu(ctx: &Context, app: &mut AppState) {
                 if let Some(path) = FileDialog::new().add_filter("DXF", &["dxf"]).save_file() {
                     let content = oxidraft_io::export_dxf(&app.document);
                     if let Err(e) = oxidraft_io::write_atomic(&path, content.as_bytes()) {
-                        app.command_log.push(format!("DXF export failed: {e}"));
+                        app.problem(format!("DXF export failed: {e}"));
                     }
                 }
                 ctx.data_mut(|d| d.insert_temp(egui::Id::new("open_export"), false));
@@ -300,7 +300,7 @@ fn export_menu(ctx: &Context, app: &mut AppState) {
                 {
                     let content = oxidraft_io::export_svg(&app.document);
                     if let Err(e) = oxidraft_io::write_atomic(&path, content.as_bytes()) {
-                        app.command_log.push(format!("SVG export failed: {e}"));
+                        app.problem(format!("SVG export failed: {e}"));
                     }
                 }
                 ctx.data_mut(|d| d.insert_temp(egui::Id::new("open_export"), false));
@@ -465,12 +465,12 @@ pub(super) fn plot_dialog(ctx: &Context, app: &mut AppState) {
                     match oxidraft_io::export_pdf_window(&app.document, paper, window) {
                         Ok(bytes) => {
                             if let Err(e) = oxidraft_io::write_atomic(&path, &bytes) {
-                                app.command_log.push(format!("Plot failed: {e}"));
+                                app.problem(format!("Plot failed: {e}"));
                             } else {
-                                app.command_log.push("Plotted to PDF".to_string());
+                                app.note("Plotted to PDF".to_string());
                             }
                         }
-                        Err(e) => app.command_log.push(format!("Plot failed: {e}")),
+                        Err(e) => app.problem(format!("Plot failed: {e}")),
                     }
                 }
                 close_after_plot = true;
@@ -530,7 +530,7 @@ fn menu_items(ui: &mut egui::Ui, app: &mut AppState) {
             if let Some(path) = FileDialog::new().add_filter("DXF", &["dxf"]).save_file() {
                 let content = oxidraft_io::export_dxf(&app.document);
                 if let Err(e) = oxidraft_io::write_atomic(&path, content.as_bytes()) {
-                    app.command_log.push(format!("DXF export failed: {e}"));
+                    app.problem(format!("DXF export failed: {e}"));
                 }
             }
             ui.close();
@@ -542,7 +542,7 @@ fn menu_items(ui: &mut egui::Ui, app: &mut AppState) {
             {
                 let content = oxidraft_io::export_svg(&app.document);
                 if let Err(e) = oxidraft_io::write_atomic(&path, content.as_bytes()) {
-                    app.command_log.push(format!("SVG export failed: {e}"));
+                    app.problem(format!("SVG export failed: {e}"));
                 }
             }
             ui.close();
@@ -2099,12 +2099,20 @@ pub(super) fn command_toast(ctx: &Context, app: &AppState, canvas_rect: egui::Re
         .interactable(false)
         .show(ctx, |ui| {
             ui.set_opacity(alpha);
-            crate::theme::toast_alert(crate::theme::tok::R_MD)
+            // Everything used to be drawn in the red alert frame, so a
+            // finished export looked exactly like a failed one. Only a problem
+            // gets the alert now; anything that worked reports on plain glass.
+            let frame = if msg.is_problem() {
+                crate::theme::toast_alert(crate::theme::tok::R_MD)
+            } else {
+                crate::theme::glass(crate::theme::tok::R_MD)
+            };
+            frame
                 .inner_margin(egui::Margin::symmetric(12, 7))
                 .show(ui, |ui| {
                     ui.label(
-                        egui::RichText::new(msg)
-                            .size(12.0)
+                        egui::RichText::new(msg.text())
+                            .size(crate::theme::tok::T_BODY)
                             .color(crate::theme::TEXT),
                     );
                 });
@@ -4142,7 +4150,7 @@ fn edit_entity_geometry(ui: &mut egui::Ui, app: &mut AppState, id: oxidraft_docu
                         .add_constraint(oxidraft_document::SketchConstraint::distance(id, new_len));
                 }
                 if !oxidraft_cad::resolve_after_edit(&mut app.document, id, None) {
-                    app.command_log.push(
+                    app.problem(
                         "Constraints not satisfiable after edit (UNCONSTRAIN to drop)".into(),
                     );
                 }
@@ -4194,7 +4202,7 @@ fn edit_entity_geometry(ui: &mut egui::Ui, app: &mut AppState, id: oxidraft_docu
                         ));
                 }
                 if !oxidraft_cad::resolve_after_edit(&mut app.document, id, None) {
-                    app.command_log.push(
+                    app.problem(
                         "Constraints not satisfiable after edit (UNCONSTRAIN to drop)".into(),
                     );
                 }

@@ -134,9 +134,9 @@ impl AppState {
                     // A polyline pick is a dead end today — say how to fix
                     // it instead of silently ignoring the click.
                     (None, None, Some(id)) if is_polycurve(self, id) => {
-                        self.command_log.push(
-                            "Polylines can't take dimensions — EXPLODE (X) into welded \
-                             lines first"
+                        self.problem(
+                            "Polylines can't take dimensions. Run Disjoint (Shift+X) to break \
+                             it into welded lines first."
                                 .into(),
                         );
                     }
@@ -171,7 +171,7 @@ impl AppState {
                     return true;
                 };
                 let Some((anchor, pos)) = weld_anchor_at(self, id, px, py, tol) else {
-                    self.command_log.push(
+                    self.note(
                         "No weldable point there — pick an endpoint, midpoint, center, or point"
                             .into(),
                     );
@@ -240,7 +240,7 @@ impl AppState {
                         .map(|(c, _)| (id, 0u8, c)),
                 };
                 let Some(pick) = resolved else {
-                    self.command_log.push(match step {
+                    self.note(match step {
                         crate::tools::ConPickStep::Point => {
                             "Pick an endpoint, midpoint, center, or point".into()
                         }

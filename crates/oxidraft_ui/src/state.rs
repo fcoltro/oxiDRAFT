@@ -27,6 +27,33 @@ pub use contextual::{CornerAction, CornerGeom, CornerKind, fillet_arc};
 /// The whole app's mutable state: the document, view, active tool,
 /// selection, undo history, and every user-facing setting. Owned by the UI
 /// shell and threaded through to every input handler and renderer.
+/// One line of feedback, and whether it reports a problem.
+///
+/// Only the newest is ever shown, as a toast. Every message used to be drawn
+/// in the same red-tinted alert frame, so "Plotted to PDF" and "Plot failed"
+/// were indistinguishable — the level is what lets the toast tell them apart.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum Note {
+    /// Something happened, and it worked.
+    Info(String),
+    /// Something was refused, or failed. Says what to do next where it can.
+    Problem(String),
+}
+
+impl Note {
+    /// The message itself.
+    pub fn text(&self) -> &str {
+        match self {
+            Note::Info(t) | Note::Problem(t) => t,
+        }
+    }
+
+    /// Whether this reports something the user probably needs to act on.
+    pub fn is_problem(&self) -> bool {
+        matches!(self, Note::Problem(_))
+    }
+}
+
 pub struct AppState {
     pub document: Document,
     pub view: ViewTransform,
@@ -39,7 +66,7 @@ pub struct AppState {
     pub prefs: UiPrefs,
     pub last_command: Option<String>,
     pub history: History,
-    pub command_log: Vec<String>,
+    pub command_log: Vec<Note>,
     pub cursor_world: (f64, f64),
     pub active_snap: Option<SnapPoint>,
     pub click_count: u32,
@@ -675,7 +702,7 @@ impl AppState {
                 if !hits.is_empty() {
                     self.history.snapshot(&self.document);
                     self.document.constraints.retain(|c| !hits.contains(c));
-                    self.command_log.push(if hits.len() == 1 {
+                    self.note(if hits.len() == 1 {
                         "Removed constraint via its badge".into()
                     } else {
                         format!("Removed {} constraints via their badge", hits.len())
@@ -845,8 +872,7 @@ impl AppState {
                 first, 0, new_id, 1,
             ))
         {
-            self.command_log
-                .push("Chain closed: corner welded coincident".into());
+            self.note("Chain closed: corner welded coincident".into());
         }
         true
     }
@@ -1042,8 +1068,7 @@ impl AppState {
                     new_id,
                 ))
             {
-                self.command_log
-                    .push("Inferred tangent constraint from arc endpoint".into());
+                self.note("Inferred tangent constraint from arc endpoint".into());
             }
             recorded = true;
         }
@@ -1124,8 +1149,7 @@ impl AppState {
             ));
         if oxidraft_cad::resolve_after_transform(&mut self.document, &[line_id]) {
             if recorded {
-                self.command_log
-                    .push("Inferred tangent constraint from arc onset".into());
+                self.note("Inferred tangent constraint from arc onset".into());
             }
         } else {
             self.document.constraints = prev;
@@ -1173,7 +1197,7 @@ impl AppState {
             .document
             .add_constraint(oxidraft_document::SketchConstraint::single(kind, new_id))
         {
-            self.command_log.push(format!(
+            self.note(format!(
                 "Inferred {} constraint on drawn line",
                 kind.label()
             ));
@@ -1220,7 +1244,7 @@ impl AppState {
             }
         }
         if inferred > 0 {
-            self.command_log.push(format!(
+            self.note(format!(
                 "Inferred {inferred} coincident constraint(s) from endpoint snap"
             ));
         }
@@ -1276,8 +1300,7 @@ impl AppState {
         if t.is_finite() {
             return false;
         }
-        self.command_log
-            .push("Transform undefined for those picks — nothing changed".into());
+        self.problem("Transform undefined for those picks — nothing changed".into());
         self.tool = Tool::Select;
         true
     }
@@ -1295,11 +1318,10 @@ impl AppState {
                 match win.normalized() {
                     Some(corners) => {
                         self.plot_window = Some(corners);
-                        self.command_log.push("Plot window set".into());
+                        self.note("Plot window set".into());
                     }
                     None => self
-                        .command_log
-                        .push("Plot window has no area — pick two different corners".into()),
+                        .problem("The plot window has no area — pick two different corners".into()),
                 }
                 self.plot_dialog_open = true;
                 self.plot_window_mode = true;
@@ -1350,8 +1372,7 @@ impl AppState {
                             &[new_id, r.other],
                             r.kind,
                         ) {
-                            self.command_log
-                                .push(format!("{:?} not recorded: {}", r.kind, e.message));
+                            self.note(format!("{:?} not recorded: {}", r.kind, e.message));
                         }
                     }
                 }
@@ -1371,7 +1392,7 @@ impl AppState {
                     }
                 }
                 if !oxidraft_cad::resolve_after_transform_rigid(&mut self.document, &moved, &t) {
-                    self.command_log.push(
+                    self.problem(
                         "Constraints not satisfiable after transform (UNCONSTRAIN to drop)".into(),
                     );
                 }
@@ -1433,7 +1454,7 @@ impl AppState {
                 });
             }
             self.tool = Tool::Select;
-            self.command_log.push(trimmed.to_string());
+            self.note(trimmed.to_string());
             return;
         }
         if matches!(self.tool, Tool::Polyline { .. } | Tool::Spline { .. }) {
@@ -1448,7 +1469,7 @@ impl AppState {
                 let ev = self.tool.close_and_commit();
                 self.apply_tool_event(ev);
                 self.tool = Tool::Select;
-                self.command_log.push(trimmed.to_string());
+                self.note(trimmed.to_string());
                 return;
             }
         }
@@ -1461,7 +1482,7 @@ impl AppState {
                 radius_point: None,
                 sides: Some(n),
             };
-            self.command_log.push(trimmed.to_string());
+            self.note(trimmed.to_string());
             return;
         }
         if let Ok(v) = trimmed.parse::<f64>()
@@ -1473,7 +1494,7 @@ impl AppState {
                         dist: v,
                         source: *source,
                     };
-                    self.command_log.push(trimmed.to_string());
+                    self.note(trimmed.to_string());
                     return;
                 }
                 Tool::Fillet { first, .. } => {
@@ -1481,7 +1502,7 @@ impl AppState {
                         radius: v,
                         first: *first,
                     };
-                    self.command_log.push(trimmed.to_string());
+                    self.note(trimmed.to_string());
                     return;
                 }
                 Tool::Chamfer { first, .. } => {
@@ -1489,7 +1510,7 @@ impl AppState {
                         dist: v,
                         first: *first,
                     };
-                    self.command_log.push(trimmed.to_string());
+                    self.note(trimmed.to_string());
                     return;
                 }
                 Tool::Blend {
@@ -1504,7 +1525,7 @@ impl AppState {
                         first: *first,
                         second: *second,
                     };
-                    self.command_log.push(trimmed.to_string());
+                    self.note(trimmed.to_string());
                     return;
                 }
                 Tool::CircleTtr { first, .. } => {
@@ -1512,7 +1533,7 @@ impl AppState {
                         radius: v,
                         first: *first,
                     };
-                    self.command_log.push(trimmed.to_string());
+                    self.note(trimmed.to_string());
                     return;
                 }
                 _ => {}
@@ -1536,7 +1557,7 @@ impl AppState {
             let target_pt = Point2d::from_f64(rx + dist * ux, ry + dist * uy);
             let ev = self.tool.on_pick(crate::tools::Pick::bare(target_pt));
             self.apply_tool_event(ev);
-            self.command_log.push(trimmed.to_string());
+            self.note(trimmed.to_string());
             return;
         }
         if let Some(coord) = parse_coordinate(trimmed) {
@@ -1561,11 +1582,11 @@ impl AppState {
                 .tool
                 .on_pick(crate::tools::Pick::bare(Point2d::from_f64(x, y)));
             self.apply_tool_event(ev);
-            self.command_log.push(trimmed.to_string());
+            self.note(trimmed.to_string());
             return;
         }
         let cmd = parse_command(text);
-        self.command_log.push(text.trim().to_string());
+        self.note(text.trim().to_string());
         if !matches!(cmd, Command::Cancel | Command::Unknown(_)) {
             self.last_command = Some(trimmed.to_string());
         }
@@ -1650,8 +1671,7 @@ impl AppState {
                 // unrecognised command shows a toast of exactly what was typed
                 // and then does nothing — which reads as confirmation. Say it
                 // was not understood, and where to look.
-                self.command_log
-                    .push(format!("{what} isn't a command — press Ctrl+F to search"));
+                self.problem(format!("{what} isn't a command — press Ctrl+F to search"));
             }
         }
     }
@@ -1778,7 +1798,7 @@ impl AppState {
             .filter_map(|&id| self.document.get(id).and_then(oxidraft_cad::boundary_loop))
             .collect();
         if loops.is_empty() {
-            self.command_log.push(
+            self.note(
                 "HATCH: select a closed boundary, or run HATCH and click inside an area".into(),
             );
             return;
@@ -1806,13 +1826,11 @@ impl AppState {
         let (boundary, holes) = match oxidraft_cad::trace_pick_region(&self.document, x, y) {
             Ok(r) => r,
             Err(oxidraft_cad::PickRegionError::TooComplex) => {
-                self.command_log
-                    .push("HATCH: boundary too complex to trace (over 4000 segments)".into());
+                self.problem("HATCH: boundary too complex to trace (over 4000 segments)".into());
                 return false;
             }
             Err(oxidraft_cad::PickRegionError::NotFound) => {
-                self.command_log
-                    .push("HATCH: no enclosed area found at that point".into());
+                self.problem("HATCH: no enclosed area found at that point".into());
                 return false;
             }
         };
@@ -1841,12 +1859,12 @@ impl AppState {
             Ok(msg) => {
                 self.history.snapshot(&self.document);
                 self.document = doc;
-                self.command_log.push(msg);
+                self.note(msg);
                 self.doc_epoch = self.doc_epoch.wrapping_add(1);
                 true
             }
             Err(e) => {
-                self.command_log.push(e.message);
+                self.note(e.message);
                 if !e.culprits.is_empty() {
                     self.conflict_flash = Some((e.culprits, std::time::Instant::now()));
                 }
@@ -1948,8 +1966,7 @@ impl AppState {
                 .count();
             if lines != 2 {
                 self.tool = Tool::Weld { first: None };
-                self.command_log
-                    .push("WELD: pick two points to make them coincident".into());
+                self.note("WELD: pick two points to make them coincident".into());
                 return;
             }
         }
@@ -1960,7 +1977,7 @@ impl AppState {
                 kind,
                 picks: Vec::new(),
             };
-            self.command_log.push(match kind {
+            self.note(match kind {
                 K::Midpoint => "MIDPOINT: pick a point, then a line".into(),
                 K::PointOnLine => "POINT-ON-LINE: pick a point, then a line".into(),
                 K::PointOnCircle => "POINT-ON-CIRCLE: pick a point, then a circle/arc".into(),
@@ -2145,8 +2162,7 @@ impl AppState {
         if self.document.constraints.contains(&target) {
             self.history.snapshot(&self.document);
             self.document.constraints.retain(|c| c != &target);
-            self.command_log
-                .push(format!("Removed {} constraint", target.kind.label()));
+            self.note(format!("Removed {} constraint", target.kind.label()));
             self.doc_epoch = self.doc_epoch.wrapping_add(1);
         }
     }
@@ -2155,8 +2171,7 @@ impl AppState {
     /// segments. Logs a hint if `n` is missing (the command needs a count).
     pub fn divide_selection(&mut self, n: Option<u32>) {
         let Some(n) = n else {
-            self.command_log
-                .push("DIVIDE needs a segment count of 2 or more (DIVIDE 5)".into());
+            self.problem("DIVIDE needs a segment count of 2 or more (DIVIDE 5)".into());
             return;
         };
         self.place_points_on_selection(
@@ -2171,8 +2186,7 @@ impl AppState {
     /// positive distance).
     pub fn measure_selection(&mut self, interval: Option<f64>) {
         let Some(interval) = interval else {
-            self.command_log
-                .push("MEASURE needs a positive interval (MEASURE 2.5)".into());
+            self.problem("MEASURE needs a positive interval (MEASURE 2.5)".into());
             return;
         };
         self.place_points_on_selection(
@@ -2194,7 +2208,7 @@ impl AppState {
             .filter_map(|&id| self.document.get(id).and_then(|e| e.as_curve()).cloned())
             .collect();
         if curves.is_empty() {
-            self.command_log.push(empty_msg.into());
+            self.note(empty_msg.into());
             return;
         }
         self.history.snapshot(&self.document);
@@ -2204,9 +2218,9 @@ impl AppState {
             .sum();
         if placed == 0 {
             self.history.discard_last();
-            self.command_log.push(zero_msg.into());
+            self.note(zero_msg.into());
         } else {
-            self.command_log.push(format!("Placed {placed} point(s)"));
+            self.note(format!("Placed {placed} point(s)"));
         }
     }
 
@@ -2214,8 +2228,7 @@ impl AppState {
     /// instead if the selection is empty or has no constraints on it.
     pub fn unconstrain_selection(&mut self) {
         if self.selection.is_empty() {
-            self.command_log
-                .push("Select entities to remove constraints from".into());
+            self.note("Select entities to remove constraints from".into());
             return;
         }
         let count: usize = self
@@ -2224,8 +2237,7 @@ impl AppState {
             .map(|&id| self.document.constraints_on(id).count())
             .sum();
         if count == 0 {
-            self.command_log
-                .push("No constraints on the selection".into());
+            self.note("No constraints on the selection".into());
             return;
         }
         self.history.snapshot(&self.document);
@@ -2233,7 +2245,7 @@ impl AppState {
             self.document.remove_constraints_on(id);
         }
         let remaining = self.document.constraints.len();
-        self.command_log.push(format!(
+        self.note(format!(
             "Removed constraints touching the selection ({remaining} left in drawing)"
         ));
         self.doc_epoch = self.doc_epoch.wrapping_add(1);
@@ -2567,7 +2579,7 @@ impl AppState {
                 self.current_file_path = Some(path);
                 self.saved_revision = self.history.current_revision();
             }
-            Err(e) => self.command_log.push(format!("Cannot open: {e}")),
+            Err(e) => self.problem(format!("Cannot open: {e}")),
         }
     }
 
@@ -2619,7 +2631,7 @@ impl AppState {
                 true
             }
             Err(e) => {
-                self.command_log.push(format!("Save failed: {e}"));
+                self.problem(format!("Save failed: {e}"));
                 false
             }
         }
@@ -2635,6 +2647,20 @@ impl AppState {
     /// only the newest entry is ever displayed (the toast), the rest exist
     /// for context. Trimmed with slack so the drain runs rarely, not on
     /// every push past the cap.
+    /// Reports something that worked.
+    ///
+    /// Takes a `String` rather than `impl Into<String>` so the very common
+    /// `"…".into()` at call sites still resolves — with the generic form there
+    /// is nothing to infer the target type from.
+    pub fn note(&mut self, msg: String) {
+        self.command_log.push(Note::Info(msg));
+    }
+
+    /// Reports something refused or failed. Prefer saying what to do next.
+    pub fn problem(&mut self, msg: String) {
+        self.command_log.push(Note::Problem(msg));
+    }
+
     pub fn trim_command_log(&mut self) {
         const CAP: usize = 400;
         const SLACK: usize = 200;
@@ -2664,7 +2690,7 @@ impl AppState {
                 true
             }
             Err(e) => {
-                self.command_log.push(format!("Recovery failed: {e}"));
+                self.problem(format!("Recovery failed: {e}"));
                 false
             }
         }
@@ -4700,7 +4726,7 @@ mod tests {
     fn command_log_is_capped_and_keeps_the_newest_entries() {
         let mut a = app();
         for i in 0..1000 {
-            a.command_log.push(format!("entry {i}"));
+            a.note(format!("entry {i}"));
             a.trim_command_log();
         }
         assert!(
@@ -4709,7 +4735,7 @@ mod tests {
             a.command_log.len()
         );
         assert_eq!(
-            a.command_log.last().map(String::as_str),
+            a.command_log.last().map(Note::text),
             Some("entry 999"),
             "trimming drops the oldest entries, never the newest"
         );
@@ -4794,6 +4820,24 @@ mod tests {
     }
 
     #[test]
+    fn success_and_failure_are_told_apart() {
+        // Every message used to render in the same red alert frame, so a
+        // finished export looked exactly like a failed one. The toast picks
+        // its frame from this, so the levels have to be right.
+        let mut a = app();
+        a.note("Plotted to PDF".into());
+        assert!(
+            !a.command_log.last().expect("logged").is_problem(),
+            "something that worked must not be dressed as a failure"
+        );
+        a.problem("Couldn't plot to PDF — disk full".into());
+        assert!(
+            a.command_log.last().expect("logged").is_problem(),
+            "a failure must read as one"
+        );
+    }
+
+    #[test]
     fn an_unrecognised_command_says_so() {
         // The raw text is logged before dispatch, so without this the toast
         // shows exactly what was typed and nothing happens — which reads as
@@ -4802,12 +4846,16 @@ mod tests {
         a.run_command("FILLETT");
         let last = a.command_log.last().expect("something was logged");
         assert!(
-            last.contains("isn't a command"),
+            last.text().contains("isn't a command"),
             "an unknown command must say so, got {last:?}"
         );
         assert!(
-            last.contains("FILLETT"),
+            last.text().contains("FILLETT"),
             "and it should quote what was typed, got {last:?}"
+        );
+        assert!(
+            last.is_problem(),
+            "an unrecognised command is a refusal, not news: {last:?}"
         );
     }
 
@@ -4817,7 +4865,7 @@ mod tests {
         a.run_command("LINE");
         let last = a.command_log.last().expect("something was logged");
         assert!(
-            !last.contains("isn't a command"),
+            !last.text().contains("isn't a command"),
             "LINE is a command, got {last:?}"
         );
     }
