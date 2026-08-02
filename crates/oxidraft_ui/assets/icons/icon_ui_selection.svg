@@ -1,42 +1,5 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<svg xmlns="http://www.w3.org/2000/svg" version="1.1" viewBox="0 0 24 24">
+<svg id="art" xmlns="http://www.w3.org/2000/svg" version="1.1" viewBox="0 0 24 24">
   <!-- Generator: Adobe Illustrator 30.6.0, SVG Export Plug-In . SVG Version: 2.1.4 Build 109)  -->
-  <defs>
-    <style>
-      .st0 {
-        stroke-linecap: round;
-        stroke-linejoin: round;
-      }
-
-      .st0, .st1 {
-        fill: none;
-        opacity: .2;
-        stroke: #ccc;
-        stroke-width: .1px;
-      }
-
-      .st1 {
-        stroke-miterlimit: 10;
-      }
-
-      .st2 {
-        fill: red;
-        opacity: .15;
-      }
-    </style>
-  </defs>
-  <g id="art">
-    <path d="M9,21s-.02,0-.03,0c-.43-.01-.8-.29-.93-.7L3.05,4.3c-.11-.36-.01-.76.27-1.02.28-.26.68-.34,1.04-.21l16,6c.41.15.67.56.65.99-.02.44-.33.81-.76.91l-7.49,1.87-2.82,7.51c-.15.39-.52.65-.94.65ZM5.56,5.65l3.52,11.27,1.98-5.27c.12-.31.38-.54.69-.62l4.88-1.22L5.56,5.65Z"/>
-  </g>
-  <g id="border">
-    <path class="st2" d="M0,0v24h24V0H0ZM22,22H2V2h20v20Z"/>
-  </g>
-  <g id="guides">
-    <rect class="st1" x="3" y="3" width="18" height="18" rx="2" ry="2"/>
-    <rect class="st1" x="4" y="2" width="16" height="20" rx="2" ry="2"/>
-    <rect class="st1" x="2" y="4" width="20" height="16" rx="2" ry="2"/>
-    <circle class="st1" cx="12" cy="12" r="10"/>
-    <line class="st0" x1="2" y1="2" x2="22" y2="22"/>
-    <line class="st0" x1="22" y1="2" x2="2" y2="22"/>
-  </g>
+  <path d="M9,21s-.02,0-.03,0c-.43-.01-.8-.29-.93-.7L3.05,4.3c-.11-.36-.01-.76.27-1.02.28-.26.68-.34,1.04-.21l16,6c.41.15.67.56.65.99-.02.44-.33.81-.76.91l-7.49,1.87-2.82,7.51c-.15.39-.52.65-.94.65ZM5.56,5.65l3.52,11.27,1.98-5.27c.12-.31.38-.54.69-.62l4.88-1.22L5.56,5.65Z"/>
 </svg>
