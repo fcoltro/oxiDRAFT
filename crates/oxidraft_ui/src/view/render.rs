@@ -75,15 +75,15 @@ pub(super) fn tool_prompt(tool: &Tool) -> String {
         },
         Tool::CircleTtr { first, .. } => {
             if first.is_none() {
-                "Pick the first tangent entity (type a radius first)".into()
+                "Pick the first object to touch (type a radius first)".into()
             } else {
-                "Pick the second tangent entity".into()
+                "Pick the second object to touch".into()
             }
         }
         Tool::CircleTtt { picks } => match picks.len() {
-            0 => "Pick the first tangent entity".into(),
-            1 => "Pick the second tangent entity".into(),
-            _ => "Pick the third tangent entity".into(),
+            0 => "Pick the first object to touch".into(),
+            1 => "Pick the second object to touch".into(),
+            _ => "Pick the third object to touch".into(),
         },
         Tool::TangentLine { first } => match first {
             None => "Pick a start point or a circle/arc".into(),
@@ -258,9 +258,9 @@ pub(super) fn tool_prompt(tool: &Tool) -> String {
             if second.is_some() {
                 "Adjust continuity/tension, then Apply or Enter to confirm".into()
             } else if first.is_none() {
-                format!("Blend ({continuity:?}) — pick the first entity")
+                format!("Blend ({continuity:?}) — pick the first object")
             } else {
-                "Pick the second entity to blend into".into()
+                "Pick the second object to blend into".into()
             }
         }
         Tool::Stretch { c1, c2, base, .. } => match (c1, c2, base) {
@@ -269,7 +269,7 @@ pub(super) fn tool_prompt(tool: &Tool) -> String {
             (_, _, None) => "Specify base point".into(),
             _ => "Specify destination".into(),
         },
-        Tool::Select => "Click an entity, or drag a window".into(),
+        Tool::Select => "Click an object, or drag a window".into(),
         Tool::Point => "Specify point".into(),
     }
 }

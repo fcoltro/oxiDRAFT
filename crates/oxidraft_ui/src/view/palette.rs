@@ -117,9 +117,9 @@ const ENTRIES: &[Entry] = &[
         action: Action::Cmd("MOVE"),
     },
     Entry {
-        name: "Copy",
+        name: "Duplicate",
         hint: "Shift C",
-        keywords: "modify duplicate",
+        keywords: "modify copy",
         group: "Modify",
         icon: Icon::Copy,
         action: Action::Cmd("COPY"),
@@ -229,9 +229,9 @@ const ENTRIES: &[Entry] = &[
         action: Action::Cmd("HATCH"),
     },
     Entry {
-        name: "Erase",
+        name: "Delete",
         hint: "Del",
-        keywords: "delete remove",
+        keywords: "erase remove",
         group: "Modify",
         icon: Icon::Delete,
         action: Action::Cmd("ERASE"),
@@ -363,7 +363,7 @@ const ENTRIES: &[Entry] = &[
     Entry {
         name: "Concentric",
         hint: "CONC",
-        keywords: "constrain same centre center circles",
+        keywords: "constrain same center circles",
         group: "Constraints",
         icon: Icon::ConConcentric,
         action: Action::Cmd("CONCENTRIC"),

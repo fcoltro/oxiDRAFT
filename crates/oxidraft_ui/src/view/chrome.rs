@@ -601,7 +601,7 @@ fn menu_items(ui: &mut egui::Ui, app: &mut AppState) {
         }
         ui.separator();
         if ui
-            .add_enabled(has_sel, egui::Button::new("Erase").shortcut_text("Del"))
+            .add_enabled(has_sel, egui::Button::new("Delete").shortcut_text("Del"))
             .clicked()
         {
             app.erase_selection();
@@ -780,7 +780,7 @@ fn menu_items(ui: &mut egui::Ui, app: &mut AppState) {
         tool_menu_item(
             ui,
             app,
-            "Copy",
+            "Duplicate",
             Tool::Copy {
                 base: None,
                 ids: vec![],
@@ -1796,7 +1796,7 @@ pub(super) fn draw_entries() -> Vec<(crate::icons::Icon, &'static str, Act)> {
         ),
         (
             Icon::Blend,
-            "Blend  (Shift+B) — pick G0–G3, pick 2 entities",
+            "Blend  (Shift+B) — pick G0–G3, pick two objects",
             Act::Tool(Tool::Blend {
                 continuity: oxidraft_geometry::Continuity::G1,
                 tension: 1.0,
@@ -1825,7 +1825,7 @@ pub(super) fn modify_entries() -> Vec<(crate::icons::Icon, &'static str, Act)> {
         ),
         (
             Icon::Copy,
-            "Copy selection  (Shift+C)",
+            "Duplicate  (Shift+C)",
             Act::Tool(Tool::Copy {
                 base: None,
                 ids: vec![],
@@ -2131,9 +2131,9 @@ pub(super) fn status_pill(ctx: &Context, app: &mut AppState, canvas_rect: egui::
             // here would be a lie about everything outside the component.
             (
                 format!(
-                    "{} unconstrained entit{}",
+                    "{} unconstrained object{}",
                     s.free_entities,
-                    if s.free_entities == 1 { "y" } else { "ies" }
+                    if s.free_entities == 1 { "" } else { "s" }
                 ),
                 crate::theme::STATUS_AMBER,
             )
@@ -3251,7 +3251,7 @@ fn hints_for_tool(tool: &Tool) -> (&'static str, Vec<(&'static str, &'static str
         Select => (
             "Select",
             vec![
-                ("Click", "pick an entity"),
+                ("Click", "pick an object"),
                 ("Drag →", "window select"),
                 ("Drag ←", "crossing select"),
                 ("Shift", "add / remove"),
@@ -3384,7 +3384,7 @@ fn hints_for_tool(tool: &Tool) -> (&'static str, Vec<(&'static str, &'static str
             vec![
                 ("G0–G3", "continuity"),
                 ("type", "tension"),
-                ("Click", "two entities"),
+                ("Click", "two objects"),
                 ("Esc", "cancel"),
             ],
         ),
@@ -4166,7 +4166,7 @@ fn edit_entity_geometry(ui: &mut egui::Ui, app: &mut AppState, id: oxidraft_docu
             let mut sa = arc.start_angle.to_degrees();
             let mut ea = arc.end_angle.to_degrees();
             let mut changed = false;
-            prop_caption(ui, "Centre");
+            prop_caption(ui, "Center");
             changed |= xy_fields(ui, "X", &mut cx, "Y", &mut cy, 0.01);
             ui.add_space(crate::theme::tok::SP_2);
             changed |= num_field(ui, "Radius", &mut r, 0.01);
@@ -4288,7 +4288,7 @@ fn edit_entity_geometry(ui: &mut egui::Ui, app: &mut AppState, id: oxidraft_docu
             let mut sa = el.start_angle.to_degrees();
             let mut ea = el.end_angle.to_degrees();
             let mut changed = false;
-            prop_caption(ui, "Centre");
+            prop_caption(ui, "Center");
             changed |= xy_fields(ui, "X", &mut cx, "Y", &mut cy, 0.01);
             ui.add_space(crate::theme::tok::SP_2);
             ui.columns(2, |c| {
