@@ -1720,7 +1720,7 @@ fn tool_menu_item(ui: &mut egui::Ui, app: &mut AppState, label: &str, tool: Tool
     }
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub(super) enum Act {
     Tool(Tool),
     Cmd(Command),
@@ -1933,7 +1933,13 @@ pub(super) fn act_needs_selection(act: &Act) -> bool {
 pub(super) fn group_id(act: &Act) -> Option<u8> {
     match act {
         Act::Tool(Tool::Line { .. }) => Some(0),
-        Act::Tool(Tool::Circle { .. }) => Some(1),
+        // No entry for Circle. It had a group — five constructions to
+        // pre-select from — until Circle became one tool that reads the
+        // construction off the picks themselves (see `Contribution` in
+        // tools.rs). Forcing that choice in the radial menu's own gesture
+        // would have been the exact thing the redesign removed, reintroduced
+        // one menu away from where it was taken out. Clicking the wedge now
+        // does what clicking any other leaf wedge does: activate the tool.
         Act::Tool(Tool::Arc3 { .. }) => Some(2),
         Act::Tool(Tool::Dimension { .. }) => Some(3),
         _ => None,
@@ -1953,34 +1959,10 @@ pub(super) fn group_entries(id: u8) -> Vec<(crate::icons::Icon, &'static str, Ac
                 ),
             ]
         }
-        1 => {
-            vec![
-                (Icon::Circle, "Center, radius", Act::Tool(Tool::circle())),
-                (
-                    Icon::Circle2P,
-                    "2 points (diameter)",
-                    Act::Tool(Tool::CircleTwoPoint { first: None }),
-                ),
-                (
-                    Icon::Circle3P,
-                    "3 points",
-                    Act::Tool(Tool::CircleThreePoint { pts: vec![] }),
-                ),
-                (
-                    Icon::CircleTtr,
-                    "Tangent, tangent, radius",
-                    Act::Tool(Tool::CircleTtr {
-                        radius: 1.0,
-                        first: None,
-                    }),
-                ),
-                (
-                    Icon::CircleTtt,
-                    "Tangent, tangent, tangent",
-                    Act::Tool(Tool::CircleTtt { picks: vec![] }),
-                ),
-            ]
-        }
+        // id 1 was the Circle group; retired along with its entry in
+        // `group_id` above. Not reused, so a stray call with id 1 falls
+        // through to the `_` arm below rather than silently meaning
+        // something else.
         2 => {
             vec![
                 (Icon::Arc, "3 points", Act::Tool(Tool::Arc3 { pts: vec![] })),
@@ -4543,5 +4525,73 @@ fn file_save_as(app: &mut AppState) {
         .save_file()
     {
         app.save_file_to(path);
+    }
+}
+
+#[cfg(test)]
+mod radial_group_tests {
+    use super::*;
+
+    #[test]
+    fn circle_has_no_radial_group() {
+        // Circle used to expand into five sub-tools to pre-select a
+        // construction from — the exact thing the unified circle tool (see
+        // `Contribution` in tools.rs) exists to make unnecessary, since it
+        // reads the construction off the picks themselves. Re-introducing
+        // that choice one menu away, in the radial gesture, would have put
+        // it right back. `group_id` returning `None` is what makes the
+        // wedge behave like any other leaf tool: one click, one activation.
+        let circle_act = Act::Tool(Tool::circle());
+        assert_eq!(
+            group_id(&circle_act),
+            None,
+            "Circle must not have a radial sub-menu"
+        );
+    }
+
+    #[test]
+    fn the_draw_ring_still_offers_one_circle_entry() {
+        // The wedge itself must still exist — only its expansion into
+        // constructions is gone.
+        let entries = draw_entries();
+        let circle_entries: Vec<_> = entries
+            .iter()
+            .filter(|(_, _, act)| matches!(act, Act::Tool(Tool::Circle { .. })))
+            .collect();
+        assert_eq!(
+            circle_entries.len(),
+            1,
+            "expected exactly one Circle wedge in the draw ring, got {circle_entries:?}"
+        );
+    }
+
+    #[test]
+    fn every_group_id_the_ring_can_produce_has_entries() {
+        // A wedge whose `group_id` returns `Some(n)` but whose `group_entries(n)`
+        // comes back empty would open an empty sub-ring on hover — this is the
+        // check that would have caught leaving Circle's mapping in `group_id`
+        // while deleting its arm from `group_entries` (or the reverse).
+        for (_, _, act) in draw_entries().iter().chain(modify_entries().iter()) {
+            if let Some(id) = group_id(act) {
+                assert!(
+                    !group_entries(id).is_empty(),
+                    "group id {id} has no entries"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn no_tool_variant_still_carries_the_retired_circle_group_id() {
+        // id 1 was Circle's group before this test suite existed to say
+        // otherwise. Nothing in either ring should map back onto it — that
+        // would mean a stray tool inherited the id circle gave up.
+        for (_, _, act) in draw_entries().iter().chain(modify_entries().iter()) {
+            assert_ne!(
+                group_id(act),
+                Some(1),
+                "id 1 was retired with the Circle group; {act:?} should not reuse it"
+            );
+        }
     }
 }

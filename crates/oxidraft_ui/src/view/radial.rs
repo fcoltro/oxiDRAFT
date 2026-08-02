@@ -254,10 +254,13 @@ fn draw_hub(painter: &egui::Painter, center: Pos2, label: Option<&str>) {
             painter.galley(center - galley.size() * 0.5, galley, theme::TEXT);
         }
         None => {
+            // Not the widget's own name — a hint at what to do with it,
+            // matching the "Nothing selected — click an object..." style the
+            // rest of the app uses for an empty state.
             painter.text(
                 center,
                 egui::Align2::CENTER_CENTER,
-                "Radial",
+                "Choose a tool",
                 egui::FontId::proportional(theme::tok::T_CAPTION),
                 theme::TEXT_DIM,
             );
@@ -383,7 +386,7 @@ pub(super) fn radial_menu(
             if let (Some(entries), Some(idx)) = (&category_entries, category_hovered) {
                 Some(short_label(entries[idx].1).to_string())
             } else if category.is_none() && dist > DEAD_ZONE {
-                Some(if root_idx == 0 { "Tools" } else { "Modifiers" }.to_string())
+                Some(if root_idx == 0 { "Tools" } else { "Modify" }.to_string())
             } else {
                 None
             }
@@ -442,7 +445,7 @@ pub(super) fn radial_menu(
             } else {
                 // Root: the circle split into two big halves — Tools / Modifiers.
                 let half = std::f32::consts::PI / 2.0 - WEDGE_HALF_GAP;
-                for (i, label) in ["Tools", "Modifiers"].iter().enumerate() {
+                for (i, label) in ["Tools", "Modify"].iter().enumerate() {
                     let ca = wedge_center_angle(i, 2);
                     let hovered = i == root_idx && dist > DEAD_ZONE;
                     draw_sector(
