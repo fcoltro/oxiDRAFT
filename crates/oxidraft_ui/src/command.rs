@@ -134,24 +134,17 @@ pub fn parse_command(input: &str) -> Command {
         // on (see `Tool::Line`), so this is the same tool as LINE — kept as
         // an alias for anyone who still types it out of habit.
         "TANGENT" | "TAN" => Command::Activate(Tool::Line { first: None }),
+        // The dimension tool now infers linear/angular/radius from what's
+        // picked (see `Tool::Dimension`), so every one of these names
+        // activates the same tool with nothing banked yet — there is no
+        // pick to pre-seed a diameter reading with before a circle/arc is
+        // actually picked, so DIMDIAMETER differs from DIMRADIUS only in
+        // habit: pick a circle, then Tab to flip to diameter before placing.
         "DIMENSION" | "DIM" | "DIMLINEAR" | "DIMALIGNED" | "DIMHORIZONTAL" | "DIMHOR"
-        | "DIMVERTICAL" | "DIMVER" => Command::Activate(Tool::Dimension { p1: None, p2: None }),
-        "DIMANGULAR" | "DIMANG" | "DIMANGLE" | "DIMANGLINES" | "DIMANG2" | "DIMANGL" => {
-            Command::Activate(Tool::DimAngularLines {
-                a: None,
-                geom: None,
-            })
+        | "DIMVERTICAL" | "DIMVER" | "DIMANGULAR" | "DIMANG" | "DIMANGLE" | "DIMANGLINES"
+        | "DIMANG2" | "DIMANGL" | "DIMRADIUS" | "DIMRAD" | "DIMDIAMETER" | "DIMDIA" => {
+            Command::Activate(Tool::Dimension { subject: None })
         }
-        "DIMRADIUS" | "DIMRAD" => Command::Activate(Tool::DimRadial {
-            diameter: false,
-            center: None,
-            radius: 0.0,
-        }),
-        "DIMDIAMETER" | "DIMDIA" => Command::Activate(Tool::DimRadial {
-            diameter: true,
-            center: None,
-            radius: 0.0,
-        }),
         "ELLIPSE" | "EL" => Command::Activate(Tool::Ellipse {
             center: None,
             axis_end: None,

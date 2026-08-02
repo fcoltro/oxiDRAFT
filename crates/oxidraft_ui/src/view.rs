@@ -1707,8 +1707,7 @@ fn canvas(root_ui: &mut egui::Ui, app: &mut AppState, ui_state: &mut UiState, pa
                 .unwrap_or(Color32::from_rgb(46, 204, 113));
             match &app.tool {
                 Tool::Dimension {
-                    p1: Some(a),
-                    p2: Some(b),
+                    subject: Some(crate::tools::DimSubject::Points(a, b)),
                 } => match oxidraft_document::linear_orientation(*a, *b, cursor) {
                     None => {
                         draw_dimension(&painter, app, *a, *b, cursor, None, &to_screen, dim_col)
@@ -1717,20 +1716,22 @@ fn canvas(root_ui: &mut egui::Ui, app: &mut AppState, ui_state: &mut UiState, pa
                         &painter, app, *a, *b, cursor, vertical, None, &to_screen, dim_col,
                     ),
                 },
-                Tool::DimAngularLines {
-                    geom: Some((v, a, b)),
-                    ..
+                Tool::Dimension {
+                    subject: Some(crate::tools::DimSubject::LinePair(v, a, b)),
                 } => {
                     render::draw_angular_dim(
                         &painter, app, *v, *a, *b, cursor, None, &to_screen, dim_col,
                     );
                 }
-                Tool::DimRadial {
-                    diameter,
-                    center: Some(c),
-                    radius,
+                Tool::Dimension {
+                    subject:
+                        Some(crate::tools::DimSubject::Radial {
+                            center,
+                            radius,
+                            diameter,
+                        }),
                 } if *radius > 1e-9 => {
-                    let (cx, cy) = c.to_f64();
+                    let (cx, cy) = center.to_f64();
                     let (dx, dy) = (cursor.x - cx, cursor.y - cy);
                     let len = (dx * dx + dy * dy).sqrt();
                     let edge = if len > 1e-9 {
@@ -1739,7 +1740,7 @@ fn canvas(root_ui: &mut egui::Ui, app: &mut AppState, ui_state: &mut UiState, pa
                         Point2d::from_f64(cx + *radius, cy)
                     };
                     render::draw_radial_dim(
-                        &painter, app, *c, edge, *diameter, None, &to_screen, dim_col,
+                        &painter, app, *center, edge, *diameter, None, &to_screen, dim_col,
                     );
                 }
                 _ => {}

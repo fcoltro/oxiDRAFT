@@ -113,18 +113,14 @@ pub enum Tool {
     CircleTtt {
         picks: Vec<EntityId>,
     },
+    /// One drafting-dimension tool for linear, angular, and radial/diameter
+    /// annotations: what's picked decides the kind, the same inference
+    /// `Tool::DimConstraint` already does for *driving* dimensions below —
+    /// a line for its length (or, paired with a second line, an angle), a
+    /// circle/arc for its radius, or two free points for the old plain
+    /// two-point case. See [`DimSubject`].
     Dimension {
-        p1: Option<Point2d>,
-        p2: Option<Point2d>,
-    },
-    DimAngularLines {
-        a: Option<EntityId>,
-        geom: Option<(Point2d, Point2d, Point2d)>,
-    },
-    DimRadial {
-        diameter: bool,
-        center: Option<Point2d>,
-        radius: f64,
+        subject: Option<DimSubject>,
     },
     /// Smart dimensioning that adds *driving* constraints (not drafting
     /// annotations): click a line for a driving length, a circle/arc for a
@@ -248,6 +244,114 @@ pub enum TanAnchor {
     Point(Point2d),
     /// Entity id, where it was clicked, its centre, its radius.
     Circle(EntityId, Point2d, Point2d, f64),
+}
+
+/// What `Tool::Dimension` has picked so far, on the way to a placement
+/// click. Classifying a pick — line vs. circle/arc vs. empty space, and
+/// telling a second line from anything else — needs the document, so that
+/// part of the dispatch lives in `AppState::handle_modify_click`. Everything
+/// past that point only needs what a subject already carries, which
+/// [`dimension_pick`] handles without a document — the same split
+/// [`TanAnchor`] makes for the line tool, and for the same reason: it is
+/// what lets `AppState::place_tool_point` (typed coordinates) keep placing
+/// dimensions the way it already does lines.
+#[derive(Clone, Copy, Debug)]
+pub enum DimSubject {
+    /// One free point banked, awaiting a second — the old plain
+    /// `Tool::Dimension`'s only case, still reachable when neither pick
+    /// lands on anything dimensionable.
+    Point(Point2d),
+    /// Two points banked — typed freely, or a line's own endpoints picked
+    /// as a shortcut (see the `Line` case below) — awaiting placement.
+    Points(Point2d, Point2d),
+    /// One line banked, its endpoints resolved so placing its own length
+    /// needs no document; may still pair with a second line for an angular
+    /// dimension instead, which does need one — mirroring
+    /// `Tool::DimConstraint`'s `first`.
+    Line(EntityId, Point2d, Point2d),
+    /// Two lines' angular geometry resolved (vertex, far point on each),
+    /// awaiting placement.
+    LinePair(Point2d, Point2d, Point2d),
+    /// A circle/arc's centre and radius, awaiting placement. Tab flips
+    /// `diameter` before the placement click.
+    Radial {
+        center: Point2d,
+        radius: f64,
+        diameter: bool,
+    },
+}
+
+/// Advances the dimension being built by one point, using only what the
+/// subject already carries — no document. Handles the free two-point case
+/// end to end, and the placement click for every already-resolved subject
+/// (including a `Line` that has nowhere left to go but its own length, which
+/// is also what a same-line/non-line/empty-space second click falls back to
+/// in `AppState::handle_modify_click`). Classifying a *fresh* pick — is it a
+/// line, a circle/arc, or a second line to pair with one already held —
+/// needs the document, so that step is not here; see `handle_modify_click`.
+pub fn dimension_pick(subject: &mut Option<DimSubject>, p: Point2d) -> ToolEvent {
+    let linear = |a: Point2d, b: Point2d, line: Point2d| match oxidraft_document::linear_orientation(
+        a, b, line,
+    ) {
+        None => EntityKind::Dimension {
+            p1: a,
+            p2: b,
+            line,
+            height: 2.5,
+            override_text: None,
+        },
+        Some(vertical) => EntityKind::OrthoDim {
+            p1: a,
+            p2: b,
+            line,
+            vertical,
+            height: 2.5,
+            override_text: None,
+        },
+    };
+    match subject.take() {
+        None => {
+            *subject = Some(DimSubject::Point(p));
+            ToolEvent::Pending
+        }
+        Some(DimSubject::Point(a)) => {
+            *subject = Some(DimSubject::Points(a, p));
+            ToolEvent::Pending
+        }
+        Some(DimSubject::Points(a, b)) => ToolEvent::Create(vec![linear(a, b, p)]),
+        Some(DimSubject::Line(_, p0, p1)) => ToolEvent::Create(vec![linear(p0, p1, p)]),
+        Some(DimSubject::LinePair(center, a, b)) => {
+            ToolEvent::Create(vec![EntityKind::AngularDim {
+                center,
+                p1: a,
+                p2: b,
+                line: p,
+                height: 2.5,
+                override_text: None,
+            }])
+        }
+        Some(DimSubject::Radial {
+            center,
+            radius,
+            diameter,
+        }) => {
+            let (cx, cy) = center.to_f64();
+            let (dx, dy) = (p.x - cx, p.y - cy);
+            let len = (dx * dx + dy * dy).sqrt();
+            let edge = if len > 1e-9 {
+                Point2d::from_f64(cx + dx / len * radius, cy + dy / len * radius)
+            } else {
+                Point2d::from_f64(cx + radius, cy)
+            };
+            ToolEvent::Create(vec![EntityKind::RadialDim {
+                center,
+                edge,
+                diameter,
+                height: 2.5,
+                override_text: None,
+            }])
+        }
+    }
 }
 
 /// What a completed tool interaction asks the app to do to the document.
@@ -881,9 +985,6 @@ impl Tool {
             Tool::CircleTtr { .. } => "CIRCLE TTR",
             Tool::CircleTtt { .. } => "CIRCLE TTT",
             Tool::Dimension { .. } => "DIMENSION",
-            Tool::DimAngularLines { .. } => "DIM ANGULAR (2 lines)",
-            Tool::DimRadial { diameter: true, .. } => "DIM DIAMETER",
-            Tool::DimRadial { .. } => "DIM RADIUS",
             Tool::DimConstraint { .. } => "SMART DIMENSION",
             Tool::Weld { .. } => "WELD",
             Tool::ConPick { .. } => "CONSTRAIN (pick)",
@@ -929,8 +1030,11 @@ impl Tool {
                 | Tool::Blend { .. }
                 | Tool::CircleTtr { .. }
                 | Tool::CircleTtt { .. }
-                | Tool::DimRadial { center: None, .. }
-                | Tool::DimAngularLines { geom: None, .. }
+                // Matches every phase, the same as `DimConstraint` below —
+                // even its placement click is a free click, not a pick, but
+                // that phase never lasted long enough for the distinction to
+                // matter before either.
+                | Tool::Dimension { .. }
                 | Tool::DimConstraint { .. }
                 | Tool::Weld { .. }
                 | Tool::ConPick { .. }
@@ -1042,6 +1146,12 @@ impl Tool {
             Tool::Circle { choice, .. } | Tool::Arc { choice, .. } => {
                 *choice = choice.wrapping_add(1);
             }
+            // Only two readings, so cycling is just a flip.
+            Tool::Dimension {
+                subject: Some(DimSubject::Radial { diameter, .. }),
+            } => {
+                *diameter = !*diameter;
+            }
             _ => {}
         }
     }
@@ -1082,6 +1192,12 @@ impl Tool {
             // `Center` snap's automatic `Concentric`.
             Tool::Arc { parts, choice } => arc_pick(parts, choice, Pick::bare(p)),
 
+            // No document here, so a fresh pick can only ever start (or
+            // continue) the free-point case — never classify a line/circle
+            // under the cursor, and never tell a second line from anything
+            // else. `AppState::handle_modify_click` is what adds that.
+            Tool::Dimension { subject } => dimension_pick(subject, p),
+
             Tool::CircleTwoPoint { first } => match first.take() {
                 None => {
                     *first = Some(p);
@@ -1103,89 +1219,6 @@ impl Tool {
                     }
                 }
             },
-
-            Tool::Dimension { p1, p2 } => match (*p1, *p2) {
-                (None, _) => {
-                    *p1 = Some(p);
-                    ToolEvent::Pending
-                }
-                (Some(_), None) => {
-                    *p2 = Some(p);
-                    ToolEvent::Pending
-                }
-                (Some(a), Some(b)) => {
-                    *self = Tool::Dimension { p1: None, p2: None };
-                    let kind = match oxidraft_document::linear_orientation(a, b, p) {
-                        None => EntityKind::Dimension {
-                            p1: a,
-                            p2: b,
-                            line: p,
-                            height: 2.5,
-                            override_text: None,
-                        },
-                        Some(vertical) => EntityKind::OrthoDim {
-                            p1: a,
-                            p2: b,
-                            line: p,
-                            vertical,
-                            height: 2.5,
-                            override_text: None,
-                        },
-                    };
-                    ToolEvent::Create(vec![kind])
-                }
-            },
-
-            Tool::DimAngularLines { geom, .. } => match *geom {
-                Some((center, a, b)) => {
-                    *self = Tool::DimAngularLines {
-                        a: None,
-                        geom: None,
-                    };
-                    ToolEvent::Create(vec![EntityKind::AngularDim {
-                        center,
-                        p1: a,
-                        p2: b,
-                        line: p,
-                        height: 2.5,
-                        override_text: None,
-                    }])
-                }
-                None => ToolEvent::Pending,
-            },
-
-            Tool::DimRadial {
-                diameter,
-                center,
-                radius,
-            } => {
-                let snap = center.map(|c| (c, *radius, *diameter));
-                match snap {
-                    Some((c, r, dia)) => {
-                        let (cx, cy) = c.to_f64();
-                        let (dx, dy) = (p.x - cx, p.y - cy);
-                        let len = (dx * dx + dy * dy).sqrt();
-                        let edge = if len > 1e-9 {
-                            Point2d::from_f64(cx + dx / len * r, cy + dy / len * r)
-                        } else {
-                            Point2d::from_f64(cx + r, cy)
-                        };
-                        *self = Tool::DimRadial {
-                            diameter: dia,
-                            center: None,
-                            radius: 0.0,
-                        };
-                        ToolEvent::Create(vec![EntityKind::RadialDim {
-                            center: c,
-                            edge,
-                            diameter: dia,
-                            height: 2.5,
-                            override_text: None,
-                        }])
-                    }
-                    None => ToolEvent::Pending,
-                }
-            }
 
             Tool::CircleThreePoint { pts } => {
                 pts.push(p);
@@ -1420,18 +1453,7 @@ impl Tool {
             Tool::CircleThreePoint { pts } => pts.clear(),
             Tool::CircleTtr { first, .. } => *first = None,
             Tool::CircleTtt { picks } => picks.clear(),
-            Tool::Dimension { p1, p2 } => {
-                *p1 = None;
-                *p2 = None;
-            }
-            Tool::DimAngularLines { a, geom } => {
-                *a = None;
-                *geom = None;
-            }
-            Tool::DimRadial { center, radius, .. } => {
-                *center = None;
-                *radius = 0.0;
-            }
+            Tool::Dimension { subject } => *subject = None,
             Tool::DimConstraint { first, pending } => {
                 *first = None;
                 *pending = None;
@@ -1490,9 +1512,7 @@ impl Tool {
             Tool::CircleThreePoint { pts } => !pts.is_empty(),
             Tool::CircleTtr { first, .. } => first.is_some(),
             Tool::CircleTtt { picks } => !picks.is_empty(),
-            Tool::Dimension { p1, .. } => p1.is_some(),
-            Tool::DimAngularLines { a, geom } => a.is_some() || geom.is_some(),
-            Tool::DimRadial { center, .. } => center.is_some(),
+            Tool::Dimension { subject } => subject.is_some(),
             Tool::DimConstraint { first, pending } => first.is_some() || pending.is_some(),
             Tool::Weld { first } => first.is_some(),
             Tool::ConPick { picks, .. } => !picks.is_empty(),
@@ -1579,8 +1599,7 @@ impl Tool {
                 }
             }
             Tool::Dimension {
-                p1: Some(a),
-                p2: None,
+                subject: Some(DimSubject::Point(a)),
             } => vec![Curve::Line(LineSeg::from_endpoints(*a, *cursor))],
             Tool::CircleTwoPoint { first: Some(a) } => {
                 let d = a.dist_f64(cursor);
@@ -1695,9 +1714,14 @@ impl Tool {
             | Tool::DimConstraint { .. } => None,
             Tool::Weld { first } => first.map(|(_, _, p)| p),
             Tool::ConPick { picks, .. } => picks.last().map(|(_, _, p)| *p),
-            Tool::Dimension { p1, p2 } => (*p2).or(*p1),
-            Tool::DimAngularLines { geom, .. } => geom.map(|(v, _, _)| v),
-            Tool::DimRadial { center, .. } => *center,
+            Tool::Dimension { subject } => match subject {
+                Some(DimSubject::Point(a)) => Some(*a),
+                Some(DimSubject::Points(_, b)) => Some(*b),
+                Some(DimSubject::Line(_, _, p1)) => Some(*p1),
+                Some(DimSubject::LinePair(vertex, ..)) => Some(*vertex),
+                Some(DimSubject::Radial { center, .. }) => Some(*center),
+                None => None,
+            },
             Tool::Select | Tool::Point => None,
         }
     }
@@ -2760,6 +2784,130 @@ mod tests {
             2,
             "the degenerate third pick must not be banked"
         );
+    }
+
+    #[test]
+    fn dimension_tool_free_two_points_build_an_aligned_dimension() {
+        // The placement click's offset from the segment's midpoint has to
+        // be roughly diagonal (neither axis more than 2x the other, see
+        // `oxidraft_document::linear_orientation`) to read as aligned rather
+        // than snapping to an ortho horizontal/vertical dimension.
+        let mut t = Tool::Dimension { subject: None };
+        assert!(matches!(t.on_point(pt(0, 0)), ToolEvent::Pending));
+        assert!(matches!(t.on_point(pt(10, 3)), ToolEvent::Pending));
+        match t.on_point(pt(6, 3)) {
+            ToolEvent::Create(es) => match es.as_slice() {
+                [EntityKind::Dimension { p1, p2, line, .. }] => {
+                    assert_eq!(*p1, pt(0, 0));
+                    assert_eq!(*p2, pt(10, 3));
+                    assert_eq!(*line, pt(6, 3));
+                }
+                o => panic!("expected an aligned dimension, got {o:?}"),
+            },
+            o => panic!("expected a commit, got {o:?}"),
+        }
+    }
+
+    #[test]
+    fn dimension_tool_axis_aligned_points_build_an_ortho_dimension() {
+        let mut t = Tool::Dimension { subject: None };
+        t.on_point(pt(0, 0));
+        t.on_point(pt(10, 0));
+        match t.on_point(pt(5, 6)) {
+            ToolEvent::Create(es) => match es.as_slice() {
+                [EntityKind::OrthoDim { .. }] => {}
+                o => panic!("expected an ortho dimension, got {o:?}"),
+            },
+            o => panic!("expected a commit, got {o:?}"),
+        }
+    }
+
+    #[test]
+    fn dimension_tool_places_a_held_lines_own_length_without_a_document() {
+        // `Line` carries its endpoints precisely so this needs nothing more
+        // — no document, no `handle_modify_click` — which is what lets
+        // `AppState::place_tool_point` (typed coordinates) finish a
+        // dimension started by clicking a line, the same way it already
+        // places lines.
+        let mut subject = Some(DimSubject::Line(EntityId(1), pt(0, 0), pt(10, 0)));
+        match dimension_pick(&mut subject, pt(5, 6)) {
+            ToolEvent::Create(es) => match es.as_slice() {
+                [EntityKind::OrthoDim { p1, p2, .. }] => {
+                    assert_eq!(*p1, pt(0, 0));
+                    assert_eq!(*p2, pt(10, 0));
+                }
+                o => panic!("expected an ortho dimension, got {o:?}"),
+            },
+            o => panic!("expected a commit, got {o:?}"),
+        }
+        assert!(subject.is_none(), "subject should reset after commit");
+    }
+
+    #[test]
+    fn dimension_tool_places_a_radial_dimension() {
+        let mut subject = Some(DimSubject::Radial {
+            center: pt(0, 0),
+            radius: 5.0,
+            diameter: false,
+        });
+        match dimension_pick(&mut subject, pt(0, 10)) {
+            ToolEvent::Create(es) => match es.as_slice() {
+                [
+                    EntityKind::RadialDim {
+                        center,
+                        edge,
+                        diameter,
+                        ..
+                    },
+                ] => {
+                    assert_eq!(*center, pt(0, 0));
+                    assert!(!diameter);
+                    assert!((edge.dist_f64(&pt(0, 0)) - 5.0).abs() < 1e-9);
+                }
+                o => panic!("expected a radial dimension, got {o:?}"),
+            },
+            o => panic!("expected a commit, got {o:?}"),
+        }
+    }
+
+    #[test]
+    fn dimension_tool_places_an_angular_dimension() {
+        let mut subject = Some(DimSubject::LinePair(pt(0, 0), pt(10, 0), pt(0, 10)));
+        match dimension_pick(&mut subject, pt(3, 3)) {
+            ToolEvent::Create(es) => match es.as_slice() {
+                [EntityKind::AngularDim { center, .. }] => assert_eq!(*center, pt(0, 0)),
+                o => panic!("expected an angular dimension, got {o:?}"),
+            },
+            o => panic!("expected a commit, got {o:?}"),
+        }
+    }
+
+    #[test]
+    fn dimension_tool_tab_flips_radius_to_diameter() {
+        let mut t = Tool::Dimension {
+            subject: Some(DimSubject::Radial {
+                center: pt(0, 0),
+                radius: 5.0,
+                diameter: false,
+            }),
+        };
+        t.cycle_reading();
+        assert!(matches!(
+            t,
+            Tool::Dimension {
+                subject: Some(DimSubject::Radial { diameter: true, .. })
+            }
+        ));
+        t.cycle_reading();
+        assert!(matches!(
+            t,
+            Tool::Dimension {
+                subject: Some(DimSubject::Radial {
+                    diameter: false,
+                    ..
+                })
+            }
+        ));
     }
 
     #[test]

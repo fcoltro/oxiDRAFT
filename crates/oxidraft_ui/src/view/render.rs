@@ -6,7 +6,7 @@ use super::tessellate::{
     draw_curve, draw_curve_patterned, draw_patterned_polyline, flatten_curve_world, is_closed_curve,
 };
 use crate::state::AppState;
-use crate::tools::Tool;
+use crate::tools::{DimSubject, Tool};
 use egui::{Color32, Stroke, pos2, vec2};
 use oxidraft_document::{Color, EntityId, EntityKind, LineTypeRef};
 use oxidraft_geometry::{Curve, CurveSegment, Point2d};
@@ -72,32 +72,23 @@ pub(super) fn tool_prompt(tool: &Tool) -> String {
             1 => "Pick the second object to touch".into(),
             _ => "Pick the third object to touch".into(),
         },
-        Tool::Dimension { p1, p2 } => match (p1, p2) {
-            (None, _) => "Specify first dimension point".into(),
-            (Some(_), None) => "Specify second dimension point".into(),
-            (Some(_), Some(_)) => {
+        Tool::Dimension { subject } => match subject {
+            None => "Pick a line (length), a circle/arc (radius), a first line for an \
+                     angle, or a point for a free two-point dimension"
+                .into(),
+            Some(DimSubject::Point(_)) => "Specify second dimension point".into(),
+            Some(DimSubject::Points(_, _)) => {
                 "Place the dimension line — aside for vertical, above/below for horizontal".into()
             }
+            Some(DimSubject::Line(..)) => {
+                "Pick a second line for an angle, or click to place this line's length".into()
+            }
+            Some(DimSubject::LinePair(..)) => "Click to place the dimension arc".into(),
+            Some(DimSubject::Radial { diameter, .. }) => {
+                let what = if *diameter { "diameter" } else { "radius" };
+                format!("Click to place the {what} leader — Tab switches radius/diameter")
+            }
         },
-        Tool::DimAngularLines { a, geom } => {
-            if geom.is_some() {
-                "Click to place the dimension arc".into()
-            } else if a.is_some() {
-                "Pick the second line".into()
-            } else {
-                "Pick the first line".into()
-            }
-        }
-        Tool::DimRadial {
-            diameter, center, ..
-        } => {
-            let what = if *diameter { "diameter" } else { "radius" };
-            if center.is_none() {
-                format!("Pick a circle or arc to {what}-dimension")
-            } else {
-                "Click to place the leader".into()
-            }
-        }
         Tool::DimConstraint { first, pending } => match (first, pending) {
             (_, Some(_)) => "Click to place the dimension".into(),
             (Some(_), None) => {

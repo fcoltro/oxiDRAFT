@@ -101,7 +101,7 @@ Or build it yourself in one command (see [Build & run](#-build--run)).
 - **Drawing units** — mm / cm / m / km / in / ft / unitless — that bound the zoom range and label measurements
 - **Curvature comb** on selected curves for smoothness inspection
 - **`Ctrl+F` command palette** plus an always-available command line, **window / crossing marquee**, hover highlight, ghost previews, **undo / redo**
-- **Radial tool wheel** — press `Q` for a **Tools** / **Modifiers** picker at the cursor; move toward either to reveal its full ring, then to a wedge and click to activate it, or push out further on Circle/Arc/Dimension/Line to reveal their construction-method variants; press `Q` again or `Esc` to dismiss
+- **Radial tool wheel** — press `Q` for a **Tools** / **Modifiers** picker at the cursor; move toward either to reveal its full ring, then to a wedge and click to activate it; press `Q` again or `Esc` to dismiss
 - Modern dark, glass-panelled interface — top bar, inspector and status pill; preferences persist between sessions
 
 ### Geometry kernel
@@ -138,11 +138,8 @@ Type a verb in the command line, or use the `Draw`/`Modify` menus, the radial to
 | `ELLIPSE` / `EL` | Ellipse | `CHAMFER` / `CHA` | Chamfer | `LAYER` / `LA` | Layer set / new |
 | `RECTANGLE` / `REC` | Rectangle | `BLEND` / `BL` | Blend (G0–G3) | | |
 | `POLYGON` / `POL` | Polygon | `STRETCH` / `S` | Stretch | | |
-| `SPLINE` / `SPL` | NURBS spline | **Dimension** | | | |
-| `TEXT` / `T` / `MTEXT` | Text | `DIMENSION` / `DIM` | Aligned | | |
-| | | `DIMHOR` · `DIMVER` | Horizontal / Vertical | | |
-| | | `DIMANG` · `DIMANGL` | Angular (3-pt / 2-line) | | |
-| | | `DIMRAD` · `DIMDIA` | Radius / Diameter | | |
+| `SPLINE` / `SPL` | NURBS spline | `DIMENSION` / `DIM` | Dimension (linear/angular/radius read off the pick) | | |
+| `TEXT` / `T` / `MTEXT` | Text | | | | |
 
 `POLYGON n` and `TTR r` accept an inline argument (side count / radius), and
 `BLEND g2 1.5` presets the continuity and tension. Polyline and spline finish

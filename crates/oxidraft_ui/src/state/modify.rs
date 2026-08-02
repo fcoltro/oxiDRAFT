@@ -92,24 +92,67 @@ impl AppState {
                 }
                 true
             }
-            Tool::DimRadial {
-                diameter,
-                center: None,
-                ..
-            } => {
-                if let Some(id) = pick(self)
-                    && let Some((c, r)) = self
-                        .document
-                        .get(id)
-                        .and_then(|e| e.as_curve())
-                        .and_then(circle_center_radius)
-                {
-                    self.tool = Tool::DimRadial {
-                        diameter,
-                        center: Some(c),
-                        radius: r,
-                    };
+            Tool::Dimension { mut subject } => {
+                use crate::tools::DimSubject;
+                let hit = pick(self);
+                let click = Point2d::from_f64(px, py);
+                match (&subject, hit) {
+                    // A second line → the angle geometry follows the cursor
+                    // until placed. Checked before the generic `Line`
+                    // fallback below so a second line pick is never
+                    // swallowed as "place this line's own length" instead.
+                    (Some(DimSubject::Line(a, ..)), Some(id))
+                        if id != *a && line_endpoints_of(self, id).is_some() =>
+                    {
+                        if let Some((vertex, p1, p2)) = angular_from_lines(self, *a, id) {
+                            subject = Some(DimSubject::LinePair(vertex, p1, p2));
+                        }
+                    }
+                    // First pick: classify what's under the cursor. A line
+                    // may still pair with a second line, so it waits as
+                    // `Line` (endpoints resolved now, so placing its own
+                    // length later needs no document); a circle/arc has
+                    // nothing to pair with, so its radius preview starts
+                    // following the cursor right away.
+                    (None, Some(id)) if is_dimensionable(self, id) => {
+                        subject = if let Some((p0, p1)) = line_endpoints_of(self, id) {
+                            Some(DimSubject::Line(id, p0, p1))
+                        } else if let Some((c, r)) = self
+                            .document
+                            .get(id)
+                            .and_then(|e| e.as_curve())
+                            .and_then(circle_center_radius)
+                        {
+                            Some(DimSubject::Radial {
+                                center: c,
+                                radius: r,
+                                diameter: false,
+                            })
+                        } else {
+                            None
+                        };
+                    }
+                    (None, Some(id)) if is_polycurve(self, id) => {
+                        self.problem(
+                            "Polylines can't take dimensions. Run Disjoint (Shift+X) to break \
+                             it into welded lines first."
+                                .into(),
+                        );
+                    }
+                    // Everything else — a fully resolved subject following
+                    // the cursor to its placement click, a held line falling
+                    // back to its own length (same-line/non-line/empty-space
+                    // second pick), nothing dimensionable under the cursor
+                    // starting the free two-point case, or a first free
+                    // point completing its pair — needs nothing the
+                    // document can add, so `on_pick`'s own dispatch handles
+                    // it too.
+                    _ => {
+                        let ev = crate::tools::dimension_pick(&mut subject, click);
+                        self.apply_tool_event(ev);
+                    }
                 }
+                self.tool = Tool::Dimension { subject };
                 true
             }
             Tool::DimConstraint { first, pending } => {
@@ -271,30 +314,6 @@ impl AppState {
                     };
                 } else {
                     self.tool = Tool::ConPick { kind, picks };
-                }
-                true
-            }
-            Tool::DimAngularLines { a, geom: None } => {
-                if let Some(id) = pick(self)
-                    && line_endpoints_of(self, id).is_some()
-                {
-                    match a {
-                        None => {
-                            self.tool = Tool::DimAngularLines {
-                                a: Some(id),
-                                geom: None,
-                            };
-                        }
-                        Some(first) if first != id => {
-                            if let Some(g) = angular_from_lines(self, first, id) {
-                                self.tool = Tool::DimAngularLines {
-                                    a: Some(first),
-                                    geom: Some(g),
-                                };
-                            }
-                        }
-                        _ => {}
-                    }
                 }
                 true
             }

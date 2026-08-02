@@ -54,9 +54,6 @@ pub enum Icon {
     Plus,
     Minus,
     Dimension,
-    DimAngle,
-    DimRadius,
-    DimDiameter,
     ConHorizontal,
     ConVertical,
     ConParallel,
@@ -123,9 +120,6 @@ impl Icon {
         Icon::Join,
         Icon::Explode,
         Icon::Dimension,
-        Icon::DimAngle,
-        Icon::DimRadius,
-        Icon::DimDiameter,
         Icon::ConHorizontal,
         Icon::ConVertical,
         Icon::ConParallel,
@@ -256,8 +250,7 @@ impl Icon {
             // Exploding a compound splits it into its parts.
             Icon::Explode => '\u{f031}', // edit_split
 
-            // Dimensions: the font carries one dimension mark, not one per kind.
-            Icon::Dimension | Icon::DimAngle | Icon::DimRadius | Icon::DimDiameter => '\u{f02b}', // tool_dimension
+            Icon::Dimension => '\u{f02b}', // tool_dimension
 
             // Constraints.
             Icon::ConHorizontal => '\u{f03d}', // const_horizontal
@@ -614,9 +607,6 @@ mod tests {
             Icon::Join => "edit_join",
             Icon::Explode => "edit_split",
             Icon::Dimension => "tool_dimension",
-            Icon::DimAngle => "tool_dimension",
-            Icon::DimRadius => "tool_dimension",
-            Icon::DimDiameter => "tool_dimension",
             Icon::ConHorizontal => "const_horizontal",
             Icon::ConVertical => "const_vertical",
             Icon::ConParallel => "const_parallel",

@@ -715,43 +715,11 @@ fn menu_items(ui: &mut egui::Ui, app: &mut AppState) {
             },
         );
         ui.separator();
-        ui.menu_button("Dimension", |ui| {
-            tool_menu_item(
-                ui,
-                app,
-                "Linear (aligned)",
-                Tool::Dimension { p1: None, p2: None },
-            );
-            tool_menu_item(
-                ui,
-                app,
-                "Angular (2 lines)",
-                Tool::DimAngularLines {
-                    a: None,
-                    geom: None,
-                },
-            );
-            tool_menu_item(
-                ui,
-                app,
-                "Radius",
-                Tool::DimRadial {
-                    diameter: false,
-                    center: None,
-                    radius: 0.0,
-                },
-            );
-            tool_menu_item(
-                ui,
-                app,
-                "Diameter",
-                Tool::DimRadial {
-                    diameter: true,
-                    center: None,
-                    radius: 0.0,
-                },
-            );
-        });
+        // One Dimension entry, not a 4-way submenu — the tool now infers
+        // linear/angular/radius/diameter from what's picked (see
+        // `Tool::Dimension`), the same collapse Line/Circle/Arc went
+        // through above.
+        tool_menu_item(ui, app, "Dimension", Tool::Dimension { subject: None });
     });
     ui.menu_button("Modify", |ui| {
         tool_menu_item(
@@ -1682,8 +1650,6 @@ fn tool_hotkey(tool: &Tool) -> &'static str {
         | Tool::CircleTtr { .. }
         | Tool::CircleTtt { .. }
         | Tool::Dimension { .. }
-        | Tool::DimAngularLines { .. }
-        | Tool::DimRadial { .. }
         | Tool::DimConstraint { .. }
         | Tool::Weld { .. }
         | Tool::ConPick { .. }
@@ -1770,8 +1736,8 @@ pub(super) fn draw_entries() -> Vec<(crate::icons::Icon, &'static str, Act)> {
         ),
         (
             Icon::Dimension,
-            "Dimension — hold for angular / radius / diameter",
-            Act::Tool(Tool::Dimension { p1: None, p2: None }),
+            "Dimension",
+            Act::Tool(Tool::Dimension { subject: None }),
         ),
         (
             Icon::Blend,
@@ -1909,62 +1875,30 @@ pub(super) fn act_needs_selection(act: &Act) -> bool {
     }
 }
 
-pub(super) fn group_id(act: &Act) -> Option<u8> {
-    match act {
-        // No entry for Line, Circle, or Arc. Each had a group — Line's two
-        // constructions, Circle's five, Arc's three — to pre-select from,
-        // until each became one tool that reads the construction off the
-        // picks themselves (see `read_line_anchor`/`Contribution`/
-        // `arc_pick_readings` in tools.rs). Forcing that choice in the
-        // radial menu's own gesture would have been the exact thing the
-        // redesign removed, reintroduced one menu away from where it was
-        // taken out. Clicking the wedge now does what clicking any other
-        // leaf wedge does: activate the tool.
-        Act::Tool(Tool::Dimension { .. }) => Some(3),
-        _ => None,
-    }
+/// No tool has a radial sub-menu group anymore. Line had two constructions,
+/// Circle five, Arc three, Dimension four, each pre-selected via a group
+/// here — until every one of them became a single tool that reads the
+/// construction off the picks themselves (see `read_line_anchor`/
+/// `Contribution`/`arc_pick_readings`/the `Tool::Dimension` click dispatch
+/// in `AppState::handle_modify_click`). Forcing that choice in the radial
+/// menu's own gesture would have been the exact thing each redesign removed,
+/// reintroduced one menu away from where it was taken out. Clicking a wedge
+/// now does what clicking any other leaf wedge does: activate the tool.
+///
+/// The variant sub-ring machinery in `radial.rs` that this fed is now
+/// unreachable in practice (`group_id` never returns `Some`) but is left in
+/// place rather than torn out here — retiring the last group is this
+/// function's job; retiring the now-dead ring-drawing code around it is a
+/// separate, larger change.
+pub(super) fn group_id(_act: &Act) -> Option<u8> {
+    None
 }
 
-// id 0 was Line's group, id 1 was Circle's, id 2 was Arc's; all three
-// retired along with their entries in `group_id` above. Dimension (id 3) is
-// the only one `group_id` can still produce, so `id` itself has nothing left
-// to switch on — kept as a parameter because the caller still passes what
-// `group_id` returned, not because this reads it.
+/// Never actually reached — `group_id` never returns `Some`, and every
+/// caller in `radial.rs` guards on that before calling this. Kept only so
+/// those call sites still type-check; see `group_id`'s doc comment.
 pub(super) fn group_entries(_id: u8) -> Vec<(crate::icons::Icon, &'static str, Act)> {
-    use crate::icons::Icon;
-    vec![
-        (
-            Icon::Dimension,
-            "Linear (aligned)",
-            Act::Tool(Tool::Dimension { p1: None, p2: None }),
-        ),
-        (
-            Icon::DimAngle,
-            "Angular (2 lines)",
-            Act::Tool(Tool::DimAngularLines {
-                a: None,
-                geom: None,
-            }),
-        ),
-        (
-            Icon::DimRadius,
-            "Radius",
-            Act::Tool(Tool::DimRadial {
-                diameter: false,
-                center: None,
-                radius: 0.0,
-            }),
-        ),
-        (
-            Icon::DimDiameter,
-            "Diameter",
-            Act::Tool(Tool::DimRadial {
-                diameter: true,
-                center: None,
-                radius: 0.0,
-            }),
-        ),
-    ]
+    Vec::new()
 }
 
 pub(super) fn command_toast(ctx: &Context, app: &AppState, canvas_rect: egui::Rect) {

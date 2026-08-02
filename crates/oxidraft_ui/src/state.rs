@@ -3571,7 +3571,7 @@ mod tests {
     #[test]
     fn dimension_lands_on_dimension_layer() {
         let mut a = app();
-        a.tool = crate::tools::Tool::Dimension { p1: None, p2: None };
+        a.tool = crate::tools::Tool::Dimension { subject: None };
         a.place_tool_point(Point2d::from_f64(0.0, 0.0));
         a.place_tool_point(Point2d::from_f64(10.0, 0.0));
         a.place_tool_point(Point2d::from_f64(0.0, 3.0));
@@ -3643,17 +3643,18 @@ mod tests {
                 std::f64::consts::TAU,
             ),
         )));
-        a.tool = crate::tools::Tool::DimRadial {
-            diameter: false,
-            center: None,
-            radius: 0.0,
-        };
+        a.tool = crate::tools::Tool::Dimension { subject: None };
         let (sx, sy) = a.view.world_to_screen(5.0, 0.0);
         a.canvas_click(sx, sy);
         assert!(
-            matches!(a.tool, crate ::tools::Tool::DimRadial { center : Some(_), radius,
-            .. } if (radius - 5.0).abs() < 1e-9),
-            "circle pick set centre+radius"
+            matches!(
+                a.tool,
+                crate::tools::Tool::Dimension {
+                    subject: Some(crate::tools::DimSubject::Radial { radius, .. })
+                } if (radius - 5.0).abs() < 1e-9
+            ),
+            "circle pick set centre+radius, got {:?}",
+            a.tool
         );
         let (lx, ly) = a.view.world_to_screen(0.0, 6.0);
         a.canvas_click(lx, ly);
@@ -3681,10 +3682,7 @@ mod tests {
                 Point2d::from_f64(0.0, 0.0),
                 Point2d::from_f64(0.0, 10.0),
             ))));
-        a.tool = crate::tools::Tool::DimAngularLines {
-            a: None,
-            geom: None,
-        };
+        a.tool = crate::tools::Tool::Dimension { subject: None };
         let (s1x, s1y) = a.view.world_to_screen(5.0, 0.0);
         a.canvas_click(s1x, s1y);
         let (s2x, s2y) = a.view.world_to_screen(0.0, 5.0);
@@ -3692,9 +3690,12 @@ mod tests {
         assert!(
             matches!(
                 a.tool,
-                crate::tools::Tool::DimAngularLines { geom: Some(_), .. }
+                crate::tools::Tool::Dimension {
+                    subject: Some(crate::tools::DimSubject::LinePair(..))
+                }
             ),
-            "two line picks produced the angle geometry"
+            "two line picks produced the angle geometry, got {:?}",
+            a.tool
         );
         let (lx, ly) = a.view.world_to_screen(3.0, 3.0);
         a.canvas_click(lx, ly);
