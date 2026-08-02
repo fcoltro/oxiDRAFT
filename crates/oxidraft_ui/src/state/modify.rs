@@ -32,6 +32,10 @@ impl AppState {
                     // every other outcome removes or replaces `id`.
                     if edit::trim(&mut self.document, id, &cutters, px, py) == vec![id] {
                         self.history.discard_last();
+                        self.problem(
+                            "Nothing crosses there to trim against — the piece you click                              has to be bounded by something."
+                                .into(),
+                        );
                     }
                     self.selection.clear();
                 }
@@ -52,6 +56,10 @@ impl AppState {
                     self.history.snapshot(&self.document);
                     if !edit::extend(&mut self.document, id, &boundaries, px, py) {
                         self.history.discard_last();
+                        self.problem(
+                            "Nothing to extend to in that direction — there has to be an                              edge ahead of the end you pick."
+                                .into(),
+                        );
                     }
                 }
                 true
@@ -306,6 +314,9 @@ impl AppState {
                                     self.record_corner_constraints([a, id], arc, true);
                                 } else {
                                     self.history.discard_last();
+                                    self.problem(format!(
+                                        "No fillet fits there at radius {radius} — try a                                          smaller one, or pick two edges that meet."
+                                    ));
                                 }
                             }
                             self.tool = Tool::Fillet {
@@ -335,6 +346,9 @@ impl AppState {
                                     self.record_corner_constraints([a, id], conn, false);
                                 } else {
                                     self.history.discard_last();
+                                    self.problem(format!(
+                                        "No chamfer fits there at distance {dist} — try a                                          smaller one, or pick two edges that meet."
+                                    ));
                                 }
                             }
                             self.tool = Tool::Chamfer { dist, first: None };
@@ -527,16 +541,21 @@ impl AppState {
         ) else {
             return;
         };
-        if let Some((center, r)) = oxidraft_geometry::tangent_circle_ttr(&c1, &c2, radius, near)
-            && let Some(id) = self.create_full_circle(center, r)
-        {
-            self.set_tangents(
-                id,
-                vec![
-                    oxidraft_document::TangentRef { target: a, near },
-                    oxidraft_document::TangentRef { target: b, near },
-                ],
-            );
+        match oxidraft_geometry::tangent_circle_ttr(&c1, &c2, radius, near) {
+            Some((center, r)) => {
+                if let Some(id) = self.create_full_circle(center, r) {
+                    self.set_tangents(
+                        id,
+                        vec![
+                            oxidraft_document::TangentRef { target: a, near },
+                            oxidraft_document::TangentRef { target: b, near },
+                        ],
+                    );
+                }
+            }
+            None => self.problem(format!(
+                "No circle of radius {radius} is tangent to both — try a                  different radius, or pick nearer where you want it."
+            )),
         }
     }
 
@@ -548,16 +567,21 @@ impl AppState {
         if curves.len() != 3 {
             return;
         }
-        if let Some((center, r)) =
-            oxidraft_geometry::tangent_circle_ttt(&curves[0], &curves[1], &curves[2], near)
-            && let Some(id) = self.create_full_circle(center, r)
-        {
-            self.set_tangents(
-                id,
-                ids.iter()
-                    .map(|&t| oxidraft_document::TangentRef { target: t, near })
-                    .collect(),
-            );
+        match oxidraft_geometry::tangent_circle_ttt(&curves[0], &curves[1], &curves[2], near) {
+            Some((center, r)) => {
+                if let Some(id) = self.create_full_circle(center, r) {
+                    self.set_tangents(
+                        id,
+                        ids.iter()
+                            .map(|&t| oxidraft_document::TangentRef { target: t, near })
+                            .collect(),
+                    );
+                }
+            }
+            None => self.problem(
+                "No circle is tangent to all three — pick nearer where you want                  it, or a different set of edges."
+                    .into(),
+            ),
         }
     }
 

@@ -1737,6 +1737,10 @@ impl AppState {
         if new_ids.is_empty() {
             self.selection = ids;
             self.history.discard_last();
+            self.problem(
+                "Nothing in that selection has parts to break apart — Disjoint                  only affects polylines, polygons, and rectangles."
+                    .into(),
+            );
             return;
         }
         let survived: Vec<_> = ids
@@ -2268,6 +2272,10 @@ impl AppState {
         if new_ids.is_empty() {
             self.selection = ids;
             self.history.discard_last();
+            self.problem(
+                "Nothing in that selection touches end to end — Join needs curves                  that share an endpoint."
+                    .into(),
+            );
             return;
         }
         let survived: Vec<_> = ids
@@ -2486,6 +2494,10 @@ impl AppState {
             self.selection = new_ids;
         } else {
             self.history.discard_last();
+            self.problem(
+                "That text has no outlines to create — its font may have no glyphs                  for the characters used."
+                    .into(),
+            );
         }
     }
 
@@ -4688,6 +4700,11 @@ mod tests {
             depth,
             "a rejected fillet must not leave a phantom undo entry"
         );
+        assert!(
+            a.command_log.last().is_some_and(Note::is_problem),
+            "a rejected fillet must say so, got {:?}",
+            a.command_log.last()
+        );
     }
 
     #[test]
@@ -4719,6 +4736,62 @@ mod tests {
             a.history.undo_depth(),
             depth,
             "a rejected chamfer must not leave a phantom undo entry"
+        );
+        assert!(
+            a.command_log.last().is_some_and(Note::is_problem),
+            "a rejected chamfer must say so, got {:?}",
+            a.command_log.last()
+        );
+    }
+
+    #[test]
+    fn extend_with_nothing_ahead_does_not_leave_a_phantom_undo_entry() {
+        let mut a = app();
+        // A short line with nothing beyond either end: no boundary to reach.
+        a.run_command("LINE");
+        a.canvas_click(400.0, 300.0);
+        a.canvas_click(500.0, 300.0);
+        a.run_command("");
+        let before = a.document.len();
+        let depth = a.history.undo_depth();
+
+        a.run_command("EXTEND");
+        a.canvas_click(500.0, 300.0);
+
+        assert_eq!(a.document.len(), before, "nothing was there to extend to");
+        assert_eq!(
+            a.history.undo_depth(),
+            depth,
+            "a rejected extend must not leave a phantom undo entry"
+        );
+        assert!(
+            a.command_log.last().is_some_and(Note::is_problem),
+            "a rejected extend must say so, got {:?}",
+            a.command_log.last()
+        );
+    }
+
+    #[test]
+    fn join_of_untouching_curves_does_not_leave_a_phantom_undo_entry() {
+        let mut a = app();
+        let l1 = a.add_entity(line(0, 0, 10, 0));
+        let l2 = a.add_entity(line(0, 100, 10, 100));
+        a.selection = vec![l1, l2];
+        let before = a.document.len();
+        let depth = a.history.undo_depth();
+
+        a.join_selection();
+
+        assert_eq!(a.document.len(), before, "the lines do not touch");
+        assert_eq!(
+            a.history.undo_depth(),
+            depth,
+            "a no-op join must not leave a phantom undo entry"
+        );
+        assert!(
+            a.command_log.last().is_some_and(Note::is_problem),
+            "a no-op join must say so, got {:?}",
+            a.command_log.last()
         );
     }
 
@@ -4894,6 +4967,12 @@ mod tests {
             depth,
             "a no-op trim must not leave a phantom undo entry"
         );
+        let last = a.command_log.last().expect("something was logged");
+        assert!(last.is_problem(), "a no-op trim must say so, got {last:?}");
+        assert!(
+            last.text().contains("trim"),
+            "and say what the click was for, got {last:?}"
+        );
     }
 
     #[test]
@@ -4915,6 +4994,11 @@ mod tests {
             a.history.undo_depth(),
             depth,
             "a no-op explode must not leave a phantom undo entry"
+        );
+        let last = a.command_log.last().expect("something was logged");
+        assert!(
+            last.is_problem(),
+            "a no-op explode must say so, got {last:?}"
         );
     }
 
@@ -4939,6 +5023,11 @@ mod tests {
             a.history.undo_depth(),
             depth,
             "a no-op outline must not leave a phantom undo entry"
+        );
+        let last = a.command_log.last().expect("something was logged");
+        assert!(
+            last.is_problem(),
+            "a no-op outline must say so, got {last:?}"
         );
     }
 
