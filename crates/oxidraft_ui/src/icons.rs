@@ -425,8 +425,24 @@ pub fn logo_texture(ctx: &egui::Context) -> Option<egui::TextureHandle> {
     Some(tex)
 }
 
-const ICON_SIZE: f32 = 30.0;
-const GLYPH_PX: f32 = 24.0;
+/// The app draws icon content at exactly two sizes — nothing in between.
+/// [`GLYPH_PX`] is the glyphs' own 24-unit design grid, used everywhere an
+/// icon is the main thing in its container (the toolbar, the radial menu).
+/// [`GLYPH_PX_DENSE`] is the one deliberate smaller size, for icons that sit
+/// inside something else that needs the room back (a list row, a badge
+/// chip) — not an arbitrary shrink, a second sanctioned tier.
+///
+/// Each glyph's own canvas already bakes in a safe margin (every icon is
+/// drawn on its 24-unit grid with a 2-unit margin on every side, scaled down
+/// with everything else at the dense size), so the button on top of it only
+/// needs a little more breathing room, not a second margin of its own:
+/// [`ICON_PADDING`] on every side, shared by both tiers, gives
+/// [`ICON_SIZE`]/[`ICON_SIZE_DENSE`].
+pub(crate) const GLYPH_PX: f32 = 24.0;
+pub(crate) const GLYPH_PX_DENSE: f32 = 16.0;
+const ICON_PADDING: f32 = crate::theme::tok::SP_1;
+const ICON_SIZE: f32 = GLYPH_PX + 2.0 * ICON_PADDING;
+pub(crate) const ICON_SIZE_DENSE: f32 = GLYPH_PX_DENSE + 2.0 * ICON_PADDING;
 
 /// A clickable icon button at the default toolbar size, with hover/active
 /// highlight animation and a rich tooltip.
@@ -475,7 +491,7 @@ pub fn icon_button_sized(
     } else {
         Color32::WHITE.gamma_multiply(0.4)
     };
-    let glyph = GLYPH_PX.min(size - 4.0).max(8.0);
+    let glyph = GLYPH_PX.min(size - 2.0 * ICON_PADDING).max(8.0);
     // Snap the centre, then size from it — not `snap_rect`, which rounds min
     // and max independently and so changes the box's *height* by up to a pixel
     // depending on where it happens to sit. The icons are drawn on a 24-unit
@@ -538,7 +554,7 @@ pub(crate) fn rich_tooltip(ui: &mut Ui, text: &str) {
     if !desc.is_empty() {
         ui.label(
             egui::RichText::new(desc)
-                .size(12.0)
+                .size(crate::theme::tok::T_BODY)
                 .color(crate::theme::TEXT_DIM),
         );
     }
@@ -700,7 +716,7 @@ mod tests {
 
     /// What `icon_button_sized` hands to [`paint_icon`] as the em box.
     fn glyph_box(button: f32) -> f32 {
-        GLYPH_PX.min(button - 4.0).max(8.0)
+        GLYPH_PX.min(button - 2.0 * ICON_PADDING).max(8.0)
     }
 
     /// What [`paint_icon`] rasterises at, given an em box and a scale factor.
@@ -712,13 +728,12 @@ mod tests {
     fn the_default_toolbar_draws_icons_at_their_design_size() {
         // The art is drawn on a 24-unit grid, so 24 is the one size where a
         // stroke the designer put on a pixel boundary lands on one.
-        assert_eq!(glyph_box(ICON_SIZE), 24.0);
+        assert_eq!(glyph_box(ICON_SIZE), GLYPH_PX);
         // Anything roomier still gets 24 rather than scaling up.
-        assert_eq!(glyph_box(38.0), 24.0);
-        // Below 28 the box has to shrink to fit, and the grid is lost. This is
-        // a real visual compromise on those buttons, not an accident, so it is
-        // written down rather than left to be rediscovered.
-        assert_eq!(glyph_box(20.0), 16.0);
+        assert_eq!(glyph_box(38.0), GLYPH_PX);
+        // The dense button lands on the dense grid the same way — this is the
+        // sanctioned second tier, not a shrink-to-fit compromise.
+        assert_eq!(glyph_box(ICON_SIZE_DENSE), GLYPH_PX_DENSE);
     }
 
     #[test]

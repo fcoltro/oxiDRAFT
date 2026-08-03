@@ -915,7 +915,7 @@ pub(super) fn draw_entity(
             pos2(origin_screen.x + 24.0, origin_screen.y),
             egui::Align2::CENTER_CENTER,
             "X",
-            egui::FontId::proportional(10.0),
+            egui::FontId::proportional(crate::theme::tok::T_CAPTION),
             stroke_x.color,
         );
 
@@ -941,7 +941,7 @@ pub(super) fn draw_entity(
             pos2(origin_screen.x, origin_screen.y - 24.0),
             egui::Align2::CENTER_CENTER,
             "Y",
-            egui::FontId::proportional(10.0),
+            egui::FontId::proportional(crate::theme::tok::T_CAPTION),
             stroke_y.color,
         );
         painter.circle_filled(origin_screen, 3.0, Color32::from_rgb(180, 195, 220));

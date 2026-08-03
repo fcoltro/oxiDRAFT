@@ -164,6 +164,16 @@ const CORNER_ICON_GAP: f32 = 20.0;
 /// mark sits beside the point marker instead of on top of it.
 const FIX_ICON_OFFSET: f32 = 14.0;
 
+/// The badge/constraint chip's drawn size (`badge_chip`/`icon_chip`) — the
+/// app's dense button size, since a chip is exactly that: a dense icon
+/// button that happens to sit on the canvas instead of in a panel.
+const CHIP_SIZE: f32 = crate::icons::ICON_SIZE_DENSE;
+
+/// The chip's click target. A shade larger than the chip itself so the hit
+/// area never falls short of what's visible — tied to [`CHIP_SIZE`] rather
+/// than a separate literal so the two can't drift apart.
+const CHIP_HIT_SIZE: f32 = CHIP_SIZE + 1.0;
+
 /// Screen-space offset from a welded corner to where its coincidence glyph
 /// sits. Points into the open space *away* from the welded legs so the chip
 /// clears the drawn geometry; falls back to straight up when the legs cancel
@@ -730,7 +740,7 @@ pub(crate) fn badge_hit(app: &AppState, sx: f64, sy: f64) -> Option<Vec<SketchCo
             continue;
         };
         for ((_, cs), c) in glyphs.iter().zip(centers) {
-            if egui::Rect::from_center_size(c, vec2(20.0, 20.0)).contains(p) {
+            if egui::Rect::from_center_size(c, vec2(CHIP_HIT_SIZE, CHIP_HIT_SIZE)).contains(p) {
                 return Some(cs.clone());
             }
         }
@@ -746,7 +756,7 @@ pub(crate) fn badge_hit(app: &AppState, sx: f64, sy: f64) -> Option<Vec<SketchCo
         let (dx, dy) = app.view.world_to_screen(*wx, *wy);
         let base = pos2(dx as f32, dy as f32);
         let chip_c = base + corner_icon_offset(&app.document, (*wx, *wy), cs);
-        if egui::Rect::from_center_size(chip_c, vec2(20.0, 20.0)).contains(p) {
+        if egui::Rect::from_center_size(chip_c, vec2(CHIP_HIT_SIZE, CHIP_HIT_SIZE)).contains(p) {
             return Some(cs.clone());
         }
     }
@@ -756,7 +766,7 @@ pub(crate) fn badge_hit(app: &AppState, sx: f64, sy: f64) -> Option<Vec<SketchCo
         }
         let (dx, dy) = app.view.world_to_screen(*wx, *wy);
         let chip_c = pos2(dx as f32, dy as f32) + vec2(FIX_ICON_OFFSET, -FIX_ICON_OFFSET);
-        if egui::Rect::from_center_size(chip_c, vec2(20.0, 20.0)).contains(p) {
+        if egui::Rect::from_center_size(chip_c, vec2(CHIP_HIT_SIZE, CHIP_HIT_SIZE)).contains(p) {
             return Some(cs.clone());
         }
     }
@@ -833,7 +843,9 @@ pub(super) fn constraint_badges(
                 continue;
             }
             let hot = hover
-                .map(|h| egui::Rect::from_center_size(p, vec2(20.0, 20.0)).contains(h))
+                .map(|h| {
+                    egui::Rect::from_center_size(p, vec2(CHIP_HIT_SIZE, CHIP_HIT_SIZE)).contains(h)
+                })
                 .unwrap_or(false)
                 && !under_grip(p);
             badge_chip(painter, p, *g, bg, hot);
@@ -871,7 +883,9 @@ pub(super) fn constraint_badges(
         // The click now lands on the offset glyph, clear of the endpoint
         // grip, so (unlike the old on-point dot) it's always deletable.
         let hot = hover
-            .map(|h| egui::Rect::from_center_size(chip_c, vec2(20.0, 20.0)).contains(h))
+            .map(|h| {
+                egui::Rect::from_center_size(chip_c, vec2(CHIP_HIT_SIZE, CHIP_HIT_SIZE)).contains(h)
+            })
             .unwrap_or(false)
             && !under_grip(chip_c);
         // A small tick keeps the exact shared point marked...
@@ -895,7 +909,9 @@ pub(super) fn constraint_badges(
             continue;
         }
         let hot = hover
-            .map(|h| egui::Rect::from_center_size(chip_c, vec2(20.0, 20.0)).contains(h))
+            .map(|h| {
+                egui::Rect::from_center_size(chip_c, vec2(CHIP_HIT_SIZE, CHIP_HIT_SIZE)).contains(h)
+            })
             .unwrap_or(false)
             && !under_grip(chip_c);
         painter.circle_filled(p, 2.2, col);
@@ -920,7 +936,7 @@ pub(super) fn constraint_badges(
 }
 
 fn badge_chip(painter: &egui::Painter, c: egui::Pos2, g: BadgeGlyph, bg: Color32, hot: bool) {
-    let r = egui::Rect::from_center_size(c, vec2(19.0, 19.0));
+    let r = egui::Rect::from_center_size(c, vec2(CHIP_SIZE, CHIP_SIZE));
     painter.rect_filled(r, 4.0, bg);
     painter.rect_stroke(
         r,
@@ -947,7 +963,7 @@ fn icon_chip(
     bg: Color32,
     hot: bool,
 ) {
-    let r = egui::Rect::from_center_size(c, vec2(19.0, 19.0));
+    let r = egui::Rect::from_center_size(c, vec2(CHIP_SIZE, CHIP_SIZE));
     painter.rect_filled(r, 4.0, bg);
     painter.rect_stroke(
         r,
@@ -962,7 +978,10 @@ fn icon_chip(
         ),
         egui::StrokeKind::Middle,
     );
-    let glyph = egui::Rect::from_center_size(c, vec2(14.0, 14.0));
+    let glyph = egui::Rect::from_center_size(
+        c,
+        vec2(crate::icons::GLYPH_PX_DENSE, crate::icons::GLYPH_PX_DENSE),
+    );
     crate::icons::paint_icon(painter, painter.ctx(), icon, glyph, Color32::WHITE);
 }
 
@@ -994,7 +1013,10 @@ fn badge_icon(g: BadgeGlyph) -> crate::icons::Icon {
 /// the icon's own colours — shared by the canvas badges and the inspector's
 /// constraint bar so the two read identically.
 pub(super) fn paint_badge_glyph(painter: &egui::Painter, c: egui::Pos2, g: BadgeGlyph) {
-    let rect = egui::Rect::from_center_size(c, vec2(14.0, 14.0));
+    let rect = egui::Rect::from_center_size(
+        c,
+        vec2(crate::icons::GLYPH_PX_DENSE, crate::icons::GLYPH_PX_DENSE),
+    );
     crate::icons::paint_icon(painter, painter.ctx(), badge_icon(g), rect, Color32::WHITE);
 }
 
@@ -1054,7 +1076,7 @@ pub(super) fn cursor_readout(ctx: &egui::Context, app: &AppState, origin: egui::
                     ui.label(
                         egui::RichText::new(text)
                             .monospace()
-                            .size(12.0)
+                            .size(crate::theme::tok::T_BODY)
                             .color(crate::theme::ACCENT_BRIGHT),
                     );
                 });
@@ -1125,7 +1147,7 @@ fn hud_field(
 fn hud_label(ui: &mut egui::Ui, text: &str) {
     ui.label(
         egui::RichText::new(text)
-            .size(12.0)
+            .size(crate::theme::tok::T_BODY)
             .color(crate::theme::HUD_LABEL),
     );
 }
@@ -1474,7 +1496,7 @@ pub(super) fn polygon_sides_hud(
                 ui.vertical(|ui| {
                     ui.label(
                         egui::RichText::new("⠿ Polygon sides")
-                            .size(11.0)
+                            .size(crate::theme::tok::T_CAPTION)
                             .color(crate::theme::HUD_LABEL),
                     );
                     ui.horizontal(|ui| {
@@ -1901,7 +1923,7 @@ pub(super) fn blend_confirm_hud(
                 ui.vertical(|ui| {
                     ui.label(
                         egui::RichText::new("⠿ Blend")
-                            .size(11.0)
+                            .size(crate::theme::tok::T_CAPTION)
                             .color(crate::theme::HUD_LABEL),
                     );
                     if preview.is_none() {

@@ -26,8 +26,6 @@ pub mod tok {
     pub const SP_4: f32 = 8.0;
     /// Between sections.
     pub const SP_5: f32 = 12.0;
-    /// Panel inset, and the gap between panels.
-    pub const SP_6: f32 = 16.0;
 
     // ---- Corner radii -----------------------------------------------------
     /// Chips and badges — anything small enough that a larger radius would eat
@@ -55,6 +53,10 @@ pub mod tok {
     pub const T_BODY: f32 = 12.0;
     /// Labels that need to sit a step above body — panel rows, menu items.
     pub const T_LABEL: f32 = 13.0;
+    /// A single-line label prominent enough to read as the main thing in its
+    /// container without being a full heading — dialog titles, an inspector
+    /// object's name, a command palette row's command name.
+    pub const T_TITLE: f32 = 14.0;
     /// Headings.
     pub const T_HEADING: f32 = 15.0;
 }
@@ -246,9 +248,15 @@ mod tests {
 
     #[test]
     fn the_type_scale_has_no_duplicate_steps() {
-        // Four steps a pixel apart is already tight; two tokens landing on the
+        // Five steps a pixel apart is already tight; two tokens landing on the
         // same size would mean one of them is not a step at all.
-        let steps = [tok::T_CAPTION, tok::T_BODY, tok::T_LABEL, tok::T_HEADING];
+        let steps = [
+            tok::T_CAPTION,
+            tok::T_BODY,
+            tok::T_LABEL,
+            tok::T_TITLE,
+            tok::T_HEADING,
+        ];
         for (i, a) in steps.iter().enumerate() {
             for b in &steps[i + 1..] {
                 assert_ne!(a, b, "two type tokens resolve to the same size");

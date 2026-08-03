@@ -1303,7 +1303,10 @@ fn canvas(root_ui: &mut egui::Ui, app: &mut AppState, ui_state: &mut UiState, pa
                         &painter,
                         ctx,
                         crate::icons::Icon::Rotate,
-                        egui::Rect::from_center_size(p, vec2(18.0, 18.0)),
+                        egui::Rect::from_center_size(
+                            p,
+                            vec2(crate::icons::GLYPH_PX_DENSE, crate::icons::GLYPH_PX_DENSE),
+                        ),
                         col,
                     );
                 } else {
@@ -1537,7 +1540,7 @@ fn canvas(root_ui: &mut egui::Ui, app: &mut AppState, ui_state: &mut UiState, pa
                         egui::FontId::proportional(crate::theme::tok::T_BODY),
                         Color32::WHITE,
                     );
-                    let isz = 14.0;
+                    let isz = crate::icons::GLYPH_PX_DENSE;
                     let pad = if chamfer { isz + 6.0 } else { 0.0 };
                     let tp = pos2(dp.x + 12.0, dp.y - 22.0);
                     let bg = egui::Rect::from_min_size(

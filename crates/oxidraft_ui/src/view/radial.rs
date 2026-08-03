@@ -30,7 +30,9 @@ const RING_INNER: f32 = 84.0;
 const RING_OUTER: f32 = 150.0;
 // Wedges sit flush against each other; the divider lines alone separate them.
 const WEDGE_HALF_GAP: f32 = 0.0;
-const RING_ICON_SIZE: f32 = 23.0;
+// The primary tool picker, not a cramped secondary control, so it gets the
+// icons' native size rather than the dense tier.
+const RING_ICON_SIZE: f32 = crate::icons::GLYPH_PX;
 
 const VARIANT_ARC_STEP: f32 = 0.34;
 const VARIANT_UNLATCH_MARGIN: f32 = 0.15;

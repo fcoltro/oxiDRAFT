@@ -556,14 +556,17 @@ fn command_row(ui: &mut egui::Ui, e: &Entry, selected: bool) -> egui::Response {
         &ui.painter_at(rect),
         ui.ctx(),
         e.icon,
-        icon_box.shrink(7.0),
+        egui::Rect::from_center_size(
+            icon_box.center(),
+            egui::Vec2::splat(crate::icons::GLYPH_PX_DENSE),
+        ),
         egui::Color32::from_rgb(210, 224, 244),
     );
     ui.painter().text(
         egui::pos2(icon_box.right() + 12.0, rect.center().y),
         egui::Align2::LEFT_CENTER,
         e.name,
-        egui::FontId::proportional(14.0),
+        egui::FontId::proportional(crate::theme::tok::T_TITLE),
         theme::TEXT,
     );
     if !e.hint.is_empty() {
@@ -779,7 +782,7 @@ pub(super) fn command_bar(
                                                 egui::RichText::new(e.group.to_uppercase())
                                                     .font(crate::fonts::strong_font_id(
                                                         ui.ctx(),
-                                                        10.0,
+                                                        crate::theme::tok::T_CAPTION,
                                                     ))
                                                     .color(theme::TEXT_DIM),
                                             );
@@ -805,14 +808,14 @@ pub(super) fn command_bar(
                                 keycap(ui, "↑↓");
                                 ui.label(
                                     egui::RichText::new("navigate")
-                                        .size(12.0)
+                                        .size(crate::theme::tok::T_BODY)
                                         .color(theme::TEXT_DIM),
                                 );
                                 ui.add_space(crate::theme::tok::SP_4);
                                 keycap(ui, "↵");
                                 ui.label(
                                     egui::RichText::new("select")
-                                        .size(12.0)
+                                        .size(crate::theme::tok::T_BODY)
                                         .color(theme::TEXT_DIM),
                                 );
                                 ui.with_layout(
@@ -824,7 +827,7 @@ pub(super) fn command_bar(
                                                 env!("CARGO_PKG_VERSION")
                                             ))
                                             .monospace()
-                                            .size(11.0)
+                                            .size(crate::theme::tok::T_CAPTION)
                                             .color(theme::TEXT_DIM),
                                         );
                                     },

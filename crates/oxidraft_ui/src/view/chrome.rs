@@ -79,7 +79,7 @@ pub(super) fn top_bar(ctx: &Context, app: &mut AppState, canvas_rect: egui::Rect
                         ui.add_space(crate::theme::tok::SP_2);
                         ui.label(
                             egui::RichText::new(app.document_label())
-                                .size(13.0)
+                                .size(crate::theme::tok::T_LABEL)
                                 .color(crate::theme::TEXT),
                         );
                         {
@@ -105,12 +105,11 @@ pub(super) fn top_bar(ctx: &Context, app: &mut AppState, canvas_rect: egui::Rect
                         ui.scope(|ui| {
                             ui.spacing_mut().item_spacing.x = 2.0;
                             ui.add_enabled_ui(app.history.can_undo(), |ui| {
-                                if crate::icons::icon_button_sized(
+                                if crate::icons::icon_button(
                                     ui,
                                     crate::icons::Icon::Undo,
                                     "Undo  (Ctrl+Z)",
                                     false,
-                                    30.0,
                                 )
                                 .clicked()
                                 {
@@ -118,12 +117,11 @@ pub(super) fn top_bar(ctx: &Context, app: &mut AppState, canvas_rect: egui::Rect
                                 }
                             });
                             ui.add_enabled_ui(app.history.can_redo(), |ui| {
-                                if crate::icons::icon_button_sized(
+                                if crate::icons::icon_button(
                                     ui,
                                     crate::icons::Icon::Redo,
                                     "Redo  (Ctrl+Y)",
                                     false,
-                                    30.0,
                                 )
                                 .clicked()
                                 {
@@ -181,7 +179,7 @@ fn search_button() -> impl egui::Widget {
             crate::icons::Icon::Find,
             egui::Rect::from_center_size(
                 egui::pos2(rect.left() + 16.0, rect.center().y),
-                egui::Vec2::splat(15.0),
+                egui::Vec2::splat(crate::icons::GLYPH_PX_DENSE),
             ),
             crate::theme::TEXT_DIM,
         );
@@ -195,7 +193,7 @@ fn search_button() -> impl egui::Widget {
         let cap = |p: &egui::Painter, right: f32, text: &str| -> f32 {
             let galley = p.layout_no_wrap(
                 text.to_string(),
-                egui::FontId::monospace(10.0),
+                egui::FontId::monospace(crate::theme::tok::T_CAPTION),
                 crate::theme::TEXT_DIM,
             );
             let w = galley.size().x + 10.0;
@@ -214,7 +212,7 @@ fn search_button() -> impl egui::Widget {
                 kr.center(),
                 egui::Align2::CENTER_CENTER,
                 text,
-                egui::FontId::monospace(10.0),
+                egui::FontId::monospace(crate::theme::tok::T_CAPTION),
                 crate::theme::TEXT_DIM,
             );
             kr.left()
@@ -239,7 +237,7 @@ fn export_button() -> impl egui::Widget {
         p.rect_filled(rect, crate::theme::tok::R_SM as f32, fill);
         // Mark and label as one unit: measure the text, then centre the pair so
         // the button stays balanced rather than the glyph hanging off one edge.
-        const GLYPH: f32 = 16.0;
+        const GLYPH: f32 = crate::icons::GLYPH_PX_DENSE;
         const GAP: f32 = 6.0;
         let galley = p.layout_no_wrap(
             "Export".to_owned(),
@@ -361,7 +359,7 @@ pub(super) fn plot_dialog(ctx: &Context, app: &mut AppState) {
             ui.set_width(260.0);
             ui.label(
                 egui::RichText::new("Renders the drawing onto one PDF page, fit to the paper.")
-                    .size(12.0)
+                    .size(crate::theme::tok::T_BODY)
                     .color(crate::theme::TEXT_DIM),
             );
             ui.add_space(crate::theme::tok::SP_4);
@@ -375,13 +373,13 @@ pub(super) fn plot_dialog(ctx: &Context, app: &mut AppState) {
                         Some((x0, y0, x1, y1)) => {
                             ui.label(
                                 egui::RichText::new(format!("{:.1} × {:.1}", x1 - x0, y1 - y0))
-                                    .size(12.0),
+                                    .size(crate::theme::tok::T_BODY),
                             );
                         }
                         None => {
                             ui.label(
                                 egui::RichText::new("not set")
-                                    .size(12.0)
+                                    .size(crate::theme::tok::T_BODY)
                                     .color(crate::theme::TEXT_DIM),
                             );
                         }
@@ -943,13 +941,13 @@ pub(super) fn about_window(ctx: &Context, ui_state: &mut UiState) {
                 ui.add_space(10.0);
                 ui.label(
                     egui::RichText::new(concat!("Version ", env!("CARGO_PKG_VERSION")))
-                        .size(12.0)
+                        .size(crate::theme::tok::T_BODY)
                         .color(crate::theme::TEXT_DIM),
                 );
                 ui.add_space(crate::theme::tok::SP_1);
                 ui.label(
                     egui::RichText::new("Exact, robust 2D CAD")
-                        .size(11.0)
+                        .size(crate::theme::tok::T_CAPTION)
                         .color(crate::theme::TEXT_DIM),
                 );
                 ui.add_space(14.0);
@@ -997,7 +995,10 @@ pub(super) fn line_props_dialog(ctx: &Context, app: &mut AppState, ui_state: &mu
             ui.add_space(10.0);
             ui.label(
                 egui::RichText::new("Line Weight & Type")
-                    .font(crate::fonts::strong_font_id(ui.ctx(), 14.0))
+                    .font(crate::fonts::strong_font_id(
+                        ui.ctx(),
+                        crate::theme::tok::T_TITLE,
+                    ))
                     .color(crate::theme::TEXT),
             );
             prop_section(ui, "NEW OBJECTS");
@@ -1121,7 +1122,7 @@ pub(super) fn settings_dialog(ctx: &Context, app: &mut AppState, ui_state: &mut 
                     egui::RichText::new(
                             "Preferences, drawing aids & document defaults — drag the bottom edge to resize",
                         )
-                        .size(12.0)
+                        .size(crate::theme::tok::T_BODY)
                         .color(crate::theme::TEXT_DIM),
                 );
                 ui.add_space(crate::theme::tok::SP_4);
@@ -1323,7 +1324,7 @@ pub(super) fn settings_dialog(ctx: &Context, app: &mut AppState, ui_state: &mut 
                                             }
                                             ui.label(
                                                 egui::RichText::new("lines")
-                                                    .size(11.0)
+                                                    .size(crate::theme::tok::T_CAPTION)
                                                     .color(crate::theme::TEXT_DIM),
                                             );
                                         },
@@ -1347,7 +1348,7 @@ pub(super) fn settings_dialog(ctx: &Context, app: &mut AppState, ui_state: &mut 
                                             ];
                                             ui.label(
                                                 egui::RichText::new("Major")
-                                                    .size(11.0)
+                                                    .size(crate::theme::tok::T_CAPTION)
                                                     .color(crate::theme::TEXT_DIM),
                                             );
                                             if ui.color_edit_button_srgb(&mut m).changed() {
@@ -1447,7 +1448,7 @@ pub(super) fn settings_dialog(ctx: &Context, app: &mut AppState, ui_state: &mut 
                                             }
                                             ui.label(
                                                 egui::RichText::new("decimals")
-                                                    .size(11.0)
+                                                    .size(crate::theme::tok::T_CAPTION)
                                                     .color(crate::theme::TEXT_DIM),
                                             );
                                         },
@@ -1551,7 +1552,10 @@ fn settings_card(ui: &mut egui::Ui, title: &str, body: impl FnOnce(&mut egui::Ui
             ui.set_width(ui.available_width());
             ui.label(
                 egui::RichText::new(title)
-                    .font(crate::fonts::strong_font_id(ui.ctx(), 11.0))
+                    .font(crate::fonts::strong_font_id(
+                        ui.ctx(),
+                        crate::theme::tok::T_CAPTION,
+                    ))
                     .color(crate::theme::TEXT_DIM),
             );
             ui.add_space(9.0);
@@ -2041,7 +2045,7 @@ pub(super) fn status_pill(ctx: &Context, app: &mut AppState, canvas_rect: egui::
                             };
                             ui.label(
                                 egui::RichText::new("X")
-                                    .size(11.0)
+                                    .size(crate::theme::tok::T_CAPTION)
                                     .color(crate::theme::TEXT_DIM),
                             );
                             ui.add_space(crate::theme::tok::SP_4);
@@ -2049,7 +2053,7 @@ pub(super) fn status_pill(ctx: &Context, app: &mut AppState, canvas_rect: egui::
                             ui.add_space(crate::theme::tok::SP_3);
                             ui.label(
                                 egui::RichText::new("Y")
-                                    .size(11.0)
+                                    .size(crate::theme::tok::T_CAPTION)
                                     .color(crate::theme::TEXT_DIM),
                             );
                             ui.add_space(crate::theme::tok::SP_4);
@@ -2057,7 +2061,7 @@ pub(super) fn status_pill(ctx: &Context, app: &mut AppState, canvas_rect: egui::
                             ui.add_space(crate::theme::tok::SP_3);
                             ui.label(
                                 egui::RichText::new(app.units_label())
-                                    .size(11.0)
+                                    .size(crate::theme::tok::T_CAPTION)
                                     .color(crate::theme::TEXT_DIM),
                             );
                         });
@@ -2100,12 +2104,16 @@ pub(super) fn status_pill(ctx: &Context, app: &mut AppState, canvas_rect: egui::
                         unit_dropdown(ui, app);
                         if let Some((text, color)) = &dof_chip {
                             pill_sep(ui);
-                            ui.label(egui::RichText::new(text).size(12.0).color(*color))
-                                .on_hover_text(
-                                    "Degrees of freedom left in the selected \
+                            ui.label(
+                                egui::RichText::new(text)
+                                    .size(crate::theme::tok::T_BODY)
+                                    .color(*color),
+                            )
+                            .on_hover_text(
+                                "Degrees of freedom left in the selected \
                                      constraint group (or the whole sketch when \
                                      nothing is selected)",
-                                );
+                            );
                         }
                     });
                 });
@@ -2301,7 +2309,10 @@ fn snap_master(ui: &mut egui::Ui, app: &mut AppState) {
                         ui.set_min_width(168.0);
                         ui.label(
                             egui::RichText::new("OBJECT SNAP")
-                                .font(crate::fonts::strong_font_id(ui.ctx(), 10.0))
+                                .font(crate::fonts::strong_font_id(
+                                    ui.ctx(),
+                                    crate::theme::tok::T_CAPTION,
+                                ))
                                 .color(crate::theme::TEXT_DIM),
                         );
                         ui.add_space(crate::theme::tok::SP_2);
@@ -2752,7 +2763,10 @@ fn inspector_header(ui: &mut egui::Ui, app: &AppState) {
     ui.horizontal(|ui| {
         ui.label(
             egui::RichText::new("PROPERTIES")
-                .font(crate::fonts::strong_font_id(ui.ctx(), 11.0))
+                .font(crate::fonts::strong_font_id(
+                    ui.ctx(),
+                    crate::theme::tok::T_CAPTION,
+                ))
                 .color(crate::theme::TEXT_DIM),
         );
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
@@ -2803,7 +2817,10 @@ fn layers_section(ui: &mut egui::Ui, app: &mut AppState) {
     ui.horizontal(|ui| {
         ui.label(
             egui::RichText::new("LAYERS")
-                .font(crate::fonts::strong_font_id(ui.ctx(), 10.0))
+                .font(crate::fonts::strong_font_id(
+                    ui.ctx(),
+                    crate::theme::tok::T_CAPTION,
+                ))
                 .color(crate::theme::TEXT_DIM),
         );
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
@@ -2892,12 +2909,28 @@ fn layers_section(ui: &mut egui::Ui, app: &mut AppState) {
                     } else {
                         "Layer 0 and the current layer can't be deleted"
                     };
-                    if icon_button_sized(ui, Icon::Delete, tip, false, 20.0).clicked() {
+                    if icon_button_sized(
+                        ui,
+                        Icon::Delete,
+                        tip,
+                        false,
+                        crate::icons::ICON_SIZE_DENSE,
+                    )
+                    .clicked()
+                    {
                         delete_layer = Some(i);
                     }
                 });
                 let icon = if on { Icon::Eye } else { Icon::EyeOff };
-                if icon_button_sized(ui, icon, "Show / hide this layer", false, 20.0).clicked() {
+                if icon_button_sized(
+                    ui,
+                    icon,
+                    "Show / hide this layer",
+                    false,
+                    crate::icons::ICON_SIZE_DENSE,
+                )
+                .clicked()
+                {
                     app.history.snapshot(&app.document);
                     if let Some(l) = app.document.layers.get_mut(i) {
                         l.on = !on;
@@ -2909,7 +2942,7 @@ fn layers_section(ui: &mut egui::Ui, app: &mut AppState) {
                 ui.label(
                     egui::RichText::new(format!("{count:>2}"))
                         .monospace()
-                        .size(11.0)
+                        .size(crate::theme::tok::T_CAPTION)
                         .color(crate::theme::TEXT_DIM),
                 );
                 ui.add_space(crate::theme::tok::SP_2);
@@ -2977,23 +3010,28 @@ fn layer_appearance_menus(ui: &mut egui::Ui, app: &mut AppState, i: usize) {
         LineTypeRef::Named(n) if n == "Center" => "─·",
         _ => "──",
     };
-    ui.menu_button(egui::RichText::new(lt_glyph).monospace().size(12.0), |ui| {
-        for (lbl, name) in [
-            ("Solid", "Continuous"),
-            ("Dashed", "Dashed"),
-            ("Dotted", "Dotted"),
-            ("Center", "Center"),
-        ] {
-            let val = LineTypeRef::Named(name.into());
-            if ui.selectable_label(cur_lt == val, lbl).clicked() {
-                app.history.snapshot(&app.document);
-                if let Some(l) = app.document.layers.get_mut(i) {
-                    l.line_type = val;
+    ui.menu_button(
+        egui::RichText::new(lt_glyph)
+            .monospace()
+            .size(crate::theme::tok::T_BODY),
+        |ui| {
+            for (lbl, name) in [
+                ("Solid", "Continuous"),
+                ("Dashed", "Dashed"),
+                ("Dotted", "Dotted"),
+                ("Center", "Center"),
+            ] {
+                let val = LineTypeRef::Named(name.into());
+                if ui.selectable_label(cur_lt == val, lbl).clicked() {
+                    app.history.snapshot(&app.document);
+                    if let Some(l) = app.document.layers.get_mut(i) {
+                        l.line_type = val;
+                    }
+                    ui.close();
                 }
-                ui.close();
             }
-        }
-    })
+        },
+    )
     .response
     .on_hover_text("Layer line type");
     let cur_w = app
@@ -3007,25 +3045,30 @@ fn layer_appearance_menus(ui: &mut egui::Ui, app: &mut AppState, i: usize) {
     } else {
         format!("{cur_w:.2}")
     };
-    ui.menu_button(egui::RichText::new(w_lbl).monospace().size(11.0), |ui| {
-        for mm in [0.0, 0.13, 0.25, 0.35, 0.50, 0.70, 1.00] {
-            let lbl = if mm <= 0.0 {
-                "Default (hairline)".to_string()
-            } else {
-                format!("{mm:.2} mm")
-            };
-            if ui
-                .selectable_label((cur_w - mm).abs() < 1e-9, lbl)
-                .clicked()
-            {
-                app.history.snapshot(&app.document);
-                if let Some(l) = app.document.layers.get_mut(i) {
-                    l.line_weight_mm = mm;
+    ui.menu_button(
+        egui::RichText::new(w_lbl)
+            .monospace()
+            .size(crate::theme::tok::T_CAPTION),
+        |ui| {
+            for mm in [0.0, 0.13, 0.25, 0.35, 0.50, 0.70, 1.00] {
+                let lbl = if mm <= 0.0 {
+                    "Default (hairline)".to_string()
+                } else {
+                    format!("{mm:.2} mm")
+                };
+                if ui
+                    .selectable_label((cur_w - mm).abs() < 1e-9, lbl)
+                    .clicked()
+                {
+                    app.history.snapshot(&app.document);
+                    if let Some(l) = app.document.layers.get_mut(i) {
+                        l.line_weight_mm = mm;
+                    }
+                    ui.close();
                 }
-                ui.close();
             }
-        }
-    })
+        },
+    )
     .response
     .on_hover_text("Layer line weight");
 }
@@ -3358,7 +3401,10 @@ fn prop_section(ui: &mut egui::Ui, title: &str) {
     ui.add_space(15.0);
     ui.add(egui::Label::new(
         egui::RichText::new(title)
-            .font(crate::fonts::strong_font_id(ui.ctx(), 10.0))
+            .font(crate::fonts::strong_font_id(
+                ui.ctx(),
+                crate::theme::tok::T_CAPTION,
+            ))
             .color(crate::theme::TEXT_DIM),
     ));
     ui.add_space(7.0);
@@ -3368,7 +3414,7 @@ fn prop_caption(ui: &mut egui::Ui, text: &str) {
     ui.add(
         egui::Label::new(
             egui::RichText::new(text)
-                .size(10.0)
+                .size(crate::theme::tok::T_CAPTION)
                 .color(crate::theme::TEXT_DIM),
         )
         .truncate(),
@@ -3507,12 +3553,15 @@ fn object_header(ui: &mut egui::Ui, name: &str, subtitle: &str, icon: crate::ico
             ui.add_space(crate::theme::tok::SP_1);
             ui.label(
                 egui::RichText::new(name)
-                    .font(crate::fonts::strong_font_id(ui.ctx(), 14.0))
+                    .font(crate::fonts::strong_font_id(
+                        ui.ctx(),
+                        crate::theme::tok::T_TITLE,
+                    ))
                     .color(crate::theme::TEXT),
             );
             ui.label(
                 egui::RichText::new(subtitle)
-                    .size(12.0)
+                    .size(crate::theme::tok::T_BODY)
                     .monospace()
                     .color(crate::theme::TEXT_DIM),
             );
@@ -3653,7 +3702,7 @@ fn appearance_row(
                 ui.set_height(22.0);
                 ui.label(
                     egui::RichText::new(label)
-                        .size(13.0)
+                        .size(crate::theme::tok::T_LABEL)
                         .color(crate::theme::TEXT_DIM),
                 );
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
@@ -3672,7 +3721,7 @@ fn appearance_row(
                     ui.add_space(crate::theme::tok::SP_1);
                     ui.label(
                         egui::RichText::new(value)
-                            .size(13.0)
+                            .size(crate::theme::tok::T_LABEL)
                             .color(crate::theme::TEXT),
                     );
                     if let Some(c) = swatch {
@@ -3848,7 +3897,7 @@ fn selection_properties(ui: &mut egui::Ui, app: &mut AppState) {
         ));
         ui.add(egui::Label::new(
             egui::RichText::new(format!("{} objects in drawing", app.document.len()))
-                .size(11.0)
+                .size(crate::theme::tok::T_CAPTION)
                 .color(crate::theme::TEXT_DIM),
         ));
         return;
@@ -3878,7 +3927,10 @@ fn selection_properties(ui: &mut egui::Ui, app: &mut AppState) {
     } else {
         ui.add(egui::Label::new(
             egui::RichText::new(format!("{} objects selected", sel.len()))
-                .font(crate::fonts::strong_font_id(ui.ctx(), 14.0))
+                .font(crate::fonts::strong_font_id(
+                    ui.ctx(),
+                    crate::theme::tok::T_TITLE,
+                ))
                 .strong(),
         ));
     }
@@ -3906,7 +3958,7 @@ fn constraints_section(ui: &mut egui::Ui, app: &mut AppState, sel: &[oxidraft_do
         } else {
             format!("{} DOF remaining", dof.dof)
         })
-        .size(11.0)
+        .size(crate::theme::tok::T_CAPTION)
         .color(if dof.dof == 0 {
             crate::theme::SNAP
         } else {
@@ -3931,7 +3983,7 @@ fn constraints_section(ui: &mut egui::Ui, app: &mut AppState, sel: &[oxidraft_do
             if is_redundant {
                 label.push_str("  ·  redundant");
             }
-            let mut rt = egui::RichText::new(label).size(12.0);
+            let mut rt = egui::RichText::new(label).size(crate::theme::tok::T_BODY);
             if is_redundant {
                 rt = rt.color(crate::theme::TEXT_DIM);
             }
@@ -3942,7 +3994,7 @@ fn constraints_section(ui: &mut egui::Ui, app: &mut AppState, sel: &[oxidraft_do
                     crate::icons::Icon::ConRemove,
                     "Remove this constraint",
                     false,
-                    20.0,
+                    crate::icons::ICON_SIZE_DENSE,
                 )
                 .clicked()
                 {
@@ -4196,7 +4248,7 @@ fn edit_entity_geometry(ui: &mut egui::Ui, app: &mut AppState, id: oxidraft_docu
             if !all_lines {
                 ui.add(egui::Label::new(
                     egui::RichText::new(format!("{} segments — edit on canvas", segs.len()))
-                        .size(11.0)
+                        .size(crate::theme::tok::T_CAPTION)
                         .italics()
                         .color(crate::theme::TEXT_DIM),
                 ));
@@ -4265,7 +4317,7 @@ fn edit_entity_geometry(ui: &mut egui::Ui, app: &mut AppState, id: oxidraft_docu
             prop_section(ui, "GEOMETRY");
             ui.add(egui::Label::new(
                 egui::RichText::new("Not editable here")
-                    .size(11.0)
+                    .size(crate::theme::tok::T_CAPTION)
                     .italics()
                     .color(crate::theme::TEXT_DIM),
             ));
