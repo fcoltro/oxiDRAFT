@@ -48,6 +48,17 @@ pub type TextCache = std::collections::HashMap<EntityId, (u64, Vec<[Point2d; 3]>
 /// closed, revisioned like [`HatchCache`].
 pub type CurveCache = std::collections::HashMap<EntityId, (u64, Vec<Point2d>, bool)>;
 
+/// What to do once a pending "unsaved changes" prompt resolves — set by an
+/// action that would otherwise discard changes (closing the window, New,
+/// Open), shown by [`chrome::save_prompt`], and carried out once the user
+/// picks Save or Discard (a Cancel just clears it, nothing runs).
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum PendingSaveAction {
+    Close,
+    New,
+    Open,
+}
+
 /// Transient UI state that lives alongside [`AppState`] but outside its undo
 /// history: text edit buffers, dialog open/closed flags, the dynamic-input
 /// field contents, and per-entity render caches. Rebuilt fresh at startup
@@ -107,6 +118,9 @@ pub struct UiState {
     /// Set once the user has answered the unsaved-changes prompt for a
     /// window close, so re-sending the close doesn't re-prompt.
     pub close_confirmed: bool,
+    /// The action waiting on an unsaved-changes decision, if the app's own
+    /// save-prompt window is currently up. See [`PendingSaveAction`].
+    pub pending_save_prompt: Option<PendingSaveAction>,
     pub radial_open: bool,
     pub radial_center: Option<egui::Pos2>,
     pub radial_category: Option<RadialRing>,
@@ -194,18 +208,25 @@ pub fn draw_ui(ui: &mut egui::Ui, app: &mut AppState, ui_state: &mut UiState) {
     // prompt New and Open already have — otherwise all work since the last
     // save is silently gone. eframe (0.35, epi_integration.rs) captures the
     // close request before this fn runs and only aborts the close if it sees
-    // a CancelClose command afterward — so we veto ONLY when the user picks
-    // Cancel, and let the close proceed untouched when they Save or Discard.
-    // `close_confirmed` latches that decision so a re-sent close (or a
-    // Discard that leaves the doc dirty) can't re-prompt.
-    if ctx.input(|i| i.viewport().close_requested()) && !ui_state.close_confirmed && app.is_dirty()
-    {
-        if chrome::maybe_save(app) {
-            ui_state.close_confirmed = true;
-        } else {
+    // a CancelClose command afterward, so a dirty document always vetoes
+    // this specific close and opens `chrome::save_prompt` instead (unless
+    // it's already up, from an earlier close attempt); the prompt sends its
+    // own `ViewportCommand::Close` once the user picks Save or Discard,
+    // which starts a *new* close that `close_confirmed` then waves through.
+    // `close_confirmed` also covers a Discard that leaves the doc dirty
+    // (autosave discarded, not saved) so that re-sent close doesn't re-open
+    // the prompt for the second time.
+    if ctx.input(|i| i.viewport().close_requested()) && !ui_state.close_confirmed {
+        if app.is_dirty() {
+            ui_state
+                .pending_save_prompt
+                .get_or_insert(PendingSaveAction::Close);
             ctx.send_viewport_cmd(egui::ViewportCommand::CancelClose);
+        } else {
+            ui_state.close_confirmed = true;
         }
     }
+    chrome::save_prompt(&ctx, app, ui_state);
     if let Some(path) = ui_state.recovery_offer.clone() {
         egui::Window::new("Recover unsaved work")
             .collapsible(false)
@@ -251,7 +272,7 @@ pub fn draw_ui(ui: &mut egui::Ui, app: &mut AppState, ui_state: &mut UiState) {
     handle_shortcuts(&ctx, app, ui_state);
     let canvas_rect = ui.max_rect();
     let radial_open = radial_menu(&ctx, app, ui_state, canvas_rect);
-    top_bar(&ctx, app, canvas_rect);
+    top_bar(&ctx, app, ui_state, canvas_rect);
     inspector(&ctx, app, canvas_rect);
     constraint_bar(&ctx, app, canvas_rect);
     status_pill(&ctx, app, canvas_rect);

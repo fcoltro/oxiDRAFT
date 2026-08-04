@@ -4,7 +4,7 @@
 //! UI (the drawing surface itself and its overlays) lives in the sibling
 //! `render`/`overlays` modules.
 
-use super::UiState;
+use super::{PendingSaveAction, UiState};
 use crate::command::Command;
 use crate::state::AppState;
 use crate::tools::Tool;
@@ -23,10 +23,10 @@ pub(super) fn handle_shortcuts(ctx: &Context, app: &mut AppState, ui_state: &mut
     let s_key = ctx.input(|i| i.key_pressed(egui::Key::S));
     let n_key = ctx.input(|i| i.key_pressed(egui::Key::N));
     let o_key = ctx.input(|i| i.key_pressed(egui::Key::O));
-    if ctrl && n_key && maybe_save(app) {
+    if ctrl && n_key && request_or_run(app, ui_state, PendingSaveAction::New) {
         app.new_document();
     }
-    if ctrl && o_key && maybe_save(app) {
+    if ctrl && o_key && request_or_run(app, ui_state, PendingSaveAction::Open) {
         file_open(app);
     }
     let save_as_key = ctrl && shift && s_key;
@@ -61,7 +61,12 @@ pub(super) fn handle_shortcuts(ctx: &Context, app: &mut AppState, ui_state: &mut
     }
 }
 
-pub(super) fn top_bar(ctx: &Context, app: &mut AppState, canvas_rect: egui::Rect) {
+pub(super) fn top_bar(
+    ctx: &Context,
+    app: &mut AppState,
+    ui_state: &mut UiState,
+    canvas_rect: egui::Rect,
+) {
     let margin = 12.0;
     let pos = canvas_rect.left_top() + egui::vec2(margin, margin);
     let width = canvas_rect.width() - 2.0 * margin;
@@ -99,7 +104,7 @@ pub(super) fn top_bar(ctx: &Context, app: &mut AppState, canvas_rect: egui::Rect
                         ui.scope(|ui| {
                             ui.style_mut().visuals.override_text_color =
                                 Some(Color32::from_rgb(203, 212, 226));
-                            menu_items(ui, app);
+                            menu_items(ui, app, ui_state);
                         });
                         ui.add_space(crate::theme::tok::SP_1);
                         ui.scope(|ui| {
@@ -486,14 +491,14 @@ pub(super) fn plot_dialog(ctx: &Context, app: &mut AppState) {
     }
 }
 
-fn menu_items(ui: &mut egui::Ui, app: &mut AppState) {
+fn menu_items(ui: &mut egui::Ui, app: &mut AppState, ui_state: &mut UiState) {
     ui.spacing_mut().item_spacing.x = 12.0;
     ui.menu_button("File", |ui| {
         if ui
             .add(egui::Button::new("New").shortcut_text("Ctrl+N"))
             .clicked()
         {
-            if maybe_save(app) {
+            if request_or_run(app, ui_state, PendingSaveAction::New) {
                 app.new_document();
             }
             ui.close();
@@ -502,7 +507,7 @@ fn menu_items(ui: &mut egui::Ui, app: &mut AppState) {
             .add(egui::Button::new("Open…").shortcut_text("Ctrl+O"))
             .clicked()
         {
-            if maybe_save(app) {
+            if request_or_run(app, ui_state, PendingSaveAction::Open) {
                 file_open(app);
             }
             ui.close();
@@ -4069,7 +4074,7 @@ fn edit_entity_geometry(ui: &mut egui::Ui, app: &mut AppState, id: oxidraft_docu
                     app.document
                         .add_constraint(oxidraft_document::SketchConstraint::distance(id, new_len));
                 }
-                if !oxidraft_cad::resolve_after_edit(&mut app.document, id, None) {
+                if !oxidraft_cad::resolve_after_direct_edit(&mut app.document, id, None) {
                     app.problem(
                         "Constraints not satisfiable after edit (UNCONSTRAIN to drop)".into(),
                     );
@@ -4121,7 +4126,7 @@ fn edit_entity_geometry(ui: &mut egui::Ui, app: &mut AppState, id: oxidraft_docu
                             r.max(0.001),
                         ));
                 }
-                if !oxidraft_cad::resolve_after_edit(&mut app.document, id, None) {
+                if !oxidraft_cad::resolve_after_direct_edit(&mut app.document, id, None) {
                     app.problem(
                         "Constraints not satisfiable after edit (UNCONSTRAIN to drop)".into(),
                     );
@@ -4393,34 +4398,171 @@ fn hatch_pattern_editor(ui: &mut egui::Ui, pattern: &mut oxidraft_document::Hatc
     changed
 }
 
-pub(super) fn maybe_save(app: &mut AppState) -> bool {
+/// Gate for an action (New, Open) that would discard unsaved changes.
+/// Nothing to lose: runs immediately, caller performs the action inline.
+/// Something to lose: opens [`save_prompt`] and defers the action to it —
+/// the caller must NOT perform it now, however this frame's click handler
+/// is written, since the whole point is that it isn't safe yet.
+fn request_or_run(app: &mut AppState, ui_state: &mut UiState, action: PendingSaveAction) -> bool {
     if !app.is_dirty() {
         return true;
     }
+    ui_state.pending_save_prompt.get_or_insert(action);
+    false
+}
+
+/// Carries out `action` once a pending save prompt has resolved in its
+/// favour (Save that actually left the document clean, or Discard) — the
+/// same three destinations [`request_or_run`]'s callers already inline for
+/// the immediate, nothing-to-lose case. A `Close` sends a fresh
+/// `ViewportCommand::Close` — the original close request was already
+/// vetoed while the prompt was up, so this starts a new one — and latches
+/// `close_confirmed` first so that request doesn't loop back into another
+/// prompt.
+fn run_pending_action(
+    ctx: &Context,
+    app: &mut AppState,
+    ui_state: &mut UiState,
+    action: PendingSaveAction,
+) {
+    match action {
+        PendingSaveAction::Close => {
+            ui_state.close_confirmed = true;
+            ctx.send_viewport_cmd(egui::ViewportCommand::Close);
+        }
+        PendingSaveAction::New => app.new_document(),
+        PendingSaveAction::Open => file_open(app),
+    }
+}
+
+pub(crate) const SAVE_PROMPT_WINDOW_ID: &str = "save_prompt_window";
+
+/// The app's own "Save changes before continuing?" prompt, replacing the
+/// OS's native message box so it reads as part of the app rather than a
+/// break out of it. No-op when nothing is pending.
+pub(super) fn save_prompt(ctx: &Context, app: &mut AppState, ui_state: &mut UiState) {
+    let Some(action) = ui_state.pending_save_prompt else {
+        return;
+    };
     let name = app
         .current_file_path
         .as_ref()
         .and_then(|p| p.file_name())
         .map(|n| n.to_string_lossy().into_owned())
         .unwrap_or_else(|| "Untitled".to_string());
-    let res = rfd::MessageDialog::new()
-        .set_level(rfd::MessageLevel::Warning)
-        .set_title("Unsaved changes")
-        .set_description(format!("Save changes to \"{name}\" before continuing?"))
-        .set_buttons(rfd::MessageButtons::YesNoCancel)
-        .show();
-    match res {
-        rfd::MessageDialogResult::Yes => {
-            if !app.save_file() {
-                file_save_as(app);
-            }
-            !app.is_dirty()
-        }
-        rfd::MessageDialogResult::No => {
-            crate::autosave::discard_recovery();
-            true
-        }
-        _ => false,
+    egui::Window::new("Unsaved changes")
+        .id(egui::Id::new(SAVE_PROMPT_WINDOW_ID))
+        .collapsible(false)
+        .resizable(false)
+        .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
+        .show(ctx, |ui| {
+            ui.label(format!("Save changes to \"{name}\" before continuing?"));
+            ui.add_space(crate::theme::tok::SP_4);
+            ui.horizontal(|ui| {
+                if ui.button("Save").clicked() {
+                    if !app.save_file() {
+                        file_save_as(app);
+                    }
+                    if !app.is_dirty() {
+                        ui_state.pending_save_prompt = None;
+                        run_pending_action(ctx, app, ui_state, action);
+                    }
+                    // Still dirty means Save As was cancelled or failed —
+                    // leave the prompt up rather than silently dropping the
+                    // request; the user can retry Save or pick another
+                    // button.
+                }
+                if ui.button("Discard").clicked() {
+                    crate::autosave::discard_recovery();
+                    ui_state.pending_save_prompt = None;
+                    run_pending_action(ctx, app, ui_state, action);
+                }
+                if ui.button("Cancel").clicked() {
+                    ui_state.pending_save_prompt = None;
+                }
+            });
+        });
+}
+
+#[cfg(test)]
+mod save_prompt_tests {
+    use super::*;
+
+    #[test]
+    fn request_or_run_passes_through_a_clean_document() {
+        let mut app = AppState::new(800.0, 600.0);
+        let mut ui_state = UiState::default();
+        assert!(!app.is_dirty(), "a fresh document has nothing to lose");
+
+        assert!(
+            request_or_run(&mut app, &mut ui_state, PendingSaveAction::New),
+            "nothing to lose means the caller runs the action immediately"
+        );
+        assert_eq!(
+            ui_state.pending_save_prompt, None,
+            "a clean document must never open the prompt"
+        );
+    }
+
+    #[test]
+    fn request_or_run_defers_a_dirty_document() {
+        let mut app = AppState::new(800.0, 600.0);
+        let mut ui_state = UiState::default();
+        app.add_entity(EntityKind::Point(Point2d::from_i64(0, 0)));
+        assert!(app.is_dirty());
+
+        assert!(
+            !request_or_run(&mut app, &mut ui_state, PendingSaveAction::New),
+            "something to lose means the caller must not run the action yet"
+        );
+        assert_eq!(
+            ui_state.pending_save_prompt,
+            Some(PendingSaveAction::New),
+            "the deferred action must be recorded for the prompt to pick up"
+        );
+    }
+
+    #[test]
+    fn request_or_run_does_not_clobber_an_already_pending_prompt() {
+        // Ctrl+N held while the prompt from an earlier New is still up must
+        // not swap which action it's guarding.
+        let mut app = AppState::new(800.0, 600.0);
+        let mut ui_state = UiState::default();
+        app.add_entity(EntityKind::Point(Point2d::from_i64(0, 0)));
+        ui_state.pending_save_prompt = Some(PendingSaveAction::Open);
+
+        request_or_run(&mut app, &mut ui_state, PendingSaveAction::New);
+        assert_eq!(ui_state.pending_save_prompt, Some(PendingSaveAction::Open));
+    }
+
+    #[test]
+    fn run_pending_action_new_resets_the_document() {
+        let mut app = AppState::new(800.0, 600.0);
+        let ctx = egui::Context::default();
+        let mut ui_state = UiState::default();
+        app.add_entity(EntityKind::Point(Point2d::from_i64(0, 0)));
+        assert!(app.is_dirty());
+
+        run_pending_action(&ctx, &mut app, &mut ui_state, PendingSaveAction::New);
+        assert!(
+            !app.is_dirty(),
+            "New must actually replace the document, not just close the prompt"
+        );
+    }
+
+    #[test]
+    fn run_pending_action_close_latches_close_confirmed() {
+        let mut app = AppState::new(800.0, 600.0);
+        let ctx = egui::Context::default();
+        let mut ui_state = UiState::default();
+
+        run_pending_action(&ctx, &mut app, &mut ui_state, PendingSaveAction::Close);
+        assert!(
+            ui_state.close_confirmed,
+            "resolving a Close must latch close_confirmed so the fresh \
+             ViewportCommand::Close this sends doesn't loop back into \
+             another prompt"
+        );
     }
 }
 

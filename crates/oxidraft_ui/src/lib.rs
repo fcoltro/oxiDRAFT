@@ -20,5 +20,5 @@ pub use egui;
 pub use history::History;
 pub use state::{AppState, UiPrefs};
 pub use tools::{Tool, ToolEvent};
-pub use view::{UiState, draw_ui};
+pub use view::{PendingSaveAction, UiState, draw_ui};
 pub use view_transform::ViewTransform;
