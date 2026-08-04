@@ -2956,7 +2956,7 @@ impl AppState {
             Some(oxidraft_cad::GripRole::Endpoint(i)) => Some(i),
             _ => None,
         };
-        oxidraft_cad::resolve_after_edit(&mut self.document, id, pinned)
+        oxidraft_cad::resolve_after_direct_edit(&mut self.document, id, pinned)
     }
 
     fn retarget_driven_dimension(&mut self, id: EntityId, role: Option<oxidraft_cad::GripRole>) {
@@ -5111,6 +5111,35 @@ mod tests {
             a.history.undo_depth(),
             depth + 1,
             "a real drag must still record its undo step"
+        );
+    }
+
+    #[test]
+    fn dragging_a_fixed_point_does_not_move_it() {
+        let mut a = app();
+        let id = a.add_entity(EntityKind::Point(Point2d::from_i64(0, 0)));
+        a.selection = vec![id];
+        a.fix_selection();
+        assert!(
+            a.document
+                .constraints
+                .iter()
+                .any(|c| c.kind == oxidraft_document::ConstraintKind::Fixed && c.a == id),
+            "Fix must have recorded the constraint"
+        );
+
+        let grip = oxidraft_cad::grips_for(&a.document.get(id).unwrap().kind)[0];
+        a.begin_grip_drag(id, grip);
+        a.apply_grip_drag((9.0, 9.0));
+        a.end_grip_drag();
+
+        let EntityKind::Point(p) = a.document.get(id).unwrap().kind else {
+            panic!("expected a point");
+        };
+        assert_eq!(
+            p.to_f64(),
+            (0.0, 0.0),
+            "a fixed point must not move when dragged"
         );
     }
 

@@ -2224,6 +2224,31 @@ pub fn resolve_after_edit(
     true
 }
 
+/// Like [`resolve_after_edit`], for callers that have just directly
+/// rewritten `moved`'s own geometry (a grip drag, a typed coordinate) rather
+/// than passing it in as a stable anchor for some *other* entity's edit —
+/// `resolve_after_edit` itself can't tell those two cases apart, since both
+/// look identical from inside it: `moved`'s current position, whatever put
+/// it there. That's exactly right for an anchor, which never actually
+/// moved, and exactly wrong when `moved` is itself `Fixed` and is the thing
+/// that just moved — `component_sketch` would seed the solver from the
+/// freshly edited position and `Fixed` would trivially satisfy itself right
+/// there, letting a fixed point, line, or arc drag itself anywhere. Reject
+/// up front instead, before the solve ever runs.
+pub fn resolve_after_direct_edit(
+    doc: &mut Document,
+    moved: EntityId,
+    pinned_endpoint: Option<usize>,
+) -> bool {
+    if doc
+        .constraints_on(moved)
+        .any(|c| c.kind == ConstraintKind::Fixed)
+    {
+        return false;
+    }
+    resolve_after_edit(doc, moved, pinned_endpoint)
+}
+
 /// Re-satisfies constraints after a whole-entity transform (move/rotate/
 /// scale) of `moved`. Every moved entity is pinned where the user put it;
 /// constrained neighbours outside the moved set follow. Returns `false`
@@ -2898,6 +2923,48 @@ mod tests {
         assert!(
             (lb.p0.x - 4.0).abs() < 1e-6 && lb.p0.y.abs() < 1e-6,
             "b's welded end stayed on the fixed corner: {lb:?}"
+        );
+    }
+
+    #[test]
+    fn fixed_point_dragged_directly_rejects_the_edit() {
+        // `constrain_fixed` pins a point at "wherever it currently sits" —
+        // fine when `moved` is an unchanged anchor, but a grip drag (or a
+        // typed coordinate edit) mutates the entity's own position *before*
+        // calling into the solver (see `AppState::apply_grip_drag`), so by
+        // the time this runs the point's "current" position already is the
+        // dragged one. Plain `resolve_after_edit` can't tell the two cases
+        // apart and would trivially satisfy `Fixed` right there — that's
+        // exactly what `resolve_after_direct_edit` exists to reject.
+        let mut doc = Document::new();
+        let p = doc.add(EntityKind::Point(Point2d::from_f64(0.0, 0.0)));
+        constrain_fixed(&mut doc, &[p]).expect("a point is fixable");
+
+        // Simulate the drag: the caller mutates the entity first, exactly
+        // like `apply_grip_drag` and the Properties-inspector coordinate
+        // fields both do, then asks the solver to resolve it.
+        if let Some(e) = doc.get_mut(p) {
+            e.kind = EntityKind::Point(Point2d::from_f64(9.0, 9.0));
+        }
+        assert!(
+            !resolve_after_direct_edit(&mut doc, p, Some(0)),
+            "a point can't drag itself off its own Fixed position"
+        );
+    }
+
+    #[test]
+    fn fixed_line_dragged_by_one_endpoint_rejects_the_edit() {
+        // The same gap as `fixed_point_dragged_directly_rejects_the_edit`,
+        // for a line: `constrain_fixed` locks the *whole* line, both
+        // endpoints, not just the one being dragged.
+        let mut doc = Document::new();
+        let a = add_line(&mut doc, 0.0, 0.0, 10.0, 0.0);
+        constrain_fixed(&mut doc, &[a]).expect("a line is fixable");
+
+        set_line(&mut doc, a, 0.0, 0.0, 10.0, 8.0);
+        assert!(
+            !resolve_after_direct_edit(&mut doc, a, Some(1)),
+            "a fixed line can't drag its own endpoint away either"
         );
     }
 
